@@ -75,7 +75,8 @@ mod tests {
 
     #[test]
     fn floors_to_minute() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 28, 9, 41, 59).unwrap() + TimeDelta::milliseconds(999);
+        let t =
+            Utc.with_ymd_and_hms(2026, 10, 28, 9, 41, 59).unwrap() + TimeDelta::milliseconds(999);
         assert_eq!(
             floor_minute(t),
             Utc.with_ymd_and_hms(2026, 10, 28, 9, 41, 0).unwrap()

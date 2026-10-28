@@ -31,6 +31,8 @@ use crate::ts::floor_minute;
 
 /// Seconds in a bucket.
 pub const BUCKET_SECONDS: u32 = 60;
+/// Upper bound the contract accepts for `keyboard_count` / `mouse_count`.
+pub const MAX_COUNT_PER_BUCKET: u64 = 100_000;
 
 #[derive(Debug, Default, Clone)]
 struct Acc {
@@ -61,8 +63,8 @@ impl Acc {
             bucket_start: start,
             active_seconds: self.active,
             idle_seconds: self.idle,
-            keyboard_count: self.keyboard,
-            mouse_count: self.mouse,
+            keyboard_count: self.keyboard.min(MAX_COUNT_PER_BUCKET),
+            mouse_count: self.mouse.min(MAX_COUNT_PER_BUCKET),
             data_quality,
         }
     }
@@ -150,7 +152,8 @@ impl ActivityAggregator {
         let had_input = std::mem::take(&mut self.carry_input);
         let mut last_minute = None;
         for i in 0..n {
-            let ts = at - TimeDelta::seconds(i64::from(n - 1 - i));
+            // Second `i` starts `n - i` seconds before `at` and belongs to that minute.
+            let ts = at - TimeDelta::seconds(i64::from(n - i));
             let minute = floor_minute(ts);
             if !self.ensure_open(minute) {
                 self.dropped_seconds += 1;
@@ -311,8 +314,8 @@ mod tests {
         }
     }
 
-    /// Drives the aggregator one second at a time from `start` for `secs` seconds,
-    /// `f(i)` giving the sample for second `i`. Returns emitted buckets.
+    /// Drives the aggregator one second at a time: second `i` covers
+    /// `[start + i, start + i + 1)`, `f(i)` gives its sample. Returns emitted buckets.
     fn drive(
         agg: &mut ActivityAggregator,
         start: DateTime<Utc>,
@@ -337,7 +340,7 @@ mod tests {
     fn buckets_align_to_utc_minutes_across_boundaries() {
         let mut agg = ActivityAggregator::new(300);
         // Start at 09:00:30, run 150 s with constant input → ends 09:03:00.
-        let out = drive(&mut agg, t(9, 0, 29), 151, |_| input(1));
+        let out = drive(&mut agg, t(9, 0, 30), 150, |_| input(1));
         let starts: Vec<_> = out.iter().map(|b| b.bucket_start).collect();
         assert_eq!(starts, vec![t(9, 0, 0), t(9, 1, 0), t(9, 2, 0)]);
         assert_eq!(out[0].active_seconds, 30);
@@ -349,18 +352,15 @@ mod tests {
             assert!(b.active_seconds + b.idle_seconds <= 60);
             assert_eq!(b.data_quality, DataQuality::Ok);
         }
-        // Second 09:03:00 is open in the 09:03 bucket.
-        let rest = agg.flush_all();
-        assert_eq!(rest.len(), 1);
-        assert_eq!(rest[0].bucket_start, t(9, 3, 0));
-        assert_eq!(rest[0].active_seconds, 1);
+        // The last second (09:02:59) ended at 09:03:00, so nothing is left open.
+        assert!(agg.flush_all().is_empty());
     }
 
     #[test]
     fn idle_is_attributed_back_to_start_of_run() {
         let mut agg = ActivityAggregator::new(60);
         // 30 s of input, then 150 s of nothing.
-        let mut out = drive(&mut agg, t(9, 0, 0) - TimeDelta::seconds(1), 180, |i| {
+        let mut out = drive(&mut agg, t(9, 0, 0), 180, |i| {
             if i < 30 {
                 input(2)
             } else {
@@ -383,7 +383,7 @@ mod tests {
     fn os_reported_idle_time_is_used_when_available() {
         let mut agg = ActivityAggregator::new(120);
         // The OS says the user has been idle for 500 s already: idle immediately.
-        let out = drive(&mut agg, t(9, 0, 0) - TimeDelta::seconds(1), 61, |i| InputSample {
+        let out = drive(&mut agg, t(9, 0, 0), 61, |i| InputSample {
             counts_available: true,
             seconds_since_last_input: Some(500.0 + f64::from(i)),
             ..Default::default()
@@ -395,7 +395,7 @@ mod tests {
     #[test]
     fn short_inactivity_counts_as_active_and_buckets_are_held_while_pending() {
         let mut agg = ActivityAggregator::new(120);
-        let start = t(9, 0, 0) - TimeDelta::seconds(1);
+        let start = t(9, 0, 0);
         // 10 s input, 100 s nothing (spans a minute boundary), then input again.
         let out = drive(&mut agg, start, 110, |i| {
             if i < 10 {
@@ -407,7 +407,10 @@ mod tests {
                 }
             }
         });
-        assert!(out.is_empty(), "09:00 bucket must be held while seconds are pending");
+        assert!(
+            out.is_empty(),
+            "09:00 bucket must be held while seconds are pending"
+        );
         let out = agg.record(start + TimeDelta::seconds(111), SEC, input(1));
         assert_eq!(out.len(), 1);
         assert_eq!((out[0].active_seconds, out[0].idle_seconds), (60, 0));
@@ -418,13 +421,12 @@ mod tests {
     #[test]
     fn missing_permission_and_degraded_quality() {
         let mut agg = ActivityAggregator::new(60);
-        let start = t(9, 0, 0) - TimeDelta::seconds(1);
-        let out = drive(&mut agg, start, 61, |_| InputSample::default());
+        let out = drive(&mut agg, t(9, 0, 0), 61, |_| InputSample::default());
         assert_eq!(out[0].data_quality, DataQuality::PermissionMissing);
         assert_eq!((out[0].active_seconds, out[0].idle_seconds), (0, 0));
 
         // Counts unavailable but last-input time known → partial, still classified.
-        let out = drive(&mut agg, t(9, 1, 0), 60, |_| InputSample {
+        let out = drive(&mut agg, t(9, 1, 1), 60, |_| InputSample {
             counts_available: false,
             keyboard_count: 99,
             mouse_count: 99,
@@ -434,13 +436,16 @@ mod tests {
         // 09:01:00 itself had no data at all; the other 59 s are degraded but active.
         assert_eq!(out[0].data_quality, DataQuality::Partial);
         assert_eq!(out[0].active_seconds, 59);
-        assert_eq!(out[0].keyboard_count, 0, "unavailable counts are never used");
+        assert_eq!(
+            out[0].keyboard_count, 0,
+            "unavailable counts are never used"
+        );
     }
 
     #[test]
     fn interrupt_resolves_pending_and_parks_current_minute() {
         let mut agg = ActivityAggregator::new(300);
-        let start = t(9, 0, 49);
+        let start = t(9, 0, 50);
         // 09:00:50..09:01:20 — 5 s input, then 26 s nothing (pending).
         let out = drive(&mut agg, start, 31, |i| {
             if i < 5 {
@@ -453,8 +458,8 @@ mod tests {
             }
         });
         assert!(out.is_empty());
-        // Pause at 09:01:20: minute 09:00 is emitted, 09:01 stays parked.
-        let out = agg.interrupt(t(9, 1, 20));
+        // Pause at 09:01:21: minute 09:00 is emitted, 09:01 stays parked.
+        let out = agg.interrupt(t(9, 1, 21));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].bucket_start, t(9, 0, 0));
         assert_eq!(out[0].active_seconds, 10);
@@ -462,8 +467,8 @@ mod tests {
         let out = drive(&mut agg, t(9, 1, 40), 30, |_| input(1));
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].bucket_start, t(9, 1, 0));
-        // 21 s before the pause + 19 s after the resume.
-        assert_eq!(out[0].active_seconds, 21 + 19);
+        // 21 s before the pause + 20 s after the resume.
+        assert_eq!(out[0].active_seconds, 21 + 20);
         assert!(out[0].active_seconds <= 60);
     }
 

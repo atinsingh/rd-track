@@ -4,9 +4,9 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use crate::platform::{
-    CaptureError, CredentialError, CredentialStore, ForegroundApp, ForegroundAppInfo,
-    HttpRequest, HttpResponse, HttpTransport, InputCounter, InputSample, PermissionStatus,
-    RawFrame, ScreenCapturer, TransportError,
+    CaptureError, CredentialError, CredentialStore, ForegroundApp, ForegroundAppInfo, HttpRequest,
+    HttpResponse, HttpTransport, InputCounter, InputSample, PermissionStatus, RawFrame,
+    ScreenCapturer, TransportError,
 };
 
 type Handler = Box<dyn Fn(&HttpRequest) -> Option<Result<HttpResponse, TransportError>> + Send>;

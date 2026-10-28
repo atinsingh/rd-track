@@ -241,6 +241,9 @@ pub fn run_job(
         Ok(i) => i,
         Err(e) => {
             return match e {
+                ApiError::LicenseUnavailable(block) => {
+                    ScreenshotOutcome::Refused(block.code().into())
+                }
                 ApiError::Http { status: 403, code } => {
                     ScreenshotOutcome::Refused(code.unwrap_or_else(|| "forbidden".into()))
                 }
@@ -324,15 +327,15 @@ pub fn downscale(frame: &RawFrame, max_width: u32) -> Result<RawFrame, String> {
                 let row = (y * sw) as usize * 4;
                 for x in x0..x1 {
                     let i = row + x as usize * 4;
-                    for c in 0..4 {
-                        acc[c] += u64::from(frame.rgba[i + c]);
+                    for (a, &v) in acc.iter_mut().zip(&frame.rgba[i..i + 4]) {
+                        *a += u64::from(v);
                     }
                 }
             }
             let n = (y1 - y0) * (x1 - x0);
             let o = ((dy * dw + dx) * 4) as usize;
-            for c in 0..4 {
-                out[o + c] = u8::try_from(acc[c] / n).unwrap_or(u8::MAX);
+            for (dst, a) in out[o..o + 4].iter_mut().zip(acc) {
+                *dst = u8::try_from(a / n).unwrap_or(u8::MAX);
             }
         }
     }
@@ -385,7 +388,10 @@ mod tests {
         assert_eq!(fired.len(), 60);
         for (k, f) in fired.iter().enumerate() {
             let ws = t0() + interval * i32::try_from(k).unwrap();
-            assert!(*f >= ws && *f < ws + interval + TimeDelta::seconds(1), "slot {k} outside its window");
+            assert!(
+                *f >= ws && *f < ws + interval + TimeDelta::seconds(1),
+                "slot {k} outside its window"
+            );
         }
         // Not all slots at the same offset (randomised).
         let offsets: std::collections::HashSet<_> = fired
@@ -423,9 +429,15 @@ mod tests {
             assert_eq!(d, expected(slot, resume));
             missed += usize::from(d == SlotDecision::Missed);
             // Whatever happened, nothing more fires in this window.
-            assert_eq!(s.poll(resume + TimeDelta::milliseconds(500), &mut rng), SlotDecision::NotDue);
+            assert_eq!(
+                s.poll(resume + TimeDelta::milliseconds(500), &mut rng),
+                SlotDecision::NotDue
+            );
         }
-        assert!(missed > 150, "most slots fall inside the pause and must be missed");
+        assert!(
+            missed > 150,
+            "most slots fall inside the pause and must be missed"
+        );
 
         // After a 2 h gap the scheduler jumps to the current window and never fires late.
         for seed in 0..200 {
@@ -445,7 +457,11 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(3);
         let mut s = ScreenshotScheduler::new(TimeDelta::minutes(15), TimeDelta::seconds(2));
         s.poll(t0(), &mut rng);
-        s.set_interval(TimeDelta::minutes(30), t0() + TimeDelta::minutes(1), &mut rng);
+        s.set_interval(
+            TimeDelta::minutes(30),
+            t0() + TimeDelta::minutes(1),
+            &mut rng,
+        );
         let slot = s.next_slot().unwrap();
         assert!(slot >= t0() + TimeDelta::minutes(1));
         assert!(slot < t0() + TimeDelta::minutes(31));
@@ -518,7 +534,10 @@ mod tests {
         assert_eq!(done.bytes, bytes.len() as u64);
         assert_eq!(done.sha256, hex(&Sha256::digest(&bytes)));
         assert_eq!(done.sha256.len(), 64);
-        assert!(matches!(out, ScreenshotOutcome::Completed { width: 640, .. }));
+        assert!(matches!(
+            out,
+            ScreenshotOutcome::Completed { width: 640, .. }
+        ));
     }
 
     #[test]
@@ -539,7 +558,10 @@ mod tests {
         let j = job(&gates);
         gates.close_all();
         let api = FakeApi::default();
-        assert_eq!(run_job(&j, &api, cap.as_ref(), &clock), ScreenshotOutcome::Cancelled);
+        assert_eq!(
+            run_job(&j, &api, cap.as_ref(), &clock),
+            ScreenshotOutcome::Cancelled
+        );
         assert!(api.calls.borrow().is_empty());
 
         // Stop arrives while the intent request is in flight.

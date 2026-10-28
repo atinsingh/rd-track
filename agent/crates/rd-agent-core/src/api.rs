@@ -104,6 +104,85 @@ pub struct HeartbeatResponse {
     pub policy_revision: i64,
     /// `active` or `revoked`.
     pub credential_status: String,
+    /// Licence state of the organization (optional; malformed values become `None`).
+    #[serde(
+        deserialize_with = "lenient_license",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub license: Option<LicenseInfo>,
+}
+
+/// Licence status reported in heartbeats.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LicenseStatus {
+    /// Paid and current.
+    Active,
+    /// Lapsed but within the grace period.
+    Grace,
+    /// Lapsed past grace.
+    Inactive,
+    /// A status this agent does not know.
+    #[default]
+    #[serde(other)]
+    Unknown,
+}
+
+/// The heartbeat `license` object: `{status, grace_ends_at?}`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct LicenseInfo {
+    /// Licence status.
+    pub status: LicenseStatus,
+    /// End of the grace period, when in grace.
+    #[serde(with = "crate::ts::option", skip_serializing_if = "Option::is_none")]
+    pub grace_ends_at: Option<DateTime<Utc>>,
+}
+
+fn lenient_license<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<LicenseInfo>, D::Error> {
+    let v = Option::<serde_json::Value>::deserialize(d)?;
+    Ok(v.and_then(|v| serde_json::from_value(v).ok()))
+}
+
+/// Why the server refuses service to this user/organization (`403`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LicenseBlock {
+    /// `subscription_inactive`: the organization's licence lapsed past grace.
+    SubscriptionInactive,
+    /// `seat_unavailable`: this user has no licensed seat.
+    SeatUnavailable,
+}
+
+impl LicenseBlock {
+    /// Maps a server error code.
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "subscription_inactive" => Some(Self::SubscriptionInactive),
+            "seat_unavailable" => Some(Self::SeatUnavailable),
+            _ => None,
+        }
+    }
+
+    /// The server error code.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::SubscriptionInactive => "subscription_inactive",
+            Self::SeatUnavailable => "seat_unavailable",
+        }
+    }
+
+    /// Text shown to the employee.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::SubscriptionInactive => {
+                "Tracking is unavailable: your organization's subscription is inactive"
+            }
+            Self::SeatUnavailable => "Tracking is unavailable: no licence seat assigned",
+        }
+    }
 }
 
 /// `POST /v1/ingestion/event-batches` request.
@@ -239,6 +318,9 @@ pub enum ApiError {
     /// The client has no device credential.
     #[error("device is not enrolled")]
     NotEnrolled,
+    /// `403 subscription_inactive` / `403 seat_unavailable`.
+    #[error("{}", .0.message())]
+    LicenseUnavailable(LicenseBlock),
     /// Any other non-2xx status.
     #[error("HTTP {status}{}", code.as_deref().map(|c| format!(" ({c})")).unwrap_or_default())]
     Http {
@@ -258,7 +340,9 @@ impl ApiError {
         match self {
             ApiError::Transport(_) | ApiError::Decode(_) => true,
             ApiError::Http { status, .. } => *status >= 500 || *status == 429 || *status == 408,
-            ApiError::DeviceRevoked | ApiError::NotEnrolled => false,
+            ApiError::DeviceRevoked | ApiError::NotEnrolled | ApiError::LicenseUnavailable(_) => {
+                false
+            }
         }
     }
 
@@ -267,6 +351,7 @@ impl ApiError {
         match self {
             ApiError::Http { code, .. } => code.as_deref(),
             ApiError::DeviceRevoked => Some("device_revoked"),
+            ApiError::LicenseUnavailable(b) => Some(b.code()),
             _ => None,
         }
     }
@@ -316,7 +401,10 @@ impl std::fmt::Debug for ApiClient {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ApiClient")
             .field("base", &self.base)
-            .field("credential", &self.credential.as_ref().map(|_| "<redacted>"))
+            .field(
+                "credential",
+                &self.credential.as_ref().map(|_| "<redacted>"),
+            )
             .finish()
     }
 }
@@ -387,6 +475,11 @@ impl ApiClient {
         let code = error_code(&resp.body);
         if resp.status == 401 && code.as_deref() == Some("device_revoked") {
             return Err(ApiError::DeviceRevoked);
+        }
+        if resp.status == 403 {
+            if let Some(block) = code.as_deref().and_then(LicenseBlock::from_code) {
+                return Err(ApiError::LicenseUnavailable(block));
+            }
         }
         Err(ApiError::Http {
             status: resp.status,
@@ -572,9 +665,17 @@ mod tests {
         );
         assert_eq!(body["client_time"], "2026-10-28T09:00:00Z");
 
-        t.push(401, json!({"error": {"code": "device_revoked", "message": "x"}}));
-        assert_eq!(api.policy(Some("a b")).unwrap_err(), ApiError::DeviceRevoked);
-        assert!(t.requests()[1].url.ends_with("/v1/device/policy?project_id=a%20b"));
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "x"}}),
+        );
+        assert_eq!(
+            api.policy(Some("a b")).unwrap_err(),
+            ApiError::DeviceRevoked
+        );
+        assert!(t.requests()[1]
+            .url
+            .ends_with("/v1/device/policy?project_id=a%20b"));
 
         t.push(403, json!({"code": "screenshots_disabled"}));
         let e = api
@@ -595,6 +696,61 @@ mod tests {
 
         let unenrolled = ApiClient::new("http://h", t);
         assert_eq!(unenrolled.policy(None).unwrap_err(), ApiError::NotEnrolled);
+    }
+
+    #[test]
+    fn license_errors_and_heartbeat_license_field() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("http://h", t.clone()).with_credential("c");
+        t.push(
+            403,
+            json!({"error": {"code": "subscription_inactive", "message": "m", "request_id": "r"}}),
+        );
+        assert_eq!(
+            api.policy(None).unwrap_err(),
+            ApiError::LicenseUnavailable(LicenseBlock::SubscriptionInactive)
+        );
+        t.push(
+            403,
+            json!({"error": {"code": "seat_unavailable", "message": "m"}}),
+        );
+        let e = api.send_batch_bytes(b"{}".to_vec()).unwrap_err();
+        assert_eq!(
+            e,
+            ApiError::LicenseUnavailable(LicenseBlock::SeatUnavailable)
+        );
+        assert!(!e.is_retryable());
+        assert_eq!(e.code(), Some("seat_unavailable"));
+        // Other 403s stay generic.
+        t.push(403, json!({"error": {"code": "forbidden"}}));
+        assert!(matches!(
+            api.policy(None),
+            Err(ApiError::Http { status: 403, .. })
+        ));
+
+        let parse = |v: serde_json::Value| serde_json::from_value::<HeartbeatResponse>(v).unwrap();
+        let r = parse(json!({"policy_revision": 1, "credential_status": "active",
+                             "license": {"status": "grace", "grace_ends_at": "2026-11-01T00:00:00Z"}}));
+        let lic = r.license.unwrap();
+        assert_eq!(lic.status, LicenseStatus::Grace);
+        assert_eq!(lic.grace_ends_at, crate::ts::parse("2026-11-01T00:00:00Z"));
+        assert_eq!(parse(json!({"policy_revision": 1})).license, None);
+        assert_eq!(parse(json!({"license": null})).license, None);
+        assert_eq!(parse(json!({"license": "weird"})).license, None);
+        assert_eq!(
+            parse(json!({"license": {"status": "platinum", "grace_ends_at": "soon"}})).license,
+            Some(LicenseInfo {
+                status: LicenseStatus::Unknown,
+                grace_ends_at: None
+            })
+        );
+        assert_eq!(
+            parse(json!({"license": {"status": "inactive"}}))
+                .license
+                .unwrap()
+                .status,
+            LicenseStatus::Inactive
+        );
     }
 
     #[test]
@@ -634,6 +790,9 @@ mod tests {
     #[test]
     fn base_url_normalization() {
         assert_eq!(normalize_base_url(" https://a.test/v1/ "), "https://a.test");
-        assert_eq!(normalize_base_url("http://localhost:3000"), "http://localhost:3000");
+        assert_eq!(
+            normalize_base_url("http://localhost:3000"),
+            "http://localhost:3000"
+        );
     }
 }

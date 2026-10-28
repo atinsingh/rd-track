@@ -301,8 +301,10 @@ mod tests {
 
     #[test]
     fn optional_fields_are_omitted_and_empty_payload_is_object() {
-        let v = serde_json::to_value(envelope(EventBody::SessionStarted(SessionStarted::default())))
-            .unwrap();
+        let v = serde_json::to_value(envelope(EventBody::SessionStarted(
+            SessionStarted::default(),
+        )))
+        .unwrap();
         assert_eq!(v["payload"], json!({}));
         let v = serde_json::to_value(envelope(EventBody::SessionResumed(Empty {}))).unwrap();
         assert_eq!(v["payload"], json!({}));

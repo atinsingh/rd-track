@@ -292,7 +292,10 @@ mod tests {
             } => {
                 assert!(backwards);
                 assert_eq!(gap_end, before);
-                assert_eq!(gap_start, before - TimeDelta::minutes(10) + TimeDelta::seconds(1));
+                assert_eq!(
+                    gap_start,
+                    before - TimeDelta::minutes(10) + TimeDelta::seconds(1)
+                );
                 assert_eq!(elapsed, Duration::from_secs(1));
             }
             other => panic!("unexpected {other:?}"),

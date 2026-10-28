@@ -20,8 +20,10 @@ use rand::{Rng, SeedableRng};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::api::{
+    ApiClient, ApiError, EventBatchRequest, EventBatchResponse, EventStatus, LicenseBlock,
+};
 pub use crate::api::{MAX_BATCH_BYTES, MAX_BATCH_EVENTS};
-use crate::api::{ApiClient, ApiError, EventBatchRequest, EventBatchResponse, EventStatus};
 use crate::clock::Clock;
 use crate::events::{Envelope, EventBody};
 use crate::outbox::{lock, OutboxError, SharedOutbox};
@@ -119,6 +121,15 @@ pub enum SyncError {
     /// The device credential was revoked.
     #[error("device revoked")]
     Revoked,
+    /// `403 subscription_inactive` / `seat_unavailable`: nothing was deleted and no
+    /// backoff was scheduled — the runtime pauses syncing until the licence is back.
+    #[error("{}", .block.message())]
+    LicenseUnavailable {
+        /// Which licence problem.
+        block: LicenseBlock,
+        /// Work completed before the refusal.
+        partial: SyncReport,
+    },
     /// Backing off; no request was made.
     #[error("backing off for {0:?}")]
     BackingOff(Duration),
@@ -214,6 +225,12 @@ impl Syncer {
                     });
                 }
                 Err(SendError::Revoked) => return Err(SyncError::Revoked),
+                Err(SendError::License(block)) => {
+                    return Err(SyncError::LicenseUnavailable {
+                        block,
+                        partial: report,
+                    })
+                }
                 Err(SendError::Outbox(e)) => return Err(SyncError::Outbox(e)),
                 Err(SendError::Api(error)) => {
                     let delay = self.backoff.failure(clock.monotonic(), &mut self.rng);
@@ -260,6 +277,7 @@ impl Syncer {
         match api.send_batch_bytes(body) {
             Ok(resp) => apply_results(outbox, &req.events, &resp, report),
             Err(ApiError::DeviceRevoked) => Err(SendError::Revoked),
+            Err(ApiError::LicenseUnavailable(b)) => Err(SendError::License(b)),
             Err(ApiError::Http { status, code }) if matches!(status, 400 | 413 | 422) => {
                 if req.events.len() > 1 {
                     self.split(outbox, api, req.events, report)
@@ -271,7 +289,10 @@ impl Syncer {
                     o.delete(&[ev.event_id])?;
                     o.record_rejection(&ev.event_id.to_string(), ev.body.event_type(), &reason)?;
                     report.rejected += 1;
-                    log::warn!("dropped one {} event refused by the server", ev.body.event_type());
+                    log::warn!(
+                        "dropped one {} event refused by the server",
+                        ev.body.event_type()
+                    );
                     Ok(Sent::Progress)
                 }
             }
@@ -298,6 +319,7 @@ impl Syncer {
 
 enum SendError {
     Revoked,
+    License(LicenseBlock),
     Api(ApiError),
     Outbox(OutboxError),
 }
@@ -406,13 +428,21 @@ mod tests {
             let results: Vec<Value> = batch_events(req).iter().map(&status_for).collect();
             Some(Ok(HttpResponse {
                 status: 200,
-                body: serde_json::to_vec(&json!({"server_time": "2026-10-28T09:00:00Z", "results": results}))
-                    .unwrap(),
+                body: serde_json::to_vec(
+                    &json!({"server_time": "2026-10-28T09:00:00Z", "results": results}),
+                )
+                .unwrap(),
             }))
         });
     }
 
-    fn setup() -> (SharedOutbox, Arc<FakeTransport>, ApiClient, FakeClock, Syncer) {
+    fn setup() -> (
+        SharedOutbox,
+        Arc<FakeTransport>,
+        ApiClient,
+        FakeClock,
+        Syncer,
+    ) {
         let t = FakeTransport::new();
         let api = ApiClient::new("http://h", t.clone()).with_credential("c");
         (
@@ -430,7 +460,10 @@ mod tests {
         for _ in 0..1203 {
             add(&o, bucket(), Uuid::nil());
         }
-        respond_with(&t, |e| json!({"event_id": e["event_id"], "status": "accepted"}));
+        respond_with(
+            &t,
+            |e| json!({"event_id": e["event_id"], "status": "accepted"}),
+        );
         let r = s.sync(&o, &api, &clock).unwrap();
         assert_eq!(r.accepted, 1203);
         assert_eq!(r.remaining, 0);
@@ -453,12 +486,17 @@ mod tests {
     fn handles_per_event_results() {
         let (o, t, api, clock, mut s) = setup();
         let session = Uuid::new_v4();
-        let start = add(&o, EventBody::SessionStarted(SessionStarted::default()), session);
+        let start = add(
+            &o,
+            EventBody::SessionStarted(SessionStarted::default()),
+            session,
+        );
         let dup = add(&o, bucket(), session);
         let rej = add(&o, bucket(), session);
         let missing = add(&o, bucket(), session);
         let unknown = add(&o, bucket(), session);
-        let (s_id, d_id, r_id, u_id) = (start.event_id, dup.event_id, rej.event_id, unknown.event_id);
+        let (s_id, d_id, r_id, u_id) =
+            (start.event_id, dup.event_id, rej.event_id, unknown.event_id);
         respond_with(&t, move |e| {
             let id: Uuid = e["event_id"].as_str().unwrap().parse().unwrap();
             if id == s_id {
@@ -482,7 +520,12 @@ mod tests {
         assert_eq!(partial.duplicate, 1);
         assert_eq!(partial.rejected, 2);
         assert_eq!(partial.overlapping_sessions, vec![session]);
-        let left: Vec<_> = lock(&o).peek_oldest(10).unwrap().iter().map(|e| e.event_id).collect();
+        let left: Vec<_> = lock(&o)
+            .peek_oldest(10)
+            .unwrap()
+            .iter()
+            .map(|e| e.event_id)
+            .collect();
         assert_eq!(left, vec![missing.event_id, unknown.event_id]);
         let rejections = lock(&o).rejections(10).unwrap();
         let reasons: Vec<_> = rejections.iter().map(|r| r.reason.as_str()).collect();
@@ -495,18 +538,30 @@ mod tests {
         let (o, t, api, clock, mut s) = setup();
         add(&o, bucket(), Uuid::nil());
         t.fail_next("connection refused");
-        assert!(matches!(s.sync(&o, &api, &clock), Err(SyncError::Failed { .. })));
+        assert!(matches!(
+            s.sync(&o, &api, &clock),
+            Err(SyncError::Failed { .. })
+        ));
         assert_eq!(lock(&o).depth().unwrap(), 1);
         // Immediately retrying is refused by the backoff without a request.
         let n = t.requests().len();
-        assert!(matches!(s.sync(&o, &api, &clock), Err(SyncError::BackingOff(_))));
+        assert!(matches!(
+            s.sync(&o, &api, &clock),
+            Err(SyncError::BackingOff(_))
+        ));
         assert_eq!(t.requests().len(), n);
         clock.advance(Duration::from_secs(1));
         t.push_raw(503, vec![]);
-        assert!(matches!(s.sync(&o, &api, &clock), Err(SyncError::Failed { .. })));
+        assert!(matches!(
+            s.sync(&o, &api, &clock),
+            Err(SyncError::Failed { .. })
+        ));
         assert_eq!(s.backoff().failures(), 2);
         clock.advance(Duration::from_secs(2));
-        respond_with(&t, |e| json!({"event_id": e["event_id"], "status": "accepted"}));
+        respond_with(
+            &t,
+            |e| json!({"event_id": e["event_id"], "status": "accepted"}),
+        );
         let r = s.sync(&o, &api, &clock).unwrap();
         assert_eq!(r.accepted, 1);
         assert_eq!(s.backoff().failures(), 0);
@@ -516,9 +571,35 @@ mod tests {
     fn device_revoked_is_surfaced() {
         let (o, t, api, clock, mut s) = setup();
         add(&o, bucket(), Uuid::nil());
-        t.push(401, json!({"error": {"code": "device_revoked", "message": "revoked"}}));
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "revoked"}}),
+        );
         assert!(matches!(s.sync(&o, &api, &clock), Err(SyncError::Revoked)));
-        assert_eq!(lock(&o).depth().unwrap(), 1, "the runtime wipes, not the syncer");
+        assert_eq!(
+            lock(&o).depth().unwrap(),
+            1,
+            "the runtime wipes, not the syncer"
+        );
+    }
+
+    #[test]
+    fn license_refusal_keeps_events_without_backoff() {
+        let (o, t, api, clock, mut s) = setup();
+        add(&o, bucket(), Uuid::nil());
+        t.push(
+            403,
+            json!({"error": {"code": "subscription_inactive", "message": "m"}}),
+        );
+        match s.sync(&o, &api, &clock) {
+            Err(SyncError::LicenseUnavailable { block, .. }) => {
+                assert_eq!(block, LicenseBlock::SubscriptionInactive)
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(lock(&o).depth().unwrap(), 1, "outbox is kept");
+        assert!(lock(&o).rejections(1).unwrap().is_empty());
+        assert_eq!(s.backoff().failures(), 0);
     }
 
     #[test]
@@ -589,7 +670,10 @@ mod tests {
                 Uuid::nil(),
             );
         }
-        respond_with(&t, |e| json!({"event_id": e["event_id"], "status": "accepted"}));
+        respond_with(
+            &t,
+            |e| json!({"event_id": e["event_id"], "status": "accepted"}),
+        );
         let r = s.sync(&o, &api, &clock).unwrap();
         assert_eq!(r.accepted, 10);
         let reqs = t.requests();

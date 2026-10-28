@@ -135,7 +135,9 @@ pub struct Outbox {
 
 impl std::fmt::Debug for Outbox {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Outbox").field("config", &self.config).finish()
+        f.debug_struct("Outbox")
+            .field("config", &self.config)
+            .finish()
     }
 }
 
@@ -398,7 +400,10 @@ impl Outbox {
             "SELECT event_type, COUNT(*) FROM events GROUP BY event_type ORDER BY event_type",
         )?;
         let it = stmt.query_map([], |r| {
-            Ok((r.get::<_, String>(0)?, u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0)))
+            Ok((
+                r.get::<_, String>(0)?,
+                u64::try_from(r.get::<_, i64>(1)?).unwrap_or(0),
+            ))
         })?;
         Ok(it.collect::<Result<_, _>>()?)
     }
@@ -444,7 +449,8 @@ impl Outbox {
 
     /// Deletes a metadata value.
     pub fn delete_meta(&mut self, key: &str) -> Result<(), OutboxError> {
-        self.conn.execute("DELETE FROM meta WHERE key = ?1", [key])?;
+        self.conn
+            .execute("DELETE FROM meta WHERE key = ?1", [key])?;
         Ok(())
     }
 
@@ -582,7 +588,8 @@ mod tests {
         let raw = std::fs::read(&path).unwrap();
         assert!(!raw.windows(needle.len()).any(|w| w == needle));
 
-        let mut wrong = Outbox::open(&path, &StaticKey([1u8; 32]), OutboxConfig::default()).unwrap();
+        let mut wrong =
+            Outbox::open(&path, &StaticKey([1u8; 32]), OutboxConfig::default()).unwrap();
         assert!(wrong.peek_oldest(10).unwrap().is_empty());
         assert_eq!(wrong.rejections(10).unwrap()[0].reason, "local_corrupt");
     }
@@ -601,7 +608,10 @@ mod tests {
         let mut o = Outbox::open(&path, &KEY, OutboxConfig::default()).unwrap();
         assert_eq!(o.last_sequence().unwrap(), 3);
         let next = o.append(new_event(bucket(3))).unwrap();
-        assert_eq!(next.sequence, 4, "sequence must not restart after deletes or reopen");
+        assert_eq!(
+            next.sequence, 4,
+            "sequence must not restart after deletes or reopen"
+        );
         let replay = o.peek_oldest(10).unwrap();
         assert_eq!(replay, vec![first, next]);
     }
@@ -646,14 +656,18 @@ mod tests {
         let t0 = Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap();
         assert_eq!(o.prune(t0 + TimeDelta::days(6)).unwrap(), 0);
         assert_eq!(o.prune(t0 + TimeDelta::days(8)).unwrap(), 1);
-        assert_eq!(o.depth_by_type().unwrap(), vec![("session.started.v1".into(), 1)]);
+        assert_eq!(
+            o.depth_by_type().unwrap(),
+            vec![("session.started.v1".into(), 1)]
+        );
     }
 
     #[test]
     fn wipe_clears_everything_including_sequence() {
         let mut o = Outbox::open_in_memory(&KEY, OutboxConfig::default()).unwrap();
         o.append(new_event(started())).unwrap();
-        o.record_rejection("x", "activity_bucket.v1", "bad").unwrap();
+        o.record_rejection("x", "activity_bucket.v1", "bad")
+            .unwrap();
         o.set_meta("k", "v").unwrap();
         o.wipe().unwrap();
         assert_eq!(o.depth().unwrap(), 0);

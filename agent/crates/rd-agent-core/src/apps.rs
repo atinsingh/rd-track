@@ -60,9 +60,18 @@ impl AppTracker {
     ) -> Vec<AppUsage> {
         let mut out = Vec::new();
         let app = app
-            .map(|a| ForegroundAppInfo {
-                app_identifier: sanitize(&a.app_identifier),
-                app_name: sanitize(&a.app_name),
+            .map(|a| {
+                let app_identifier = sanitize(&a.app_identifier);
+                let name = sanitize(&a.app_name);
+                ForegroundAppInfo {
+                    // `app_name` must be non-empty on the wire; fall back to the identifier.
+                    app_name: if name.is_empty() {
+                        app_identifier.clone()
+                    } else {
+                        name
+                    },
+                    app_identifier,
+                }
             })
             .filter(|a| !a.app_identifier.is_empty());
 
@@ -205,5 +214,15 @@ mod tests {
         );
         assert!(out.is_empty());
         assert!(tr.flush().is_empty());
+
+        tr.record(
+            t0(),
+            Duration::from_secs(2),
+            Some(ForegroundAppInfo {
+                app_identifier: "svc.exe".into(),
+                app_name: "\u{7}".into(),
+            }),
+        );
+        assert_eq!(tr.flush()[0].app_name, "svc.exe");
     }
 }

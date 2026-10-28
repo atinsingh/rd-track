@@ -68,22 +68,13 @@ pub enum EmployeeDeletion {
 }
 
 /// `session.*` settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SessionSettings {
     /// `session.allow_overlapping_sessions` (default `false`).
     pub allow_overlapping_sessions: bool,
     /// `session.require_project` (default `false`).
     pub require_project: bool,
-}
-
-impl Default for SessionSettings {
-    fn default() -> Self {
-        Self {
-            allow_overlapping_sessions: false,
-            require_project: false,
-        }
-    }
 }
 
 /// `idle.*` settings.
@@ -160,7 +151,8 @@ impl ScreenshotSettings {
     pub fn is_excluded(&self, app_identifier: &str, app_name: &str) -> bool {
         self.excluded_apps.iter().any(|e| {
             let e = e.trim();
-            !e.is_empty() && (e.eq_ignore_ascii_case(app_identifier) || e.eq_ignore_ascii_case(app_name))
+            !e.is_empty()
+                && (e.eq_ignore_ascii_case(app_identifier) || e.eq_ignore_ascii_case(app_name))
         })
     }
 }
@@ -303,8 +295,8 @@ impl WorkHours {
             .trim()
             .parse()
             .map_err(|_| PolicyError::Invalid("work_hours.timezone".into()))?;
-        let start =
-            parse_hhmm(&self.start).ok_or_else(|| PolicyError::Invalid("work_hours.start".into()))?;
+        let start = parse_hhmm(&self.start)
+            .ok_or_else(|| PolicyError::Invalid("work_hours.start".into()))?;
         let end =
             parse_hhmm(&self.end).ok_or_else(|| PolicyError::Invalid("work_hours.end".into()))?;
         let mut days = [self.days.is_empty(); 7];
@@ -681,7 +673,11 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) fn doc(project: Option<&str>, revision: i64, settings: serde_json::Value) -> SignedPolicy {
+    pub(crate) fn doc(
+        project: Option<&str>,
+        revision: i64,
+        settings: serde_json::Value,
+    ) -> SignedPolicy {
         sign(&json!({
             "organization_id": "org",
             "user_id": "user",
@@ -694,7 +690,12 @@ pub(crate) mod tests {
     }
 
     fn store() -> PolicyStore {
-        PolicyStore::new(pinned(), "org", "dev", Box::new(MemoryPolicyCache::default()))
+        PolicyStore::new(
+            pinned(),
+            "org",
+            "dev",
+            Box::new(MemoryPolicyCache::default()),
+        )
     }
 
     #[test]
@@ -762,7 +763,10 @@ pub(crate) mod tests {
 
         let mut wrong_id = good.clone();
         wrong_id.key_id = "k2".into();
-        assert!(matches!(k.verify(&wrong_id), Err(PolicyError::UnknownKey(_))));
+        assert!(matches!(
+            k.verify(&wrong_id),
+            Err(PolicyError::UnknownKey(_))
+        ));
 
         let other = SigningKey::from_bytes(&[9u8; 32]);
         let bytes = decode_b64(&good.payload_b64).unwrap();
@@ -783,7 +787,11 @@ pub(crate) mod tests {
         ));
         // Correctly signed, invalid time zone.
         assert!(matches!(
-            k.verify(&doc(None, 1, json!({"work_hours": {"timezone": "Mars/Base", "start": "09:00", "end": "17:00"}}))),
+            k.verify(&doc(
+                None,
+                1,
+                json!({"work_hours": {"timezone": "Mars/Base", "start": "09:00", "end": "17:00"}})
+            )),
             Err(PolicyError::Invalid(_))
         ));
     }
@@ -791,8 +799,11 @@ pub(crate) mod tests {
     #[test]
     fn failure_keeps_last_good_policy() {
         let mut st = store();
-        st.apply(None, &doc(None, 3, json!({"idle": {"threshold_seconds": 600}})))
-            .unwrap();
+        st.apply(
+            None,
+            &doc(None, 3, json!({"idle": {"threshold_seconds": 600}})),
+        )
+        .unwrap();
         let mut bad = doc(None, 4, json!({"idle": {"threshold_seconds": 60}}));
         bad.signature_b64 = doc(None, 5, json!({})).signature_b64;
         assert!(st.apply(None, &bad).is_err());
@@ -818,9 +829,13 @@ pub(crate) mod tests {
             "organization_id": "org", "user_id": "user", "device_id": "other",
             "project_id": null, "revision": 1, "issued_at": "2026-10-28T09:00:00Z", "settings": {}
         }));
-        assert_eq!(st.apply(None, &other_dev).unwrap_err(), PolicyError::WrongDevice);
         assert_eq!(
-            st.apply(Some("p1"), &doc(Some("p2"), 1, json!({}))).unwrap_err(),
+            st.apply(None, &other_dev).unwrap_err(),
+            PolicyError::WrongDevice
+        );
+        assert_eq!(
+            st.apply(Some("p1"), &doc(Some("p2"), 1, json!({})))
+                .unwrap_err(),
             PolicyError::WrongProject
         );
     }
@@ -831,7 +846,11 @@ pub(crate) mod tests {
         assert_eq!(st.effective(Some("p1")).source, PolicySource::Defaults);
         st.apply(
             None,
-            &doc(None, 7, json!({"screenshots": {"enabled": true}, "idle": {"threshold_seconds": 900}})),
+            &doc(
+                None,
+                7,
+                json!({"screenshots": {"enabled": true}, "idle": {"threshold_seconds": 900}}),
+            ),
         )
         .unwrap();
         let eff = st.effective(Some("p1"));
@@ -842,8 +861,11 @@ pub(crate) mod tests {
         // The base itself keeps screenshots on.
         assert!(st.effective(None).settings.screenshots.enabled);
 
-        st.apply(Some("p1"), &doc(Some("p1"), 8, json!({"screenshots": {"enabled": true}})))
-            .unwrap();
+        st.apply(
+            Some("p1"),
+            &doc(Some("p1"), 8, json!({"screenshots": {"enabled": true}})),
+        )
+        .unwrap();
         let eff = st.effective(Some("p1"));
         assert_eq!(eff.source, PolicySource::Exact);
         assert!(eff.settings.screenshots.enabled);
@@ -853,7 +875,10 @@ pub(crate) mod tests {
     #[test]
     fn cache_survives_new_store_and_is_reverified() {
         let mut cache = MemoryPolicyCache::default();
-        cache.save("p1", &doc(Some("p1"), 4, json!({"screenshots": {"enabled": true}})));
+        cache.save(
+            "p1",
+            &doc(Some("p1"), 4, json!({"screenshots": {"enabled": true}})),
+        );
         let mut corrupted = doc(None, 9, json!({}));
         corrupted.payload_b64 = STANDARD.encode(b"{}");
         cache.save("", &corrupted);

@@ -24,20 +24,20 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use crate::activity::ActivityAggregator;
-use crate::api::{ApiClient, ApiError, HeartbeatRequest};
+use crate::api::{ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo};
 use crate::apps::AppTracker;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
 use crate::events::{DataGap, EventBody, GapReason, PauseReason, SessionStopped, StopReason};
 use crate::identity::DeviceIdentity;
 use crate::outbox::{lock, NewEvent, OutboxConfig, OutboxPolicyCache, SharedOutbox};
 use crate::platform::{
-    secret_names, CredentialStore, ForegroundApp, ForegroundAppInfo, HttpTransport,
-    InputCounter, Permissions, ScreenCapturer,
+    secret_names, CredentialStore, ForegroundApp, ForegroundAppInfo, HttpTransport, InputCounter,
+    Permissions, ScreenCapturer,
 };
 use crate::policy::{EffectivePolicy, PolicySource, PolicyStore, SignedPolicy};
 use crate::screenshot::{
-    run_job, GateController, ScreenshotJob, ScreenshotOutcome, ScreenshotScheduler,
-    ScreenshotSink, SlotDecision,
+    run_job, GateController, ScreenshotJob, ScreenshotOutcome, ScreenshotScheduler, ScreenshotSink,
+    SlotDecision,
 };
 use crate::state::{SessionInfo, SessionMachine, SessionState, TransitionError};
 use crate::sync::{SyncError, Syncer};
@@ -48,6 +48,8 @@ pub const META_SESSION: &str = "session_snapshot";
 pub const META_AGENT_STATUS: &str = "agent_status";
 /// Outbox metadata key holding the latest [`SyncStatus`].
 pub const META_SYNC_STATUS: &str = "sync_status";
+/// Outbox metadata key holding the active [`LicenseBlock`], if any (survives restarts).
+pub const META_LICENSE_BLOCK: &str = "license_block";
 
 /// Runtime error.
 #[derive(Debug, Error)]
@@ -61,6 +63,9 @@ pub enum AgentError {
     /// The device was revoked; the agent no longer collects anything.
     #[error("this device has been revoked")]
     Revoked,
+    /// The organization's subscription or the user's seat is not available.
+    #[error("{}", .0.message())]
+    LicenseUnavailable(LicenseBlock),
     /// Local storage error.
     #[error(transparent)]
     Outbox(#[from] crate::outbox::OutboxError),
@@ -126,6 +131,11 @@ pub enum Notice {
     Revoked,
     /// The session was paused automatically because the work-hours window ended.
     OutsideWorkHours,
+    /// The server refused service (`subscription_inactive` / `seat_unavailable`); the
+    /// session was stopped and collection is off until the licence is restored.
+    LicenseUnavailable(LicenseBlock),
+    /// A heartbeat succeeded again after a licence refusal; tracking is available.
+    LicenseRestored,
     /// A session left open by a previous run was resumed or closed.
     Recovered {
         /// The session.
@@ -154,6 +164,15 @@ pub struct AgentStatus {
     pub idle_threshold_seconds: u32,
     /// Last known connectivity.
     pub online: bool,
+    /// Set while the server refuses service for licensing reasons.
+    #[serde(default)]
+    pub tracking_unavailable: Option<LicenseBlock>,
+    /// Employee-facing explanation when `tracking_unavailable` is set.
+    #[serde(default)]
+    pub tracking_unavailable_message: Option<String>,
+    /// Licence state from the last heartbeat.
+    #[serde(default)]
+    pub license: Option<LicenseInfo>,
     /// When this snapshot was written.
     #[serde(with = "crate::ts")]
     pub updated_at: DateTime<Utc>,
@@ -219,6 +238,8 @@ pub struct Agent {
     last_foreground: Option<ForegroundAppInfo>,
     online: bool,
     revoked: bool,
+    license_block: Option<LicenseBlock>,
+    license: Option<LicenseInfo>,
     ticks: u64,
     queued: usize,
     notices: Vec<Notice>,
@@ -260,13 +281,18 @@ impl Agent {
             machine: SessionMachine::new(),
             activity: ActivityAggregator::new(effective.settings.idle.threshold_seconds),
             apps: AppTracker::new(),
-            scheduler: ScreenshotScheduler::new(effective.settings.screenshot_interval(), tolerance),
+            scheduler: ScreenshotScheduler::new(
+                effective.settings.screenshot_interval(),
+                tolerance,
+            ),
             gates: GateController::new(),
             observer: TickObserver::new(cfg.tick),
             last_capture: None,
             last_foreground: None,
             online: true,
             revoked: false,
+            license_block: None,
+            license: None,
             ticks: 0,
             queued: 0,
             notices: Vec::new(),
@@ -277,7 +303,17 @@ impl Agent {
         };
         agent.input.set_capturing(false);
         agent.apply_effective();
+        agent.license_block = lock(&agent.outbox)
+            .get_meta(META_LICENSE_BLOCK)?
+            .and_then(|s| serde_json::from_str(&s).ok());
         agent.recover()?;
+        if let Some(block) = agent.license_block {
+            // Still refused from a previous run: never resume capture.
+            if agent.machine.is_open() {
+                let _ = agent.stop(StopReason::Policy);
+            }
+            agent.notices.push(Notice::LicenseUnavailable(block));
+        }
         agent.write_status();
         Ok(agent)
     }
@@ -336,6 +372,11 @@ impl Agent {
         self.revoked
     }
 
+    /// The licence refusal in force, if any.
+    pub fn license_block(&self) -> Option<LicenseBlock> {
+        self.license_block
+    }
+
     /// Sets connectivity (screenshots are never attempted while offline).
     pub fn set_online(&mut self, online: bool) {
         self.online = online;
@@ -357,6 +398,9 @@ impl Agent {
             screenshots_enabled: self.effective.settings.screenshots.enabled,
             idle_threshold_seconds: self.effective.settings.idle.threshold_seconds,
             online: self.online,
+            tracking_unavailable: self.license_block,
+            tracking_unavailable_message: self.license_block.map(|b| b.message().to_owned()),
+            license: self.license.clone(),
             updated_at: self.clock.wall(),
         }
     }
@@ -371,6 +415,9 @@ impl Agent {
     ) -> Result<Uuid, AgentError> {
         if self.revoked {
             return Err(AgentError::Revoked);
+        }
+        if let Some(block) = self.license_block {
+            return Err(AgentError::LicenseUnavailable(block));
         }
         if project_id.is_none() && self.policy.effective(None).settings.session.require_project {
             return Err(AgentError::ProjectRequired);
@@ -416,6 +463,9 @@ impl Agent {
     pub fn resume(&mut self) -> Result<(), AgentError> {
         if self.revoked {
             return Err(AgentError::Revoked);
+        }
+        if let Some(block) = self.license_block {
+            return Err(AgentError::LicenseUnavailable(block));
         }
         let now = ClockReading::now(self.clock.as_ref());
         self.resume_at(now)?;
@@ -510,6 +560,56 @@ impl Agent {
         }
     }
 
+    /// `403 subscription_inactive` / `seat_unavailable`: a soft stop. The open session
+    /// is stopped with `session.stopped.v1 {reason: policy}` (queued like any event),
+    /// all collection stops, and new sessions are refused until
+    /// [`Agent::on_license_restored`]. Unlike revocation, the outbox and credential are
+    /// kept.
+    pub fn on_license_blocked(&mut self, block: LicenseBlock) {
+        let changed = self.license_block != Some(block);
+        self.license_block = Some(block);
+        self.gates.close_all();
+        if self.machine.is_open() {
+            if let Err(e) = self.stop(StopReason::Policy) {
+                log::error!("could not stop session: {e}");
+            }
+        }
+        self.input.set_capturing(false);
+        self.scheduler.clear();
+        if let Ok(json) = serde_json::to_string(&block) {
+            if let Err(e) = lock(&self.outbox).set_meta(META_LICENSE_BLOCK, &json) {
+                log::warn!("could not persist licence state: {e}");
+            }
+        }
+        if changed {
+            log::warn!("{}", block.message());
+            self.notices.push(Notice::LicenseUnavailable(block));
+        }
+        self.write_status();
+    }
+
+    /// A heartbeat succeeded after a licence refusal: tracking is available again
+    /// (a new session must be started; nothing resumes by itself).
+    pub fn on_license_restored(&mut self) {
+        if self.license_block.take().is_none() {
+            return;
+        }
+        if let Err(e) = lock(&self.outbox).delete_meta(META_LICENSE_BLOCK) {
+            log::warn!("could not clear licence state: {e}");
+        }
+        log::info!("licence available again; tracking can resume");
+        self.notices.push(Notice::LicenseRestored);
+        self.write_status();
+    }
+
+    /// Records the licence state from a heartbeat (for display only).
+    pub fn on_license_info(&mut self, info: Option<LicenseInfo>) {
+        if self.license != info {
+            self.license = info;
+            self.write_status();
+        }
+    }
+
     /// `401 device_revoked`: stop collecting at once (no event — the server already
     /// knows), and wipe the outbox. The caller wipes the credential.
     pub fn on_revoked(&mut self) {
@@ -544,7 +644,9 @@ impl Agent {
         self.ticks += 1;
         match self.machine.state() {
             SessionState::Active => match kind {
-                TickKind::Suspended { gap_start, gap_end } => self.on_suspend(gap_start, gap_end, now),
+                TickKind::Suspended { gap_start, gap_end } => {
+                    self.on_suspend(gap_start, gap_end, now)
+                }
                 TickKind::ClockChange {
                     gap_start, gap_end, ..
                 } => self.on_clock_change(gap_start, gap_end, now),
@@ -657,8 +759,13 @@ impl Agent {
 
         let s = &self.effective.settings;
         let want_apps = s.apps.capture_app_name;
-        let want_fg = want_apps || (s.screenshots.enabled && !s.screenshots.excluded_apps.is_empty());
-        self.last_foreground = if want_fg { self.foreground.current() } else { None };
+        let want_fg =
+            want_apps || (s.screenshots.enabled && !s.screenshots.excluded_apps.is_empty());
+        self.last_foreground = if want_fg {
+            self.foreground.current()
+        } else {
+            None
+        };
         if want_apps {
             let segs = self
                 .apps
@@ -687,7 +794,12 @@ impl Agent {
         self.persist_session(now);
     }
 
-    fn on_clock_change(&mut self, gap_start: DateTime<Utc>, gap_end: DateTime<Utc>, now: ClockReading) {
+    fn on_clock_change(
+        &mut self,
+        gap_start: DateTime<Utc>,
+        gap_end: DateTime<Utc>,
+        now: ClockReading,
+    ) {
         log::warn!("wall clock changed; recording a data gap");
         self.leave_active(now);
         self.emit(
@@ -709,7 +821,8 @@ impl Agent {
             return false;
         }
         let interval = self.effective.settings.screenshot_interval();
-        self.scheduler.set_interval(interval, now.wall, &mut self.rng);
+        self.scheduler
+            .set_interval(interval, now.wall, &mut self.rng);
         match self.scheduler.poll(now.wall, &mut self.rng) {
             SlotDecision::NotDue => false,
             SlotDecision::Missed => {
@@ -755,6 +868,12 @@ impl Agent {
     }
 
     fn emit(&mut self, body: EventBody, occurred_at: DateTime<Utc>) {
+        if let EventBody::DataGap(g) = &body {
+            // The contract requires `gap_end > gap_start`; an empty gap carries nothing.
+            if g.gap_end <= g.gap_start {
+                return;
+            }
+        }
         let Some(sess) = self.machine.session() else {
             return;
         };
@@ -763,7 +882,13 @@ impl Agent {
         self.emit_raw(session_id, body, occurred_at, monotonic_ms);
     }
 
-    fn emit_raw(&mut self, session_id: Uuid, body: EventBody, occurred_at: DateTime<Utc>, monotonic_ms: u64) {
+    fn emit_raw(
+        &mut self,
+        session_id: Uuid,
+        body: EventBody,
+        occurred_at: DateTime<Utc>,
+        monotonic_ms: u64,
+    ) {
         let event_type = body.event_type();
         let ev = NewEvent {
             organization_id: self.cfg.identity.organization_id.clone(),
@@ -821,7 +946,9 @@ impl Agent {
             return Ok(());
         };
         let now = ClockReading::now(self.clock.as_ref());
-        let down = (now.wall - snap.last_alive).to_std().unwrap_or(Duration::ZERO);
+        let down = (now.wall - snap.last_alive)
+            .to_std()
+            .unwrap_or(Duration::ZERO);
         let resume = matches!(self.cfg.recovery, Recovery::ResumeWithin(max) if down <= max)
             && now.wall >= snap.last_alive;
         self.effective = self.policy.effective(snap.project_id.as_deref());
@@ -852,7 +979,9 @@ impl Agent {
             started_at: snap.started_at,
             mono_origin: now.mono.saturating_sub(Duration::from_millis(elapsed_ms)),
         };
-        let state = snap.paused.map_or(SessionState::Active, SessionState::Paused);
+        let state = snap
+            .paused
+            .map_or(SessionState::Active, SessionState::Paused);
         self.machine = SessionMachine::restore(info, state);
         if down > self.cfg.tick * 2 && state == SessionState::Active {
             self.emit(
@@ -917,6 +1046,12 @@ pub enum NetEvent {
     Online(bool),
     /// `401 device_revoked`.
     Revoked,
+    /// `403 subscription_inactive` / `seat_unavailable` from any endpoint.
+    LicenseBlocked(LicenseBlock),
+    /// A heartbeat succeeded while blocked.
+    LicenseRestored,
+    /// Licence info from a successful heartbeat.
+    License(Option<LicenseInfo>),
 }
 
 /// Everything the tick loop can receive.
@@ -997,6 +1132,9 @@ pub struct RunOptions {
     pub heartbeat_interval: Duration,
     /// Interval between policy refreshes.
     pub policy_interval: Duration,
+    /// While refused for licensing reasons, heartbeats are retried at most this often
+    /// (and nothing else is sent).
+    pub license_retry_interval: Duration,
 }
 
 impl RunOptions {
@@ -1009,6 +1147,7 @@ impl RunOptions {
             sync_interval: Duration::from_secs(5),
             heartbeat_interval: Duration::from_secs(60),
             policy_interval: Duration::from_secs(300),
+            license_retry_interval: Duration::from_secs(15 * 60),
         }
     }
 }
@@ -1020,6 +1159,8 @@ pub struct RunSummary {
     pub revoked: bool,
     /// Events still in the outbox at exit.
     pub outbox_depth: u64,
+    /// Licence refusal in force at exit.
+    pub license_block: Option<LicenseBlock>,
 }
 
 /// The tick loop and network worker.
@@ -1038,6 +1179,7 @@ pub struct Runtime {
     server_url: String,
     tick: Duration,
     health: Arc<Mutex<Health>>,
+    auto_start: Option<(Option<String>, Option<String>)>,
 }
 
 impl Runtime {
@@ -1079,6 +1221,7 @@ impl Runtime {
                 server_url,
                 tick,
                 health: Arc::new(Mutex::new(Health::default())),
+                auto_start: None,
             },
             handle,
         ))
@@ -1114,6 +1257,10 @@ impl Runtime {
                 Notice::OutsideWorkHours => {
                     log::info!("NOTICE: outside policy work hours; capture is paused")
                 }
+                Notice::LicenseUnavailable(b) => log::warn!("NOTICE: {}", b.message()),
+                Notice::LicenseRestored => {
+                    log::info!("NOTICE: tracking is available again")
+                }
                 Notice::Recovered { resumed, .. } => log::info!(
                     "NOTICE: a session from a previous run was {}",
                     if resumed { "resumed" } else { "closed" }
@@ -1125,13 +1272,8 @@ impl Runtime {
     /// Runs until shutdown or revocation.
     pub fn run(mut self, opts: RunOptions) -> Result<RunSummary, AgentError> {
         let worker = self.spawn_worker(&opts);
-        if let Some((project, task)) = opts.auto_start.clone() {
-            if !self.agent.machine.is_open() {
-                if let Err(e) = self.agent.start(project, task) {
-                    log::error!("could not start session: {e}");
-                }
-            }
-        }
+        self.auto_start = opts.auto_start.clone();
+        self.maybe_auto_start();
         self.update_health();
         self.forward_agent_outputs();
 
@@ -1140,7 +1282,10 @@ impl Runtime {
         let mut revoked = false;
         loop {
             let now = self.clock.monotonic();
-            if opts.max_duration.is_some_and(|d| now.saturating_sub(started) >= d) {
+            if opts
+                .max_duration
+                .is_some_and(|d| now.saturating_sub(started) >= d)
+            {
                 log::info!("run duration reached; shutting down");
                 self.shutdown_session(StopReason::User);
                 break;
@@ -1194,7 +1339,25 @@ impl Runtime {
         Ok(RunSummary {
             revoked,
             outbox_depth,
+            license_block: self.agent.license_block(),
         })
+    }
+
+    /// Headless mode: (re)start the configured session when none is open.
+    fn maybe_auto_start(&mut self) {
+        let Some((project, task)) = self.auto_start.clone() else {
+            return;
+        };
+        if self.agent.machine.is_open() || self.agent.is_revoked() {
+            return;
+        }
+        match self.agent.start(project, task) {
+            Ok(_) => {}
+            Err(AgentError::LicenseUnavailable(b)) => {
+                log::warn!("not starting a session: {}", b.message())
+            }
+            Err(e) => log::error!("could not start session: {e}"),
+        }
     }
 
     fn shutdown_session(&mut self, reason: StopReason) {
@@ -1232,19 +1395,30 @@ impl Runtime {
 
     fn handle_net(&mut self, e: NetEvent) {
         match e {
-            NetEvent::Policy {
-                project_id,
-                signed,
-            } => self.agent.on_policy(project_id.as_deref(), &signed),
+            NetEvent::Policy { project_id, signed } => {
+                self.agent.on_policy(project_id.as_deref(), &signed)
+            }
             NetEvent::SessionsRejected(ids) => self.agent.on_sessions_rejected(&ids),
             NetEvent::Online(on) => self.agent.set_online(on),
+            NetEvent::LicenseBlocked(b) => self.agent.on_license_blocked(b),
+            NetEvent::LicenseRestored => {
+                self.agent.on_license_restored();
+                self.maybe_auto_start();
+            }
+            NetEvent::License(info) => self.agent.on_license_info(info),
             NetEvent::Revoked => {}
         }
+        self.update_health();
     }
 
     fn spawn_worker(&mut self, opts: &RunOptions) -> Option<JoinHandle<()>> {
         let jobs = self.jobs_rx.take()?;
+        let start = self.clock.monotonic();
         let worker = NetWorker {
+            blocked: self.agent.license_block(),
+            next_sync: start,
+            next_heartbeat: start,
+            next_policy: start + opts.policy_interval,
             api: ApiClient::new(&self.server_url, self.transport.clone())
                 .with_credential(self.credential.clone()),
             outbox: self.outbox.clone(),
@@ -1276,6 +1450,10 @@ struct NetWorker {
     opts: RunOptions,
     status: SyncStatus,
     online: bool,
+    blocked: Option<LicenseBlock>,
+    next_sync: Duration,
+    next_heartbeat: Duration,
+    next_policy: Duration,
 }
 
 enum SyncResult {
@@ -1298,51 +1476,85 @@ impl NetWorker {
     }
 
     fn note_api_error(&mut self, e: &ApiError) {
-        if matches!(e, ApiError::Transport(_)) {
-            self.set_online(false);
+        match e {
+            ApiError::Transport(_) => self.set_online(false),
+            ApiError::LicenseUnavailable(b) => self.block(*b),
+            _ => {}
+        }
+    }
+
+    /// Enters (or stays in) the licence-refused mode: nothing but a heartbeat every
+    /// `license_retry_interval`.
+    fn block(&mut self, b: LicenseBlock) {
+        if self.blocked != Some(b) {
+            self.send(NetEvent::LicenseBlocked(b));
+        }
+        self.blocked = Some(b);
+        self.status.last_error = Some(b.code().to_owned());
+        self.write_status();
+        self.next_heartbeat = self.clock.monotonic() + self.opts.license_retry_interval;
+    }
+
+    fn unblock(&mut self) {
+        if self.blocked.take().is_some() {
+            self.send(NetEvent::LicenseRestored);
+            self.status.last_error = None;
+            let now = self.clock.monotonic();
+            self.next_sync = now;
+            self.next_policy = now;
         }
     }
 
     fn run(mut self, jobs: Receiver<NetJob>) {
-        let start = self.clock.monotonic();
-        let mut next_sync = start;
-        let mut next_heartbeat = start;
-        let mut next_policy = start + self.opts.policy_interval;
         loop {
             match jobs.recv_timeout(Duration::from_millis(200)) {
+                Ok(NetJob::Screenshot(_)) if self.blocked.is_some() => {
+                    log::info!("screenshot skipped: tracking unavailable")
+                }
                 Ok(NetJob::Screenshot(job)) => self.screenshot(&job),
+                Ok(NetJob::FetchPolicy(_)) if self.blocked.is_some() => {}
                 Ok(NetJob::FetchPolicy(p)) => {
                     if self.fetch_policy(p) {
                         return;
                     }
                 }
                 Ok(NetJob::Shutdown { deadline }) => {
-                    self.final_sync(deadline);
+                    if self.blocked.is_none() {
+                        self.final_sync(deadline);
+                    }
                     return;
                 }
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => return,
             }
             let now = self.clock.monotonic();
-            if now >= next_sync {
-                next_sync = now + self.opts.sync_interval;
-                if let SyncResult::Revoked = self.sync() {
-                    return;
-                }
-            }
-            if now >= next_heartbeat {
-                next_heartbeat = now + self.opts.heartbeat_interval;
+            if now >= self.next_heartbeat {
+                self.next_heartbeat = now
+                    + if self.blocked.is_some() {
+                        self.opts.license_retry_interval
+                    } else {
+                        self.opts.heartbeat_interval
+                    };
                 if self.heartbeat() {
                     return;
                 }
             }
-            if now >= next_policy {
-                next_policy = now + self.opts.policy_interval;
+            if self.blocked.is_some() {
+                continue;
+            }
+            if now >= self.next_sync {
+                self.next_sync = now + self.opts.sync_interval;
+                if let SyncResult::Revoked = self.sync() {
+                    return;
+                }
+            }
+            if self.blocked.is_none() && now >= self.next_policy {
+                self.next_policy = now + self.opts.policy_interval;
                 let project = self.health().project_id;
                 if self.fetch_policy(None) {
                     return;
                 }
-                if project.is_some() && self.fetch_policy(project) {
+                if project.is_some() && self.blocked.is_none() && self.fetch_policy(project) {
                     return;
                 }
             }
@@ -1350,7 +1562,10 @@ impl NetWorker {
     }
 
     fn health(&self) -> Health {
-        self.health.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.health
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     fn write_status(&self) {
@@ -1364,7 +1579,9 @@ impl NetWorker {
             return SyncResult::Ok;
         }
         self.status.last_attempt_at = Some(self.clock.wall());
-        let r = self.syncer.sync(&self.outbox, &self.api, self.clock.as_ref());
+        let r = self
+            .syncer
+            .sync(&self.outbox, &self.api, self.clock.as_ref());
         let out = match r {
             Ok(report) => {
                 self.set_online(true);
@@ -1381,6 +1598,11 @@ impl NetWorker {
                 return SyncResult::Revoked;
             }
             Err(SyncError::BackingOff(_)) => return SyncResult::Failed,
+            Err(SyncError::LicenseUnavailable { block, partial }) => {
+                self.status.accepted_total += partial.accepted as u64;
+                self.block(block);
+                return SyncResult::Failed;
+            }
             Err(SyncError::Failed { error, partial }) => {
                 self.note_api_error(&error);
                 self.status.last_error = Some(error.to_string());
@@ -1404,6 +1626,7 @@ impl NetWorker {
             match self.sync() {
                 SyncResult::Revoked => return,
                 SyncResult::Ok if lock(&self.outbox).depth().unwrap_or(0) == 0 => return,
+                _ if self.blocked.is_some() => return,
                 _ => {}
             }
             let now = self.clock.monotonic();
@@ -1414,7 +1637,11 @@ impl NetWorker {
                 );
                 return;
             }
-            let wait = self.syncer.backoff().remaining(now).max(Duration::from_millis(100));
+            let wait = self
+                .syncer
+                .backoff()
+                .remaining(now)
+                .max(Duration::from_millis(100));
             std::thread::sleep(wait.min(deadline.saturating_sub(now)));
         }
     }
@@ -1436,6 +1663,8 @@ impl NetWorker {
                     self.send(NetEvent::Revoked);
                     return true;
                 }
+                self.send(NetEvent::License(resp.license.clone()));
+                self.unblock();
                 if resp.policy_revision > h.applied_revision {
                     if self.fetch_policy(None) {
                         return true;
@@ -1483,7 +1712,12 @@ impl NetWorker {
             ScreenshotOutcome::Completed { bytes, .. } => {
                 log::info!("screenshot uploaded ({bytes} bytes)")
             }
-            ScreenshotOutcome::Refused(code) => log::info!("screenshot not authorised: {code}"),
+            ScreenshotOutcome::Refused(code) => {
+                log::info!("screenshot not authorised: {code}");
+                if let Some(b) = LicenseBlock::from_code(&code) {
+                    self.block(b);
+                }
+            }
             ScreenshotOutcome::Cancelled => log::info!("screenshot cancelled: session left Active"),
             ScreenshotOutcome::Failed(e) => log::warn!("screenshot failed: {e}"),
         }

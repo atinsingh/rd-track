@@ -11,7 +11,14 @@ rust-version.workspace = true
 name = "rd-agent"
 path = "src/main.rs"
 
+[features]
+default = []
+## Store the device credential and outbox key in the OS keychain (`keyring` crate)
+## instead of 0600 files in the data directory.
+keychain = ["dep:keyring"]
+
 [dependencies]
+keyring = { workspace = true, optional = true }
 rd-agent-core = { path = "../rd-agent-core" }
 chrono.workspace = true
 clap.workspace = true
