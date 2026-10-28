@@ -71,7 +71,7 @@ export default function ExportsPage() {
     if (from > to) return;
     const range = { from: dayRange(from, tz).from, to: dayRange(addDays(to, 0), tz).to };
     const target =
-      scope === 'me' ? { user_id: me.user.id } : scope === 'org' ? {} : { team_id: scope.replace(/^team:/, '') };
+      scope === 'me' ? { user_id: me.user.id } : { team_id: scope.replace(/^team:/, '') };
     const r = await create.run(() => rd.exports.create({ kind, ...range, ...target }));
     if (r) exportsRes.mutate((prev) => [r, ...(prev ?? [])]);
   };
@@ -97,7 +97,6 @@ export default function ExportsPage() {
                   Team {t.name}
                 </option>
               ))}
-              {access.isAdmin ? <option value="org">Whole organization</option> : null}
             </SelectField>
             <TextField label="From" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
             <TextField

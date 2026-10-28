@@ -42,22 +42,26 @@ function collectionRows(policy: MyPolicyResponse): Row[] {
 
 const RELATION: Record<string, string> = { team_manager: 'Team manager', project_manager: 'Project manager' };
 
+// Action names as written by the API's audit log (apps/api/src/modules/**).
 const ACTION_TEXT: Record<string, string> = {
   'screenshot.view': 'Opened one of your screenshots',
-  'screenshot.view_url': 'Opened one of your screenshots',
+  'screenshot.list': 'Listed your screenshots',
+  'screenshot.deleted': 'One of your screenshots was deleted',
   'activity.view': 'Viewed your computer activity',
   'apps.view': 'Viewed your app usage',
-  'sessions.view': 'Viewed your sessions',
-  'report.team.view': 'Viewed a team report that includes you',
-  'report.project.view': 'Viewed a project report that includes you',
-  'user.view': 'Viewed your day',
+  'time.view': 'Viewed your sessions',
   'export.create': 'Exported data that includes you',
-  'export.download': 'Downloaded an export that includes you',
-  'correction.approve': 'Approved your correction',
-  'correction.reject': 'Rejected your correction',
+  'time_correction.approve': 'Approved your correction',
+  'time_correction.reject': 'Rejected your correction',
   'deletion_request.approve': 'Approved your deletion request',
   'deletion_request.reject': 'Declined your deletion request',
-  'policy.publish': 'Published a policy change that applies to you',
+  'user.create': 'Created your account',
+  'user.update': 'Changed your account settings',
+  'team.member_set': 'Changed your team membership',
+  'project.member_set': 'Changed your project membership',
+  'device.enrollment_code_created': 'Created a device enrollment code for you',
+  'device.revoked': 'Revoked one of your devices',
+  'legal_hold.create': 'Placed a legal hold on some of your data',
 };
 
 function describeAccess(e: AuditEventDTO): string {

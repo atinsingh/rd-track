@@ -128,7 +128,12 @@
 }
 .bar {
   flex: 1 1 0;
-  min-width: 1px;
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .bars {
+    gap: 0;
+  }
 }
 .kindActivity {
   background: var(--data-1);
@@ -367,6 +372,7 @@
 
 /* ───── Date switcher ───── */
 .switcher {
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   align-items: center;

@@ -195,6 +195,8 @@ select.input {
   padding-right: 8px;
 }
 .inline {
+  max-width: 100%;
+  white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -206,6 +208,8 @@ select.input {
 }
 .inline select,
 .inline input {
+  min-width: 0;
+  flex: 1;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -448,6 +452,8 @@ select.input {
 
 /* ───── Tables ───── */
 .tableBox {
+  /* contain absolutely positioned (visually hidden) cells so they scroll with the table */
+  position: relative;
   overflow-x: auto;
   max-width: 100%;
 }

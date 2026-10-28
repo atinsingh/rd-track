@@ -15,6 +15,9 @@ import s from '../admin.module.css';
 
 type Role = 'member' | 'manager';
 
+/** The admin team list may include members (not yet in the shared contract types). */
+type AdminTeam = TeamSummary & { members?: { user_id: string; display_name: string; role: Role }[] };
+
 function AddMemberForm({ users, exclude, onAdd, label }: { users: UserDTO[]; exclude: Set<string>; onAdd: (userId: string, role: Role) => Promise<boolean>; label: string }) {
   const [userId, setUserId] = useState('');
   const [role, setRole] = useState<Role>('member');
@@ -44,12 +47,18 @@ function AddMemberForm({ users, exclude, onAdd, label }: { users: UserDTO[]; exc
   );
 }
 
-function TeamItem({ team, users, onChanged }: { team: TeamSummary; users: UserDTO[]; onChanged: () => void }) {
+function TeamItem({ team, users, onChanged }: { team: AdminTeam; users: UserDTO[]; onChanged: () => void }) {
   const action = useAction();
-  const members = users
-    .filter((u) => u.teams.some((t) => t.id === team.id))
-    .map((u) => ({ user: u, role: u.teams.find((t) => t.id === team.id)!.role }))
-    .sort((a, b) => byName(a.user, b.user));
+  const members = (
+    team.members
+      ? team.members.map((m) => ({
+          user: users.find((u) => u.id === m.user_id) ?? ({ id: m.user_id, display_name: m.display_name } as UserDTO),
+          role: m.role,
+        }))
+      : users
+          .filter((u) => u.teams.some((t) => t.id === team.id))
+          .map((u) => ({ user: u, role: u.teams.find((t) => t.id === team.id)!.role }))
+  ).sort((a, b) => byName(a.user, b.user));
   const add = async (userId: string, role: Role) => {
     const r = await action.run(() => rd.admin.addTeamMember(team.id, userId, role));
     if (r) onChanged();
@@ -172,7 +181,7 @@ function CreateForm({ label, onCreate, withClient }: { label: string; onCreate: 
 export default function TeamsAndProjectsPage() {
   const { access } = useMe();
   const enabled = access.isAdmin;
-  const teams = useApi(enabled ? 'admin:teams' : null, (signal) => rd.admin.teams(signal));
+  const teams = useApi(enabled ? 'admin:teams' : null, (signal) => rd.admin.teams(signal) as Promise<AdminTeam[]>);
   const projects = useApi(enabled ? 'admin:projects' : null, (signal) => rd.admin.projects(signal));
   const users = useApi(enabled ? 'admin:users' : null, (signal) => rd.admin.users(signal));
   const createTeam = useAction();

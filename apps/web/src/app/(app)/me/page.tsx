@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
@@ -14,7 +15,12 @@ import { useApi } from '@/lib/useApi';
 export default function MyDayPage() {
   const { me, timezone } = useMe();
   const [tz, setTz] = useState(timezone);
-  const [date, setDate] = useState(() => todayInTz(timezone));
+  const params = useSearchParams();
+  const [date, setDate] = useState(() => {
+    const today = todayInTz(timezone);
+    const q = params.get('date');
+    return q && /^\d{4}-\d{2}-\d{2}$/.test(q) && q <= today ? q : today;
+  });
   const [sheet, setSheet] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const policy = useApi('me:policy', (signal) => rd.my.policy(signal));
