@@ -13,6 +13,7 @@ import { authRoutes } from './modules/auth/routes';
 import { authenticateDevice, authenticateUser } from './modules/auth/service';
 import { peopleRoutes } from './modules/people-routes';
 import { authenticatePlatform, platformRoutes } from './modules/platform/routes';
+import { timesheetRoutes } from './modules/timesheets-routes';
 import { localStorageRoutes } from './storage/local-routes';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
@@ -132,6 +133,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => peopleRoutes(s, deps));
   await app.register(async (s) => adminRoutes(s, deps));
   await app.register(async (s) => commerceRoutes(s, deps));
+  await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => platformRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;

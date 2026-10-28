@@ -7,6 +7,7 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { assertWeekUnlocked } from '../timesheets/service';
 
 /** TIME-08: proposals keep the original values; approval applies them without losing history. */
 
@@ -63,6 +64,7 @@ export async function proposeCorrection(
     original = { started_at: s.started_at, ended_at: s.ended_at, project_id: s.project_id, task_id: s.task_id };
   }
   await validateValues(deps, q, actor, input.requested, input.session_id ?? null);
+  await assertWeekUnlocked(deps, q, actor.organizationId, actor.userId, [original?.started_at, input.requested.started_at]);
 
   const r = await one<{ id: string }>(
     q,
@@ -142,9 +144,9 @@ export async function reviewCorrection(
   note: string | undefined,
   requestId?: string,
 ): Promise<CorrectionDTO> {
-  const c = await one<{ user_id: string; status: string; session_id: string | null; requested: CorrectionValues }>(
+  const c = await one<{ user_id: string; status: string; session_id: string | null; original: CorrectionValues | null; requested: CorrectionValues }>(
     q,
-    'SELECT user_id, status, session_id, requested FROM time_corrections WHERE id = $1 AND organization_id = $2 FOR UPDATE',
+    'SELECT user_id, status, session_id, original, requested FROM time_corrections WHERE id = $1 AND organization_id = $2 FOR UPDATE',
     [id, actor.organizationId],
   );
   if (!c) throw errors.notFound('Correction');
@@ -153,6 +155,7 @@ export async function reviewCorrection(
   if (c.status !== 'pending') throw errors.conflict('already_reviewed', 'This correction has already been reviewed');
   if (approve) {
     await validateValues(deps, q, { ...actor, userId: c.user_id }, c.requested, c.session_id);
+    await assertWeekUnlocked(deps, q, actor.organizationId, c.user_id, [c.original?.started_at, c.requested.started_at]);
     await apply(q, id);
   }
   await q.query(
