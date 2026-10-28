@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
+import { ProjectBudgetCard } from '@/components/ProjectBudgetCard';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
 import { Empty, ErrorState, Loading } from '@/components/ui/DataState';
 import { InlineSelect } from '@/components/ui/Field';
@@ -62,6 +63,7 @@ export default function ProjectsPage() {
         }
       />
       <Banner tag="NOTE">Sorted by name. Hours include agent-tracked and approved manual time.</Banner>
+      <ProjectBudgetCard key={current.id} projectId={current.id} />
       {report.error ? (
         <ErrorState error={report.error} onRetry={report.reload} />
       ) : !report.data ? (

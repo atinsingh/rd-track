@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues, SessionDTO } from '@rd/contracts';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
+import { MyPayRate } from '@/components/MyPayRate';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { sessionTitle } from '@/components/day/SessionsList';
 import { Button } from '@/components/ui/Button';
@@ -189,6 +190,8 @@ export default function MyTimePage() {
           }
         </Resource>
       </Card>
+
+      <MyPayRate />
 
       <CorrectionSheet
         open={sheet !== null}

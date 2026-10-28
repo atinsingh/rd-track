@@ -32,6 +32,19 @@ import type {
   CorrectionValues,
   OrgRole,
   PlanId,
+  BillRateDTO,
+  ClientDTO,
+  InvoiceDTO,
+  InvoiceGrouping,
+  InvoiceLineInput,
+  InvoiceSummaryDTO,
+  MyPayRateResponse,
+  PayRateDTO,
+  PayrollExportDTO,
+  ProjectBudgetDTO,
+  ProjectBudgetResponse,
+  BudgetKind,
+  BudgetResets,
 } from '@rd/contracts';
 
 /**
@@ -230,7 +243,74 @@ export interface AuditQuery {
   cursor?: string;
 }
 
+export interface ClientBody {
+  name: string;
+  contact_email?: string | null;
+  currency?: string;
+  address?: string | null;
+  archived?: boolean;
+}
+export interface BudgetBody {
+  kind: BudgetKind;
+  limit_hours?: number;
+  limit_cents?: number;
+  currency?: string;
+  alert_thresholds: number[];
+  stop_at_budget: boolean;
+  resets: BudgetResets;
+}
+export interface InvoiceDraftBody {
+  client_id: string;
+  period_from: string;
+  period_to: string;
+  timezone?: string;
+  group_by: InvoiceGrouping;
+  tax_rate_bp: number;
+  due_date?: string | null;
+  notes?: string | null;
+}
+
+/** Stage 3 money (Pro): clients, rates, budgets, invoices, payroll. */
+const money = {
+  clients: (signal?: AbortSignal) => list<ClientDTO>('/v1/admin/clients', { signal }),
+  createClient: (body: ClientBody) => post<ClientDTO>('/v1/admin/clients', body),
+  updateClient: (id: string, body: Partial<ClientBody>) => patch<ClientDTO>(`/v1/admin/clients/${enc(id)}`, body),
+  setProjectClient: (projectId: string, clientId: string | null) =>
+    ok(put(`/v1/admin/projects/${enc(projectId)}/client`, { client_id: clientId })),
+  payRates: (signal?: AbortSignal) => list<PayRateDTO>('/v1/admin/rates/pay', { signal }),
+  createPayRate: (body: { user_id: string; amount_cents: number; currency: string; effective_from: string }) =>
+    post<PayRateDTO>('/v1/admin/rates/pay', body),
+  deletePayRate: (id: string) => ok(del(`/v1/admin/rates/pay/${enc(id)}`)),
+  billRates: (signal?: AbortSignal) => list<BillRateDTO>('/v1/admin/rates/bill', { signal }),
+  createBillRate: (body: { project_id: string; user_id: string | null; amount_cents: number; currency: string; effective_from: string }) =>
+    post<BillRateDTO>('/v1/admin/rates/bill', body),
+  deleteBillRate: (id: string) => ok(del(`/v1/admin/rates/bill/${enc(id)}`)),
+  myPayRate: (signal?: AbortSignal) => get<MyPayRateResponse>('/v1/me/pay-rate', { signal }),
+  budgets: (signal?: AbortSignal) => list<ProjectBudgetDTO>('/v1/admin/budgets', { signal }),
+  projectBudget: (projectId: string, signal?: AbortSignal) =>
+    get<ProjectBudgetResponse>(`/v1/projects/${enc(projectId)}/budget`, { signal }),
+  putBudget: (projectId: string, body: BudgetBody) => put<ProjectBudgetResponse>(`/v1/projects/${enc(projectId)}/budget`, body),
+  deleteBudget: (projectId: string) => ok(del(`/v1/projects/${enc(projectId)}/budget`)),
+  invoices: (signal?: AbortSignal) => list<InvoiceSummaryDTO>('/v1/admin/invoices', { signal }),
+  invoice: (id: string, signal?: AbortSignal) => get<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}`, { signal }),
+  createInvoice: (body: InvoiceDraftBody) => post<InvoiceDTO>('/v1/admin/invoices', body),
+  updateInvoice: (id: string, body: { tax_rate_bp?: number; due_date?: string | null; notes?: string | null }) =>
+    patch<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}`, body),
+  setInvoiceLines: (id: string, lines: InvoiceLineInput[]) => put<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/lines`, { lines }),
+  issueInvoice: (id: string, dueDate?: string | null) =>
+    post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/issue`, dueDate !== undefined ? { due_date: dueDate } : {}),
+  voidInvoice: (id: string, reason?: string) => post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/void`, reason ? { reason } : {}),
+  deleteInvoice: (id: string) => ok(del(`/v1/admin/invoices/${enc(id)}`)),
+  /** Same-origin GET; the browser sends the session cookie and saves the CSV. */
+  invoiceCsvUrl: (id: string) => `/v1/admin/invoices/${enc(id)}/csv`,
+  payrollExports: (signal?: AbortSignal) => list<PayrollExportDTO>('/v1/admin/payroll-exports', { signal }),
+  payrollExport: (id: string) => get<PayrollExportDTO>(`/v1/admin/payroll-exports/${enc(id)}`),
+  createPayrollExport: (body: { period_from: string; period_to: string; timezone?: string; user_ids?: string[] }) =>
+    post<PayrollExportDTO>('/v1/admin/payroll-exports', body),
+};
+
 export const rd = {
+  money,
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
