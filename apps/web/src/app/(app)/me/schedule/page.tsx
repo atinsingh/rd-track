@@ -33,7 +33,7 @@ function WeekAttendance({ data, tz }: { data: AttendanceResponse; tz: string }) 
     <>
       <p className="secondary small">
         {sum.scheduled_days === 0
-          ? 'No shifts this week.'
+          ? 'No shifts this week'
           : `${sum.scheduled_days} scheduled ${sum.scheduled_days === 1 ? 'day' : 'days'} · ${sum.on_time} on schedule · ${sum.late} started late · ${sum.left_early} left early · ${sum.absent} with nothing recorded · ${sum.on_leave} on leave · ${sum.holiday} holiday`}
         . Late means the first recorded time began more than {data.late_grace_minutes} min after the shift start.
       </p>
