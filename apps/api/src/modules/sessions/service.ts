@@ -1,5 +1,6 @@
 import type { Deps, DeviceActor } from '../../context';
 import { one, type Queryable } from '../../db/pool';
+import { projectBudgetReached } from '../money/budgets';
 import { resolveFor } from '../policy/service';
 
 /**
@@ -77,6 +78,12 @@ export async function startSession(
   if (input.taskId) {
     const t = await one(q, 'SELECT 1 FROM tasks WHERE id = $1 AND project_id = $2', [input.taskId, input.projectId ?? null]);
     if (!t) return { ok: false, reason: 'unknown_task' };
+  }
+  // Stage 3 budgets: a project whose "stop at budget" budget was used up before this start
+  // refuses NEW sessions. This is the only place budgets act on tracking — a session that is
+  // already running is never stopped, and replays of an accepted start returned above.
+  if (input.projectId && (await projectBudgetReached(deps, q, device.organizationId, input.projectId, input.at))) {
+    return { ok: false, reason: 'project_budget_reached' };
   }
 
   const { settings } = await resolveFor(deps, q, device.organizationId, device.userId, {

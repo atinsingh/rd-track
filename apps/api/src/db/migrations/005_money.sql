@@ -112,6 +112,8 @@ CREATE TABLE invoices (
   tax_rate_bp      integer NOT NULL DEFAULT 0 CHECK (tax_rate_bp BETWEEN 0 AND 10000),
   tax_cents        bigint NOT NULL DEFAULT 0,
   total_cents      bigint NOT NULL DEFAULT 0,
+  -- time in the period with no bill rate in the invoice currency (left off the draft; shown as a warning)
+  unrated_seconds  bigint NOT NULL DEFAULT 0,
   issued_at        timestamptz,
   due_date         date,
   notes            text,
@@ -189,6 +191,7 @@ CREATE TABLE payroll_exports (
   period_to        date NOT NULL,              -- inclusive
   timezone         text NOT NULL DEFAULT 'UTC',
   user_ids         uuid[],                     -- NULL = everyone with time in the period
+  included_user_ids uuid[],                    -- who is in the generated file (downloads audit pay_rate.view for each)
   status           text NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'ready', 'failed', 'expired')),
   object_key       text,
   row_count        integer,
