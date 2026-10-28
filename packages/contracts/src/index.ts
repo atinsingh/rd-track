@@ -6,3 +6,4 @@ export * from './agent-api';
 export * from './describe';
 export * from './insights';
 export * from './timesheets';
+export * from './scheduling';

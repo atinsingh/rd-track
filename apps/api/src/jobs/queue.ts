@@ -14,7 +14,8 @@ export type JobKind =
   | 'retention.run'
   | 'seats.snapshot'
   | 'notify.policy_expansion'
-  | 'webhook.deliver';
+  | 'webhook.deliver'
+  | 'time_off.accrue';
 
 export interface Job {
   id: number;

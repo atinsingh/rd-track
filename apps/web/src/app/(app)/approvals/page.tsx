@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues } from '@rd/contracts';
 import { TimesheetApprovals } from '@/components/timesheet/TimesheetApprovals';
+import { TimeOffApprovals } from '@/components/scheduling/TimeOffApprovals';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { TextArea } from '@/components/ui/Field';
@@ -89,6 +90,7 @@ export default function ApprovalsPage() {
   };
   if (!can(access, 'approvals')) return <NoAccess what="Approvals are for team managers." />;
   const timesheets = access.entitlements.includes('timesheets');
+  const timeOffReview = access.entitlements.includes('time_off');
 
   return (
     <>
@@ -97,8 +99,8 @@ export default function ApprovalsPage() {
         title="Approvals"
         description={
           access.managesTeams
-            ? 'Corrections, manual time and weekly timesheets from people in your teams. Original values are kept whatever you decide.'
-            : 'Weekly timesheets submitted by people across the organization. You cannot approve your own.'
+            ? 'Corrections, manual time, timesheets and time off from people in your teams. Original values are kept whatever you decide.'
+            : 'Timesheets and time off from people across the organization. You cannot approve your own.'
         }
       />
       {timesheets ? <TimesheetApprovals tz={tz} /> : null}
@@ -136,6 +138,7 @@ export default function ApprovalsPage() {
           </Resource>
         </>
       ) : null}
+      {timeOffReview ? <TimeOffApprovals tz={tz} /> : null}
     </>
   );
 }

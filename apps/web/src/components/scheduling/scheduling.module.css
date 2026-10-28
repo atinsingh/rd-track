@@ -1,0 +1,194 @@
+/* Schedules, attendance and time off. Neutral ink throughout; the amber warn tokens mark
+   schedule exceptions (late, left early, nothing recorded) — never red or green per person. */
+
+.grid {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 760px;
+}
+.grid th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--text);
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.grid th:first-child,
+.grid td:first-child {
+  padding-left: 0;
+}
+.grid td {
+  padding: 6px;
+  border-bottom: 1px solid var(--rule-soft);
+  vertical-align: top;
+}
+.name {
+  font-weight: 600;
+  white-space: nowrap;
+  vertical-align: middle !important;
+}
+.todayHead {
+  color: var(--text) !important;
+}
+
+.cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  color: var(--text-2);
+}
+.cellTitle {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
+}
+.cellSub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-3);
+}
+.cellMuted {
+  background: var(--canvas);
+  border-color: var(--canvas);
+}
+.cellMuted .cellTitle {
+  color: var(--text-3);
+  font-weight: 500;
+}
+.cellLeave {
+  background: repeating-linear-gradient(45deg, var(--rule-soft) 0 2px, var(--surface) 2px 6px);
+}
+.cellWarn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+.cellWarn .cellTitle {
+  color: var(--warn-text);
+}
+.cellWarn .cellSub {
+  color: var(--warn-text-2);
+}
+
+.marker {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  background: var(--warn-dash);
+  vertical-align: 1px;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+.swatchMuted {
+  background: var(--canvas);
+}
+.swatchLeave {
+  background: repeating-linear-gradient(45deg, var(--rule-soft) 0 2px, var(--surface) 2px 6px);
+}
+.swatchWarn {
+  background: var(--warn-bg);
+  border-color: var(--warn-border);
+}
+
+.balances {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.balance {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+.balanceValue {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.side {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  background: var(--canvas);
+  min-width: 0;
+}
+
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.inlineForm > * {
+  flex: 1 1 160px;
+}
+.inlineForm > button {
+  flex: 0 0 auto;
+}
+.weekdayPicks {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  align-items: center;
+}
+.weekdayPicks legend {
+  font-weight: 600;
+  margin-bottom: 6px;
+  padding: 0;
+  width: 100%;
+}
+.weekdayPicks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--target-sm);
+}
+.weekdayPicks input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--text);
+}
