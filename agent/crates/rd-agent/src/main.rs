@@ -2,34 +2,27 @@
 //!
 //! ```text
 //! rd-agent enroll --server https://track.example.com --code ABCDEFGHJK
-//! rd-agent run --project <id> --simulate
+//! rd-agent run --project <id>            # native collectors (Windows, macOS)
+//! rd-agent run --project <id> --simulate # simulated platform (any OS, CI)
 //! rd-agent status
 //! ```
-
-mod config;
-mod credentials;
-mod http;
-mod simulated;
 
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
-use rd_agent_core::api::{ApiClient, EnrollRequest, Os};
+use rd_agent::config::{self, Paths};
+use rd_agent::setup::{credential_store, open_outbox};
+use rd_agent::{http, native, setup, simulated};
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::events::StopReason;
-use rd_agent_core::identity::DeviceIdentity;
-use rd_agent_core::outbox::{CredentialStoreKey, Outbox, OutboxConfig, SharedOutbox};
-use rd_agent_core::platform::{secret_names, CredentialStore};
-use rd_agent_core::policy::decode_b64;
+use rd_agent_core::platform::{secret_names, ForegroundApp, InputCounter, ScreenCapturer};
 use rd_agent_core::runtime::{
     stored_status, AgentConfig, AgentHandle, Command, RunOptions, Runtime, RuntimeDeps,
 };
-
-use crate::config::Paths;
 
 /// RoundDigital Track desktop agent.
 #[derive(Debug, Parser)]
@@ -68,8 +61,8 @@ enum Cmd {
         /// Task to book the session to.
         #[arg(long)]
         task: Option<String>,
-        /// Use the simulated platform (required on Linux; native collectors are not
-        /// part of this build).
+        /// Use the simulated platform instead of the native collectors (required on
+        /// Linux, which has no native collectors).
         #[arg(long)]
         simulate: bool,
         /// Seed for the simulated platform and screenshot slots.
@@ -91,29 +84,6 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
-}
-
-/// The credential store: the OS keychain when built with `--features keychain` (unless
-/// `RD_AGENT_CREDENTIAL_STORE=file`), otherwise `0600` files under the data directory.
-fn credential_store(paths: &Paths) -> Arc<dyn CredentialStore> {
-    #[cfg(feature = "keychain")]
-    if std::env::var("RD_AGENT_CREDENTIAL_STORE").as_deref() != Ok("file") {
-        return Arc::new(credentials::KeychainCredentialStore::new(format!(
-            "rd-agent:{}",
-            paths.root.display()
-        )));
-    }
-    Arc::new(credentials::FileCredentialStore::new(paths.secrets()))
-}
-
-fn open_outbox(paths: &Paths, creds: &dyn CredentialStore) -> Result<SharedOutbox, String> {
-    let outbox = Outbox::open(
-        &paths.outbox(),
-        &CredentialStoreKey(creds),
-        OutboxConfig::default(),
-    )
-    .map_err(|e| format!("cannot open outbox: {e}"))?;
-    Ok(Arc::new(Mutex::new(outbox)))
 }
 
 fn main() -> ExitCode {
@@ -167,59 +137,8 @@ fn enroll(
     device_name: Option<String>,
     force: bool,
 ) -> Result<ExitCode, String> {
-    paths
-        .ensure()
-        .map_err(|e| format!("cannot create {}: {e}", paths.root.display()))?;
     let creds = credential_store(paths);
-    let existing = config::load_identity(&paths.identity())?;
-    let has_credential = creds
-        .get(secret_names::DEVICE_CREDENTIAL)
-        .map_err(|e| e.to_string())?
-        .is_some();
-    if existing.as_ref().is_some_and(|i| !i.revoked) && has_credential && !force {
-        return Err("this device is already enrolled (use --force to re-enroll)".into());
-    }
-
-    let api = ApiClient::new(server, Arc::new(http::UreqTransport::new()));
-    let resp = api
-        .enroll(&EnrollRequest {
-            enrollment_code: code.trim().to_owned(),
-            device_name: device_name.unwrap_or_else(config::host_name),
-            os: Os::current(),
-            os_version: config::os_version(),
-            agent_version: rd_agent_core::AGENT_VERSION.to_owned(),
-        })
-        .map_err(|e| format!("enrollment failed: {e}"))?;
-    let key_ok = decode_b64(&resp.policy_signing_key.public_key_b64).is_some_and(|k| k.len() == 32);
-    if !key_ok {
-        return Err("enrollment response has an invalid policy signing key".into());
-    }
-
-    // A new enrollment is a new device: start from an empty outbox and a new key.
-    if paths.outbox().exists() {
-        let outbox = open_outbox(paths, creds.as_ref())?;
-        rd_agent_core::outbox::lock(&outbox)
-            .wipe()
-            .map_err(|e| e.to_string())?;
-    }
-    creds
-        .delete(secret_names::OUTBOX_KEY)
-        .map_err(|e| e.to_string())?;
-    creds
-        .set(
-            secret_names::DEVICE_CREDENTIAL,
-            resp.device_credential.as_bytes(),
-        )
-        .map_err(|e| e.to_string())?;
-    let identity = DeviceIdentity {
-        server_url: api.base_url().to_owned(),
-        device_id: resp.device_id,
-        user_id: resp.user_id,
-        organization_id: resp.organization_id,
-        policy_signing_key: resp.policy_signing_key,
-        revoked: false,
-    };
-    config::save_identity(&paths.identity(), &identity)?;
+    let identity = setup::enroll(paths, creds.as_ref(), server, code, device_name, force)?;
     println!(
         "Enrolled device {} (organization {}).",
         identity.device_id, identity.organization_id
@@ -238,35 +157,37 @@ struct RunArgs {
 }
 
 fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
-    let mut identity = config::load_identity(&paths.identity())?
-        .ok_or("this device is not enrolled; run `rd-agent enroll` first")?;
-    if identity.revoked {
-        return Err(
-            "this device was revoked; ask your administrator for a new enrollment code".into(),
-        );
-    }
     let creds = credential_store(paths);
-    let credential = creds
-        .get(secret_names::DEVICE_CREDENTIAL)
-        .map_err(|e| e.to_string())?
-        .ok_or("device credential is missing; re-enroll this device")?;
-    let credential = String::from_utf8(credential).map_err(|_| "device credential is corrupt")?;
-    if !args.simulate {
-        return Err(
-            "native collectors are not part of this build; pass --simulate to run with the simulated platform"
-                .into(),
-        );
-    }
+    let (identity, credential) = setup::load_for_run(paths, creds.as_ref())?;
     let seed = args.seed.unwrap_or_else(rand::random);
+    type Collectors = (
+        Box<dyn InputCounter>,
+        Box<dyn ForegroundApp>,
+        Arc<dyn ScreenCapturer>,
+        &'static str,
+    );
+    let (input, foreground, capturer, platform_name): Collectors = if args.simulate {
+        (
+            Box::new(simulated::SimInput::new(seed)),
+            Box::new(simulated::SimForeground::new(seed)),
+            Arc::new(simulated::SimCapturer::new(seed)),
+            "simulated platform",
+        )
+    } else {
+        let n = native::platform().ok_or(
+            "this OS has no native collectors (Linux is a development target); pass --simulate",
+        )?;
+        (n.input, n.foreground, n.capturer, "native collectors")
+    };
     let outbox = open_outbox(paths, creds.as_ref())?;
     let cfg = AgentConfig::new(identity.clone());
     let (runtime, handle) = Runtime::new(
         cfg,
         RuntimeDeps {
             clock: Arc::new(SystemClock::new()),
-            input: Box::new(simulated::SimInput::new(seed)),
-            foreground: Box::new(simulated::SimForeground::new(seed)),
-            capturer: Arc::new(simulated::SimCapturer::new(seed)),
+            input,
+            foreground,
+            capturer,
             transport: Arc::new(http::UreqTransport::new()),
             credentials: creds.clone(),
             outbox,
@@ -291,11 +212,10 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
         opts.auto_start = Some((args.project, args.task));
     }
     opts.max_duration = args.duration.map(Duration::from_secs);
-    log::info!("agent running (simulated platform, seed {seed})");
+    log::info!("agent running ({platform_name}, seed {seed})");
     let summary = runtime.run(opts).map_err(|e| e.to_string())?;
     if summary.revoked {
-        identity.revoked = true;
-        config::save_identity(&paths.identity(), &identity)?;
+        setup::mark_revoked(paths, &identity)?;
         eprintln!("This device was revoked by your organization. Tracking has stopped and local data was erased.");
         return Ok(ExitCode::from(3));
     }

@@ -205,7 +205,6 @@ resource "aws_ecs_task_definition" "api" {
     logConfiguration  = local.log_config["api"]
     linuxParameters   = { initProcessEnabled = true }
     stopTimeout       = 30
-    readonlyRootFilesystem = false
   }])
 }
 
