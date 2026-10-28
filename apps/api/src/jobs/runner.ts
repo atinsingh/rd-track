@@ -5,6 +5,7 @@ import { snapshotSeats } from '../modules/billing/service';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
 import { runRetention } from '../modules/retention/service';
+import { runAccruals } from '../modules/scheduling/time-off';
 import { deleteScreenshot, verifyScreenshot } from '../modules/screenshots/service';
 import { claim, complete, enqueue, fail, requeueStale, type Job } from './queue';
 
@@ -39,6 +40,9 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'seats.snapshot':
       await snapshotSeats(deps.pool, deps.now());
       return;
+    case 'time_off.accrue':
+      await runAccruals(deps);
+      return;
     default:
       throw new Error(`Unknown job kind ${job.kind}`);
   }
@@ -65,6 +69,8 @@ export async function scheduleRecurring(deps: Deps): Promise<void> {
   const schedule: [Job['kind'], number][] = [
     ['retention.run', 3600_000],
     ['seats.snapshot', 3600_000],
+    // Idempotent per period, so running it often only makes the monthly accrual timely.
+    ['time_off.accrue', 6 * 3600_000],
   ];
   for (const [kind, everyMs] of schedule) {
     const r = await deps.pool.query(`SELECT 1 FROM jobs WHERE kind = $1 AND status IN ('queued', 'running') LIMIT 1`, [kind]);

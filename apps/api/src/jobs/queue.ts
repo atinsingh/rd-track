@@ -13,7 +13,8 @@ export type JobKind =
   | 'export.generate'
   | 'retention.run'
   | 'seats.snapshot'
-  | 'notify.policy_expansion';
+  | 'notify.policy_expansion'
+  | 'time_off.accrue';
 
 export interface Job {
   id: number;
