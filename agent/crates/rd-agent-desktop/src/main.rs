@@ -270,7 +270,10 @@ fn main() {
                 api.prevent_close();
                 let _ = window.hide();
             }
-            WindowEvent::Focused(false) if !cfg!(target_os = "linux") => {
+            WindowEvent::Focused(false)
+                if !cfg!(target_os = "linux") && window.is_visible().unwrap_or(false) =>
+            {
+                tray::note_blur_hide();
                 let _ = window.hide();
             }
             _ => {}

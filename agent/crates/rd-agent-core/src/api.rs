@@ -75,6 +75,9 @@ pub struct EnrollResponse {
     pub device_credential: String,
     /// Policy signing key to pin.
     pub policy_signing_key: PinnedKey,
+    /// The employee's own dashboard (servers before Stage 3 omit it).
+    #[serde(default)]
+    pub dashboard_url: Option<String>,
 }
 
 /// `POST /v1/device/heartbeat` request.
@@ -194,7 +197,7 @@ pub struct DeviceTask {
     pub name: String,
 }
 
-/// A project the device's user can book time to (`GET /v1/device/projects`, proposed).
+/// A project the device's user can book time to (`GET /v1/device/projects`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceProject {
     /// Project id.
@@ -551,8 +554,8 @@ impl ApiClient {
     }
 
     /// `GET /v1/device/projects` — the projects (and their open tasks) this device's
-    /// user can book time to, for the tray's pickers. **Not yet in the API contract**
-    /// (proposed; see the agent README): a `404` means the server does not offer it
+    /// user can book time to, for the tray's pickers. A `404` means an older server
+    /// that does not offer it
     /// and the tray falls back to "No project".
     pub fn projects(&self) -> Result<Vec<DeviceProject>, ApiError> {
         let list: DeviceProjectList =

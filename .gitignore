@@ -7,3 +7,6 @@ coverage/
 *.log
 agent/target/
 .local-storage/
+
+# Parallel agent worktrees
+.claude/worktrees/

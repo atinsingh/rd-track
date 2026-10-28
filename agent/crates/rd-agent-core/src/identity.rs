@@ -21,4 +21,7 @@ pub struct DeviceIdentity {
     /// Set when the server revoked the device; the credential has been wiped.
     #[serde(default)]
     pub revoked: bool,
+    /// The employee's own dashboard, as given by the server at enrollment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dashboard_url: Option<String>,
 }

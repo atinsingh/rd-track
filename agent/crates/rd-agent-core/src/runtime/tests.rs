@@ -26,6 +26,7 @@ fn identity() -> DeviceIdentity {
         organization_id: "org".into(),
         policy_signing_key: pinned(),
         revoked: false,
+        dashboard_url: None,
     }
 }
 

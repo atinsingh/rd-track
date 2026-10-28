@@ -133,7 +133,7 @@ h1.title {
 p { margin: 0; }
 
 /* ----- light session-start notice --------------------------------------------------- */
-.notice { padding: 26px; display: flex; flex-direction: column; gap: 14px; min-height: 100%; color: var(--text); }
+.notice { padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; min-height: 100%; color: var(--text); }
 .notice .eyebrow { color: var(--text-3); }
 .notice h2 { margin: 0; font: 700 22px/1.2 var(--font-display); letter-spacing: -0.03em; }
 .notice .lead { color: var(--text-2); }
@@ -144,4 +144,11 @@ p { margin: 0; }
 .notice .warnline { background: var(--warn-bg); color: var(--warn-fg); padding: 8px 10px; font-size: 13px; }
 .notice details { font-size: 13px; color: var(--text-2); }
 .notice summary { cursor: pointer; }
-.notice .buttons { margin-top: auto; display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+.notice { padding-bottom: 0; }
+.notice .buttons {
+  margin-top: auto; position: sticky; bottom: 0; background: var(--surface);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 12px 0 20px;
+  border-top: 1px solid var(--rule);
+}
+.notice .buttons.one { grid-template-columns: 1fr; }
+.notice .buttons button { padding: 0 10px; font-size: 13px; }

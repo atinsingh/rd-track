@@ -98,6 +98,7 @@ struct Inner {
     projects: Vec<DeviceProject>,
     projects_supported: Option<bool>,
     server_url: Option<String>,
+    dashboard_url: Option<String>,
     tray: Option<(TrayState, String, Option<String>)>,
     update: Option<String>,
 }
@@ -139,16 +140,16 @@ impl Controller {
         let simulated =
             !native::AVAILABLE || std::env::var("RD_AGENT_SIMULATE").as_deref() == Ok("1");
         let creds = credential_store(&paths);
-        let server_url = config::load_identity(&paths.identity())
-            .ok()
-            .flatten()
-            .map(|i| i.server_url);
+        let identity = config::load_identity(&paths.identity()).ok().flatten();
+        let dashboard_url = identity.as_ref().and_then(|i| i.dashboard_url.clone());
+        let server_url = identity.map(|i| i.server_url);
         Arc::new(Self {
             paths,
             creds,
             simulated,
             inner: Mutex::new(Inner {
                 server_url,
+                dashboard_url,
                 ..Inner::default()
             }),
             handle: Mutex::new(None),
@@ -228,7 +229,11 @@ impl Controller {
     /// may be thread-affine.
     fn run_runtime(self: &Arc<Self>, app: AppHandle) -> Result<(), String> {
         let (identity, credential) = setup::load_for_run(&self.paths, self.creds.as_ref())?;
-        lock(&self.inner).server_url = Some(identity.server_url.clone());
+        {
+            let mut i = lock(&self.inner);
+            i.server_url = Some(identity.server_url.clone());
+            i.dashboard_url = identity.dashboard_url.clone();
+        }
         let NativePlatform {
             input,
             foreground,
@@ -316,6 +321,7 @@ impl Controller {
         {
             let mut i = lock(&self.inner);
             i.server_url = Some(identity.server_url);
+            i.dashboard_url = identity.dashboard_url;
             i.notices.clear();
             i.dismissed.clear();
             i.error = None;
@@ -476,16 +482,21 @@ impl Controller {
         Permission::from_name(name).and_then(Permission::settings_url)
     }
 
-    /// "My dashboard": `RD_TRACK_DASHBOARD_URL`, else `<server>/me`.
+    /// "My dashboard": `RD_TRACK_DASHBOARD_URL`, else the URL the server gave at
+    /// enrollment, else `<server>/me`. Only http(s) URLs are ever opened.
     pub fn dashboard_url(&self) -> Option<String> {
+        let web = |u: &str| u.starts_with("https://") || u.starts_with("http://");
         if let Ok(u) = std::env::var("RD_TRACK_DASHBOARD_URL") {
-            if u.starts_with("https://") || u.starts_with("http://") {
+            if web(&u) {
                 return Some(u);
             }
         }
-        let server = lock(&self.inner).server_url.clone()?;
-        (server.starts_with("https://") || server.starts_with("http://"))
-            .then(|| format!("{}/me", server.trim_end_matches('/')))
+        let i = lock(&self.inner);
+        if let Some(u) = i.dashboard_url.as_deref().filter(|u| web(u)) {
+            return Some(u.to_owned());
+        }
+        let server = i.server_url.clone()?;
+        web(&server).then(|| format!("{}/me", server.trim_end_matches('/')))
     }
 
     /// Records that an update is ready.

@@ -124,9 +124,12 @@ pub fn sync_line(live: &LiveStatus, now: DateTime<Utc>) -> String {
     if live.agent.tracking_unavailable.is_some() {
         return "Not syncing · tracking unavailable".into();
     }
-    match (live.sync.last_success_at, &live.sync.last_error) {
+    let since = live.sync.last_success_at.map(|t| (now - t).num_seconds());
+    match (since, &live.sync.last_error) {
         (_, Some(_)) if queued > 0 => format!("Sync problem · {queued} queued, retrying"),
-        (Some(t), _) => format!("Synced {} ago", ago((now - t).num_seconds())),
+        // Nothing to send for a while: say so instead of an ever-growing "ago".
+        (Some(s), _) if queued == 0 && s > 300 => "Up to date".into(),
+        (Some(s), _) => format!("Synced {} ago", ago(s)),
         (None, _) if queued == 0 => "Up to date".into(),
         (None, _) => "Syncing…".into(),
     }
@@ -205,7 +208,12 @@ pub fn session_notice(
         );
     }
     let warning = (preview.source != "exact").then(|| {
-        "This project's policy could not be loaded yet (offline?). Screenshots stay off until it is; you will be told if that changes.".to_owned()
+        let whose = if preview.project_id.is_some() {
+            "This project's policy"
+        } else {
+            "Your organization's policy"
+        };
+        format!("{whose} could not be loaded yet (offline?). Screenshots stay off until it is; you will be told if that changes.")
     });
     SessionNotice {
         project_id: preview.project_id.clone(),
@@ -492,6 +500,10 @@ mod tests {
         assert_eq!(sync_line(&l, t(0)), "Syncing…");
         l.sync.last_success_at = Some(t(0));
         assert_eq!(sync_line(&l, t(12)), "Synced 12 s ago");
+        l.outbox_depth = 0;
+        assert_eq!(sync_line(&l, t(301)), "Up to date");
+        assert_eq!(sync_line(&l, t(300)), "Synced 5 min ago");
+        l.outbox_depth = 4;
         l.sync.last_error = Some("http 500".into());
         assert_eq!(sync_line(&l, t(12)), "Sync problem · 4 queued, retrying");
         l.agent.online = false;

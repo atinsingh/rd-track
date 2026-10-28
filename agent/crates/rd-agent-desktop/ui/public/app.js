@@ -195,7 +195,7 @@ function mainView(v) {
 function noticeView(n, review) {
     const screenshots = (i) => i.key === "screenshots.enabled";
     return h("section", { class: "notice", "aria-labelledby": "notice-h" }, h("span", { class: "eyebrow" }, review ? "What changed" : "Before you start"), h("h2", { id: "notice-h" }, review ? "This session now collects" : n.title), h("p", { class: "lead" }, "While this session runs, RoundDigital Track records:"), h("ul", {}, ...n.items.map((i) => h("li", { class: screenshots(i) ? "strong" : "" }, h("span", { class: "text" }, i.text), h("span", { class: "detail" }, i.detail)))), n.warning && h("p", { class: "warnline", role: "note" }, n.warning), ...n.footer.map((f) => h("p", { class: "fine" }, f)), n.not_collected.length > 0 &&
-        h("details", {}, h("summary", {}, "Not collected"), h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))), h("p", {}, `Never: ${n.never}`)), error && h("p", { class: "warnline", role: "alert" }, error), h("div", { class: "buttons" }, ...noticeButtons(review)));
+        h("details", {}, h("summary", {}, "Not collected"), h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))), h("p", {}, `Never: ${n.never}`)), error && h("p", { class: "warnline", role: "alert" }, error), h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)));
 }
 function noticeButtons(review) {
     const close = () => {

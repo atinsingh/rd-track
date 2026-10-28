@@ -156,6 +156,7 @@ mod tests {
                 public_key_b64: "AA==".into(),
             },
             revoked: false,
+            dashboard_url: None,
         };
         save_identity(&p.identity(), &id).unwrap();
         assert_eq!(load_identity(&p.identity()).unwrap(), Some(id));

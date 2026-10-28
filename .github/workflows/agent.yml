@@ -1,0 +1,234 @@
+# Desktop agent: lint/test on all three OSes, build the tray app, and produce
+# installable bundles (macOS .app/.dmg, Windows .msi/.exe) as workflow artifacts.
+# Signing, notarization and updater signatures run only when their secrets exist;
+# without them the installers are unsigned (see agent/README.md, "Desktop app").
+name: Agent
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["agent-v*"]
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent.yml"
+  pull_request:
+    paths:
+      - "agent/**"
+      - ".github/workflows/agent.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+env:
+  CARGO_TERM_COLOR: always
+  TAURI_CLI_VERSION: "2.12.4"
+
+jobs:
+  fmt:
+    name: Format and UI build check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --check
+        working-directory: agent
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # public/app.js is committed so `cargo build` needs no Node; make sure it matches src/.
+      - name: UI type-check and compiled output up to date
+        working-directory: agent/crates/rd-agent-desktop/ui
+        run: |
+          npx --yes -p typescript@5.9.3 tsc -p .
+          git diff --exit-code -- public/app.js
+
+  check:
+    name: Clippy and tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+          key: check
+      - name: Linux webview and tray libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev
+      - name: Clippy (core + CLI, incl. native collectors on this OS)
+        run: cargo clippy -p rd-agent-core -p rd-agent --all-targets --features rd-agent/keychain -- -D warnings
+      - name: Tests (core + CLI)
+        run: cargo test -p rd-agent-core -p rd-agent
+      - name: Clippy (tray app)
+        run: cargo clippy -p rd-agent-desktop --all-targets -- -D warnings
+      - name: Tests (tray app view logic)
+        run: cargo test -p rd-agent-desktop
+      - name: Build tray app
+        run: cargo build -p rd-agent-desktop
+
+  bundle:
+    name: Installers (${{ matrix.name }})
+    needs: [fmt, check]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS universal
+            os: macos-latest
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+            tauri_args: --target universal-apple-darwin --bundles app,dmg
+            out: agent/target/universal-apple-darwin/release/bundle
+          - name: Windows x64
+            os: windows-latest
+            rust_targets: x86_64-pc-windows-msvc
+            tauri_args: --bundles msi,nsis
+            out: agent/target/release/bundle
+    runs-on: ${{ matrix.os }}
+    env:
+      # Secrets cannot appear in step `if:`; expose only whether they are set.
+      HAS_APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      HAS_WINDOWS_PFX: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      HAS_AZURE_SIGNING: ${{ secrets.AZURE_CLIENT_ID != '' }}
+      HAS_UPDATER_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' && vars.TAURI_UPDATER_PUBKEY != '' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+          key: bundle
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Version from tag
+        if: startsWith(github.ref, 'refs/tags/agent-v')
+        run: echo "AGENT_VERSION=${GITHUB_REF_NAME#agent-v}" >> "$GITHUB_ENV"
+
+      # --- Windows Authenticode: either a PFX (OV/EV exported) or Azure Trusted Signing.
+      - name: Import Windows code-signing certificate
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_PFX == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "signing.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw
+          Remove-Item $pfx
+          "WINDOWS_CERT_THUMBPRINT=$($cert.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Install Azure Trusted Signing client
+        if: runner.os == 'Windows' && env.HAS_AZURE_SIGNING == 'true' && env.HAS_WINDOWS_PFX != 'true'
+        run: cargo install trusted-signing-cli --locked
+
+      - name: Tauri config overrides for this build
+        env:
+          UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+          AZURE_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
+        run: |
+          node - <<'EOF'
+          const fs = require("fs");
+          const env = process.env;
+          const c = { bundle: { macOS: {}, windows: {} } };
+          if (env.AGENT_VERSION) c.version = env.AGENT_VERSION;
+          // macOS: Developer ID identity is read from the imported certificate by the
+          // Tauri bundler (APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY env); without one,
+          // sign ad hoc so the app at least launches on Apple silicon.
+          if (env.RUNNER_OS === "macOS" && env.HAS_APPLE_CERT !== "true") c.bundle.macOS.signingIdentity = "-";
+          if (env.WINDOWS_CERT_THUMBPRINT) c.bundle.windows.certificateThumbprint = env.WINDOWS_CERT_THUMBPRINT;
+          else if (env.HAS_AZURE_SIGNING === "true")
+            c.bundle.windows.signCommand = `trusted-signing-cli -e ${env.AZURE_ENDPOINT} -a ${env.AZURE_ACCOUNT} -c ${env.AZURE_PROFILE} -d "RoundDigital Track" %1`;
+          if (env.HAS_UPDATER_KEY === "true") {
+            c.bundle.createUpdaterArtifacts = true;
+            c.plugins = { updater: { pubkey: env.UPDATER_PUBKEY } };
+            if (env.UPDATER_ENDPOINT) c.plugins.updater.endpoints = [env.UPDATER_ENDPOINT];
+          }
+          fs.writeFileSync("agent/crates/rd-agent-desktop/ci.tauri.json", JSON.stringify(c, null, 2));
+          console.log(JSON.stringify(c, null, 2));
+          EOF
+
+      - name: Build installers
+        working-directory: agent/crates/rd-agent-desktop
+        env:
+          # macOS signing + notarization (used by the Tauri bundler only when set).
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Azure Trusted Signing (service principal).
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          # Updater signatures (.sig files next to each installer).
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          # Empty secrets must not reach the bundler as empty strings.
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!v}" ]; then unset "$v"; fi
+          done
+          npx --yes @tauri-apps/cli@${TAURI_CLI_VERSION} build ${{ matrix.tauri_args }} --config ci.tauri.json
+
+      - name: Verify macOS signature
+        if: runner.os == 'macOS'
+        run: |
+          app=$(ls -d ${{ matrix.out }}/macos/*.app | head -1)
+          codesign --verify --deep --strict --verbose=2 "$app" || true
+          spctl --assess --type execute --verbose "$app" || echo "Not notarized (expected without Apple secrets)."
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rd-track-${{ runner.os }}-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            ${{ matrix.out }}/dmg/*.dmg
+            ${{ matrix.out }}/macos/*.app.tar.gz
+            ${{ matrix.out }}/macos/*.app.tar.gz.sig
+            ${{ matrix.out }}/msi/*.msi
+            ${{ matrix.out }}/msi/*.msi.sig
+            ${{ matrix.out }}/nsis/*.exe
+            ${{ matrix.out }}/nsis/*.exe.sig
+
+      - name: Attach to draft release
+        if: startsWith(github.ref, 'refs/tags/agent-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: |
+            ${{ matrix.out }}/dmg/*.dmg
+            ${{ matrix.out }}/macos/*.app.tar.gz
+            ${{ matrix.out }}/macos/*.app.tar.gz.sig
+            ${{ matrix.out }}/msi/*.msi
+            ${{ matrix.out }}/msi/*.msi.sig
+            ${{ matrix.out }}/nsis/*.exe
+            ${{ matrix.out }}/nsis/*.exe.sig

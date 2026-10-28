@@ -98,6 +98,7 @@ pub fn enroll(
         organization_id: resp.organization_id,
         policy_signing_key: resp.policy_signing_key,
         revoked: false,
+        dashboard_url: resp.dashboard_url,
     };
     config::save_identity(&paths.identity(), &identity)?;
     Ok(identity)

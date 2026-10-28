@@ -356,7 +356,7 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
         h("p", {}, `Never: ${n.never}`),
       ),
     error && h("p", { class: "warnline", role: "alert" }, error),
-    h("div", { class: "buttons" }, ...noticeButtons(review)),
+    h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)),
   );
 }
 

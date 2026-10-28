@@ -2,7 +2,9 @@
 //! on macOS a title with the elapsed time), left click toggles the popover, right
 //! click (or any click on Linux) opens the menu.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rd_agent_core::events::StopReason;
 use rd_agent_core::runtime::Command;
@@ -15,6 +17,23 @@ use crate::controller::Controller;
 use crate::view::{self, TrayState};
 
 const TRAY_ID: &str = "rd-track";
+
+/// When the popover last hid because it lost focus (ms since the epoch). Clicking the
+/// tray icon while the popover is open first blurs it; without this the same click
+/// would immediately show it again.
+static LAST_BLUR_HIDE_MS: AtomicU64 = AtomicU64::new(0);
+
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+/// Records a hide caused by focus loss.
+pub fn note_blur_hide() {
+    LAST_BLUR_HIDE_MS.store(now_ms(), Ordering::Relaxed);
+}
 
 fn icon(state: TrayState) -> Option<Image<'static>> {
     let bytes: &'static [u8] = match state {
@@ -103,6 +122,9 @@ fn toggle_at(app: &AppHandle, rect: Rect) {
     };
     if w.is_visible().unwrap_or(false) {
         let _ = w.hide();
+        return;
+    }
+    if now_ms().saturating_sub(LAST_BLUR_HIDE_MS.load(Ordering::Relaxed)) < 300 {
         return;
     }
     let scale = w.scale_factor().unwrap_or(1.0);
