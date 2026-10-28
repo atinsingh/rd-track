@@ -8,6 +8,7 @@ import {
   sessionCreateRequest,
   sessionStopRequest,
   uploadIntentRequest,
+  type DeviceProjectsResponse,
 } from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../context';
@@ -17,6 +18,7 @@ import { AppError, errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { assertLicensedForTracking } from './billing/service';
 import { enroll, heartbeat } from './devices/service';
+import { projectsForUser } from './org/service';
 import { ingestBatch } from './ingestion/service';
 import { signedPolicyForDevice } from './policy/service';
 import { completeUpload, createUploadIntent } from './screenshots/service';
@@ -39,6 +41,12 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/v1/device/heartbeat', { config: { auth: 'device' } }, async (req) => {
     const body = parse(heartbeatRequest, req.body);
     return withTx(pool, (tx) => heartbeat(deps, tx, deviceOf(req), body));
+  });
+
+  app.get('/v1/device/projects', { config: { auth: 'device' } }, async (req): Promise<DeviceProjectsResponse> => {
+    const d = deviceOf(req);
+    const projects = await projectsForUser(pool, d.organizationId, d.userId);
+    return { projects: projects.map((p) => ({ id: p.id, name: p.name, tasks: p.tasks })) };
   });
 
   app.get('/v1/device/policy', { config: { auth: 'device' } }, async (req) => {

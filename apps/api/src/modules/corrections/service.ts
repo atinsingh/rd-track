@@ -7,6 +7,7 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { emitEvent } from '../webhooks/service';
 
 /** TIME-08: proposals keep the original values; approval applies them without losing history. */
 
@@ -154,6 +155,13 @@ export async function reviewCorrection(
   if (approve) {
     await validateValues(deps, q, { ...actor, userId: c.user_id }, c.requested, c.session_id);
     await apply(q, id);
+    await emitEvent(q, actor.organizationId, 'time_correction.approved', {
+      correction_id: id,
+      user_id: c.user_id,
+      started_at: c.requested.started_at,
+      ended_at: c.requested.ended_at,
+      project_id: c.requested.project_id,
+    });
   }
   await q.query(
     `UPDATE time_corrections SET status = $2, reviewed_by = $3, reviewed_at = now(), review_note = $4 WHERE id = $1`,

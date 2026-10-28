@@ -11,6 +11,8 @@ export interface Deps {
   store: ObjectStore;
   email: EmailSender;
   now: () => Date;
+  /** Outbound HTTP for webhooks; tests substitute a fake. */
+  fetch?: typeof fetch;
 }
 
 export interface UserActor {

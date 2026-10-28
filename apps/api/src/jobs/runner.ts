@@ -6,6 +6,7 @@ import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
 import { runRetention } from '../modules/retention/service';
 import { deleteScreenshot, verifyScreenshot } from '../modules/screenshots/service';
+import { deliver, markFailed } from '../modules/webhooks/service';
 import { claim, complete, enqueue, fail, requeueStale, type Job } from './queue';
 
 /** Tenant jobs run scoped to their organization; cross-tenant jobs (retention) run as system. */
@@ -35,6 +36,15 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
       return;
     case 'retention.run':
       await runRetention(deps);
+      return;
+    case 'webhook.deliver':
+      try {
+        await deliver(deps, deps.pool, p.delivery_id!, deps.fetch);
+      } catch (err) {
+        // The queue retries with backoff; on the last attempt record the failure for admins.
+        if (job.attempts >= job.max_attempts) await markFailed(deps.pool, p.delivery_id!);
+        throw err;
+      }
       return;
     case 'seats.snapshot':
       await snapshotSeats(deps.pool, deps.now());

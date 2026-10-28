@@ -9,6 +9,7 @@ import { AppError } from './lib/errors';
 import { adminRoutes } from './modules/admin-routes';
 import { agentRoutes } from './modules/agent-routes';
 import { commerceRoutes } from './modules/commerce-routes';
+import { insightsRoutes } from './modules/insights-routes';
 import { authRoutes } from './modules/auth/routes';
 import { authenticateDevice, authenticateUser } from './modules/auth/service';
 import { peopleRoutes } from './modules/people-routes';
@@ -132,6 +133,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => peopleRoutes(s, deps));
   await app.register(async (s) => adminRoutes(s, deps));
   await app.register(async (s) => commerceRoutes(s, deps));
+  await app.register(async (s) => insightsRoutes(s, deps));
   await app.register(async (s) => platformRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;

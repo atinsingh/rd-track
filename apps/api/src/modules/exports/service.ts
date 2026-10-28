@@ -7,6 +7,7 @@ import { toCsv } from '../../lib/csv';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertCanView, managedTeamIds } from '../authz';
+import { emitEvent } from '../webhooks/service';
 
 /** RPT-04: exports are authorized like the matching report, audited, and expire after 24 h. */
 
@@ -120,6 +121,7 @@ export async function generateExport(deps: Deps, q: Queryable, exportId: string)
     `UPDATE export_jobs SET status = 'ready', object_key = $2, row_count = $3, completed_at = now(), expires_at = $4 WHERE id = $1`,
     [job.id, key, count, new Date(deps.now().getTime() + EXPIRY_MS).toISOString()],
   );
+  await emitEvent(q, job.organization_id, 'export.ready', { export_id: job.id, kind: job.kind, rows: count });
 }
 
 export async function getExport(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<ExportDTO> {

@@ -116,6 +116,8 @@ export interface AppUsageRow {
   app_name: string;
   domain: string | null;
   seconds: number;
+  /** Team/org work-app category (ACT-07); null when uncategorized. */
+  category: 'core_work' | 'supporting' | 'communication' | 'break' | null;
 }
 export interface AppUsageResponse {
   from: string;

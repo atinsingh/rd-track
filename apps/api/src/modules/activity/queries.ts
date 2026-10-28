@@ -13,6 +13,7 @@ import type { Deps } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { errors } from '../../lib/errors';
 import { visibilityFor } from '../authz';
+import { categoryMap } from '../insights/service';
 
 interface Range {
   from: string;
@@ -129,14 +130,19 @@ export async function activityFor(deps: Deps, q: Queryable, orgId: string, userI
 }
 
 export async function appsFor(q: Queryable, orgId: string, userId: string, r: Range): Promise<AppUsageResponse> {
-  const apps = await many<AppUsageResponse['apps'][number]>(
+  const apps = await many<Omit<AppUsageResponse['apps'][number], 'category'>>(
     q,
     `SELECT app_identifier, max(app_name) AS app_name, domain, sum(duration_seconds)::int AS seconds
      FROM app_usage WHERE organization_id = $1 AND user_id = $2 AND started_at >= $3 AND started_at < $4
      GROUP BY app_identifier, domain ORDER BY seconds DESC LIMIT 50`,
     [orgId, userId, r.from, r.to],
   );
-  return { from: r.from, to: r.to, apps };
+  const categories = await categoryMap(q, orgId, userId);
+  return {
+    from: r.from,
+    to: r.to,
+    apps: apps.map((a) => ({ ...a, category: categories.get(a.app_identifier.toLowerCase()) ?? null })),
+  };
 }
 
 // ───────────── team & project reports ─────────────

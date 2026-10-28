@@ -44,6 +44,10 @@ export async function createEnrollmentCode(
   return { code, expires_at: expires, user_id: userId };
 }
 
+export function dashboardUrl(deps: Deps): string {
+  return `${deps.config.webUrl}/me`;
+}
+
 export async function enroll(
   deps: Deps,
   q: Queryable,
@@ -84,6 +88,7 @@ export async function enroll(
     organization_id: codeRow.organization_id,
     device_credential: credential,
     policy_signing_key: { key_id: key.keyId, public_key_b64: key.publicKeyB64 },
+    dashboard_url: dashboardUrl(deps),
   };
 }
 
@@ -117,6 +122,7 @@ export async function heartbeat(
     policy_revision: await orgRevision(q, device.organizationId),
     credential_status: 'active',
     license: license === 'grace' && sub.grace_ends_at ? { status: license, grace_ends_at: sub.grace_ends_at } : { status: license },
+    dashboard_url: dashboardUrl(deps),
   };
 }
 

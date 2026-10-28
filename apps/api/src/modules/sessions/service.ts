@@ -1,6 +1,7 @@
 import type { Deps, DeviceActor } from '../../context';
 import { one, type Queryable } from '../../db/pool';
 import { resolveFor } from '../policy/service';
+import { emitEvent } from '../webhooks/service';
 
 /**
  * Work-session lifecycle (system design §6.2, TIME-01..07). Used by both the
@@ -125,6 +126,12 @@ export async function startSession(
     ],
   );
   await transition(q, row!, 'active', input.at, 'start');
+  await emitEvent(q, device.organizationId, 'session.started', {
+    session_id: row!.id,
+    user_id: row!.user_id,
+    project_id: row!.project_id,
+    started_at: row!.started_at,
+  });
   return { ok: true };
 }
 
@@ -152,5 +159,13 @@ export async function changeSessionState(
     await q.query(`UPDATE work_sessions SET state = $2, updated_at = now() WHERE id = $1`, [s.id, to]);
   }
   await transition(q, s, to, when, reason);
+  if (to === 'stopped') {
+    await emitEvent(q, s.organization_id, 'session.stopped', {
+      session_id: s.id,
+      user_id: s.user_id,
+      project_id: s.project_id,
+      ended_at: when.toISOString(),
+    });
+  }
   return { ok: true };
 }

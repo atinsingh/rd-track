@@ -3,6 +3,7 @@ import {
   PLANS,
   licenseState,
   seatCeiling,
+  type Entitlement,
   type PlanId,
   type SubscriptionDTO,
   type SubscriptionStatus,
@@ -368,4 +369,11 @@ export async function snapshotSeats(q: Queryable, now: Date): Promise<number> {
     [now.toISOString().slice(0, 10)],
   );
   return r.rowCount ?? 0;
+}
+
+/** 402 unless the organization's plan (trials count as Pro) includes `entitlement`. */
+export async function assertEntitlement(q: Queryable, orgId: string, entitlement: Entitlement, now: Date, what: string): Promise<void> {
+  const sub = await currentSubscription(q, orgId, now);
+  const plan = sub.status === 'trialing' ? 'pro' : sub.plan;
+  if (!PLANS[plan].entitlements.includes(entitlement)) throw errors.paymentRequired(`${what} is not included in your plan.`);
 }

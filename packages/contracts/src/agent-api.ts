@@ -20,6 +20,8 @@ export interface EnrollResponse {
   organization_id: string;
   device_credential: string;
   policy_signing_key: { key_id: string; public_key_b64: string };
+  /** The employee's own dashboard, opened by the tray's "My dashboard". */
+  dashboard_url: string;
 }
 
 export const heartbeatRequest = z.strictObject({
@@ -38,6 +40,12 @@ export interface HeartbeatResponse {
   policy_revision: number;
   credential_status: 'active' | 'revoked';
   license: { status: LicenseState; grace_ends_at?: string };
+  dashboard_url: string;
+}
+
+/** `GET /v1/device/projects`: what the device's user may book time to (tray pickers). */
+export interface DeviceProjectsResponse {
+  projects: { id: string; name: string; tasks: { id: string; name: string }[] }[];
 }
 
 export const devicePolicyQuery = z.object({ project_id: uuid.optional() });
