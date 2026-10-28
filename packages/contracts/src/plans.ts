@@ -22,6 +22,15 @@ export const ENTITLEMENTS = [
   'extended_retention',
   'data_residency',
   'mdm',
+  /** weekly timesheets with submit/approve, limits and overtime */
+  'timesheets',
+  'time_off',
+  /** pay/bill rates, project budgets, clients, invoices, payroll export */
+  'budgets_invoicing',
+  'schedules',
+  /** team-level (aggregate) insights; personal insights are on every plan */
+  'team_insights',
+  'webhooks',
 ] as const;
 export type Entitlement = (typeof ENTITLEMENTS)[number];
 
@@ -60,7 +69,7 @@ export const PLANS: Record<PlanId, Plan> = {
     price_per_seat_cents: 250,
     max_billable_seats: null,
     allows_overage: true,
-    entitlements: ['correction_approvals'],
+    entitlements: ['correction_approvals', 'timesheets', 'time_off'],
     policyScope: BASE_RESTRICTIONS,
   },
   pro: {
