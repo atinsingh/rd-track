@@ -1,4 +1,11 @@
 import type {
+  AppCategory,
+  AppCategoryDTO,
+  PersonalInsights,
+  TeamInsights,
+  WebhookDeliveryDTO,
+  WebhookEndpointDTO,
+  WebhookEventType,
   MemberVisibility,
   ChangePlanResponse,
   ActivityResponse,
@@ -268,12 +275,15 @@ export const rd = {
     policy: (signal?: AbortSignal) => get<MyPolicyResponse>('/v1/me/policy', { signal }),
     accessLog: (signal?: AbortSignal) => list<AuditEventDTO>('/v1/me/access-log', { signal }),
     projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/me/projects', { signal }),
+    insights: (r: Range, tz: string, signal?: AbortSignal) => get<PersonalInsights>('/v1/me/insights', { query: { ...r, tz }, signal }),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {
     list: (signal?: AbortSignal) => list<TeamSummary>('/v1/teams', { signal }),
     report: (id: string, r: Range, tz: string, signal?: AbortSignal, projectId?: string | null) =>
       get<TeamReport>(`/v1/teams/${enc(id)}/report`, { query: { ...r, tz, ...(projectId ? { project_id: projectId } : {}) }, signal }),
+    insights: (id: string, r: Range, tz: string, signal?: AbortSignal) =>
+      get<TeamInsights>(`/v1/teams/${enc(id)}/insights`, { query: { ...r, tz }, signal }),
   },
   projects: {
     list: (signal?: AbortSignal) => list<ProjectDTO>('/v1/projects', { signal }),
@@ -324,6 +334,17 @@ export const rd = {
       list<DeletionRequestDTO>('/v1/admin/deletion-requests', { signal }),
     approveDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/approve`)),
     rejectDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/reject`)),
+    appCategories: (signal?: AbortSignal) => list<AppCategoryDTO>('/v1/admin/app-categories', { signal }),
+    setAppCategory: (body: { app_identifier: string; category: AppCategory; team_id?: string | null }) =>
+      put<AppCategoryDTO>('/v1/admin/app-categories', body),
+    deleteAppCategory: (id: string) => ok(del(`/v1/admin/app-categories/${enc(id)}`)),
+    webhooks: (signal?: AbortSignal) => list<WebhookEndpointDTO>('/v1/admin/webhooks', { signal }),
+    createWebhook: (body: { url: string; description?: string; events: WebhookEventType[] }) =>
+      post<WebhookEndpointDTO>('/v1/admin/webhooks', body),
+    deleteWebhook: (id: string) => ok(del(`/v1/admin/webhooks/${enc(id)}`)),
+    testWebhook: (id: string) => ok(post(`/v1/admin/webhooks/${enc(id)}/test`)),
+    webhookDeliveries: (id: string, signal?: AbortSignal) =>
+      list<WebhookDeliveryDTO>(`/v1/admin/webhooks/${enc(id)}/deliveries`, { signal }),
   },
   policies: {
     list: (signal?: AbortSignal) => get<PolicyListResponse>('/v1/policies', { signal }),

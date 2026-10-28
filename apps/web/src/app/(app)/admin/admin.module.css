@@ -95,3 +95,15 @@
   color: var(--warn-text);
   font-weight: 500;
 }
+
+/* A one-time secret on a light dialog (webhook signing secret). */
+.secret {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  word-break: break-all;
+  padding: 14px 16px;
+  border: 1px solid var(--rule);
+  background: var(--canvas);
+  color: var(--text);
+  user-select: all;
+}

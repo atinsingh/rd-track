@@ -8,7 +8,8 @@ export type Capability =
   | 'projects'
   | 'admin'
   | 'audit'
-  | 'exports';
+  | 'exports'
+  | 'webhooks';
 
 export interface Access {
   role: OrgRole;
@@ -45,6 +46,8 @@ export function can(a: Access, c: Capability): boolean {
       return a.managesProjects;
     case 'admin':
       return a.isAdmin;
+    case 'webhooks':
+      return a.isAdmin && a.entitlements.includes('webhooks');
     case 'audit':
       return a.isAdmin || a.isAuditor;
   }
@@ -67,6 +70,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: '/me', label: 'My day', capability: 'me' },
       { href: '/me/time', label: 'My time', capability: 'me' },
+      { href: '/me/insights', label: 'Insights', capability: 'me' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
       { href: '/me/privacy', label: "What's collected", capability: 'me' },
       { href: '/exports', label: 'Exports', capability: 'exports' },
@@ -87,6 +91,8 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/teams', label: 'Teams and projects', capability: 'admin' },
       { href: '/admin/devices', label: 'Devices', capability: 'admin' },
       { href: '/admin/policies', label: 'Policies', capability: 'admin' },
+      { href: '/admin/apps', label: 'Work apps', capability: 'admin' },
+      { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks' },
       { href: '/admin/requests', label: 'Deletion requests', capability: 'admin' },
       { href: '/admin/billing', label: 'Billing', capability: 'admin' },
       { href: '/audit', label: 'Audit log', capability: 'audit' },

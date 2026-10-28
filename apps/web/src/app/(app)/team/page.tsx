@@ -3,15 +3,17 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import type { CorrectionDTO, MemberReportRow, TeamReport } from '@rd/contracts';
+import type { Range } from '@/lib/api';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
+import { Stats } from '@/components/Stats';
 import { ActivityInfo } from '@/components/ui/ActivityInfo';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataState';
 import { InlineSelect } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName, durationOrDash, formatDuration, plural } from '@/lib/format';
+import { byName, durationOrDash, formatDuration, percentOrDash, plural } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
@@ -139,6 +141,48 @@ function MembersTable({ report, week }: { report: TeamReport; week: string }) {
   );
 }
 
+/** Aggregates only, for teams large enough that nobody can be singled out (RPT-07). */
+function TeamInsightsCard({ teamId, range, tz, isAdmin }: { teamId: string; range: Range; tz: string; isAdmin: boolean }) {
+  const insights = useApi(`team:insights|${teamId}|${range.from}|${tz}`, (signal) => rd.teams.insights(teamId, range, tz, signal));
+  const e = insights.error;
+  return (
+    <Card title="Team wellbeing" subtitle="Averages per person · no individual figures">
+      {e?.code === 'insufficient_group_size' ? (
+        <Empty title="Not shown for small teams">{e.message}</Empty>
+      ) : e?.status === 402 ? (
+        <Empty title="Team insights are part of Pro">
+          {isAdmin ? <Link href="/admin/billing">Compare plans →</Link> : 'Ask an org admin about upgrading.'}
+        </Empty>
+      ) : e ? (
+        <ErrorState error={e} onRetry={insights.reload} />
+      ) : !insights.data ? (
+        <Loading label="Loading team insights" />
+      ) : (
+        <Stats
+          items={[
+            { label: 'Tracked / person', value: formatDuration(insights.data.per_person.tracked_seconds) },
+            {
+              label: 'Focus / person',
+              value: formatDuration(insights.data.per_person.focus_seconds),
+              note: `${percentOrDash(insights.data.focus_share_percent)} of tracked`,
+            },
+            {
+              label: 'Outside hours / person',
+              value: formatDuration(insights.data.per_person.after_hours_seconds),
+              note: `${insights.data.people_with_after_hours} of ${insights.data.member_count} people`,
+            },
+            {
+              label: 'People with a long day',
+              value: `${insights.data.people_with_long_days} / ${insights.data.member_count}`,
+              note: 'More than 10 hours tracked',
+            },
+          ]}
+        />
+      )}
+    </Card>
+  );
+}
+
 export default function TeamPage() {
   const { access, timezone: tz } = useMe();
   const [teamId, setTeamId] = useState<string | null>(null);
@@ -232,6 +276,7 @@ export default function TeamPage() {
             <Attention report={report.data} pending={pending.data ?? []} />
           </div>
           <StackedDailyChart title="Team hours by project, per day" daily={report.data.daily} tz={tz} />
+          <TeamInsightsCard teamId={current.id} range={{ from: range.from, to: range.to }} tz={tz} isAdmin={access.isAdmin} />
         </>
       )}
     </>
