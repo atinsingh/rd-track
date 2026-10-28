@@ -47,6 +47,7 @@ function Values({ v, tz, projectName, label }: { v: CorrectionValues | null; tz:
 }
 
 function Review({ c, tz, projectName, onDone }: { c: CorrectionDTO; tz: string; projectName: (id: string | null) => string; onDone: (id: string) => void }) {
+  const named = (id: string | null) => (id && c.project_names?.[id]) || projectName(id);
   const [note, setNote] = useState('');
   const action = useAction();
   const decide = async (approve: boolean) => {
@@ -55,12 +56,12 @@ function Review({ c, tz, projectName, onDone }: { c: CorrectionDTO; tz: string; 
   };
   return (
     <Card
-      title={`${c.user_name} · ${c.kind === 'manual_add' ? 'Manual time' : 'Correction'}`}
+      title={`${c.user_name} · ${c.kind === 'manual_add' ? 'Manual time' : c.kind === 'idle_reassign' ? 'Idle time moved' : 'Correction'}`}
       subtitle={`Submitted ${formatDateTime(c.created_at, tz)}`}
     >
       <div className={s.compare}>
-        <Values v={c.original} tz={tz} projectName={projectName} label="Original" />
-        <Values v={c.requested} tz={tz} projectName={projectName} label="Requested" />
+        <Values v={c.original} tz={tz} projectName={named} label="Original" />
+        <Values v={c.requested} tz={tz} projectName={named} label="Requested" />
       </div>
       <p>
         <span className="label-mono">Reason</span>

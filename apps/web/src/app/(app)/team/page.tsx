@@ -39,7 +39,7 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
           <span className={s.attTitle}>{plural(mine.length, 'correction')} to review →</span>
           {first ? (
             <span className={s.attBody}>
-              {first.user_name} · {first.kind === 'manual_add' ? 'manual time' : 'edit'} · “{first.reason}”
+              {first.user_name} · {first.kind === 'manual_add' ? 'manual time' : first.kind === 'idle_reassign' ? 'idle time moved' : 'edit'} · “{first.reason}”
             </span>
           ) : null}
         </Link>

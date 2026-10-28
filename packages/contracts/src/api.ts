@@ -77,6 +77,22 @@ export interface SessionDTO {
   active_seconds: number;
   idle_seconds: number;
   paused_seconds: number;
+  /** Idle time the person removed or moved on return (Stage 4 F1). `keep` is not listed. */
+  idle_adjustments: IdleAdjustmentDTO[];
+}
+
+export interface IdleAdjustmentDTO {
+  id: string;
+  idle_started_at: string;
+  idle_ended_at: string;
+  seconds: number;
+  decision: 'discard' | 'reassign';
+  /** applied: in effect · pending: a move waiting for approval · rejected: no effect */
+  status: 'applied' | 'pending' | 'rejected';
+  /** `week_locked`, `unknown_project` */
+  status_reason: string | null;
+  /** Target project of a move. */
+  project_name: string | null;
 }
 
 export interface ActivityBucketDTO {
@@ -202,7 +218,7 @@ export interface CorrectionDTO {
   user_id: string;
   user_name: string;
   session_id: string | null;
-  kind: 'edit' | 'manual_add';
+  kind: 'edit' | 'manual_add' | 'idle_reassign';
   original: CorrectionValues | null;
   requested: CorrectionValues;
   reason: string;
@@ -211,6 +227,8 @@ export interface CorrectionDTO {
   reviewed_at: string | null;
   review_note: string | null;
   created_at: string;
+  /** Names of the projects in `original` and `requested`, so a reviewer who doesn't manage them still reads names. */
+  project_names: Record<string, string>;
 }
 export const reviewRequest = z.strictObject({ note: z.string().max(1000).optional() });
 

@@ -175,7 +175,7 @@ export default function MyTimePage() {
                       .map((c) => (
                         <tr key={c.id}>
                           <td className="mono small">{formatDateTime(c.created_at, tz)}</td>
-                          <td>{c.kind === 'manual_add' ? 'Manual time' : 'Edit'}</td>
+                          <td>{c.kind === 'manual_add' ? 'Manual time' : c.kind === 'idle_reassign' ? 'Idle time moved' : 'Edit'}</td>
                           <td className="mono small">{valuesText(c.original, tz)}</td>
                           <td className="mono small">{valuesText(c.requested, tz)}</td>
                           <td className="small secondary">{c.reason}</td>

@@ -121,6 +121,12 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
     min: 60,
     max: 1800,
   },
+  'idle.prompt_on_return': {
+    group: 'Sessions',
+    label: 'Ask on return from idle',
+    help: 'The agent asks whether to keep, remove or move idle time. Off: idle time is kept without asking',
+    kind: 'bool',
+  },
   'session.allow_overlapping_sessions': {
     group: 'Sessions',
     label: 'Allow overlapping sessions',

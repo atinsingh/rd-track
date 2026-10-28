@@ -3,6 +3,7 @@ import type { SessionDTO } from '@rd/contracts';
 import { Card } from '@/components/ui/Layout';
 import { Empty } from '@/components/ui/DataState';
 import { formatDuration } from '@/lib/format';
+import { idleNotes } from '@/lib/idle';
 import { formatTime } from '@/lib/time';
 import s from './day.module.css';
 
@@ -35,6 +36,11 @@ export function SessionsList({ sessions, tz, action }: { sessions: readonly Sess
               <span className={s.sessionWhat}>
                 <span className={s.sessionTitle}>{sessionTitle(x)}</span>
                 <span className={s.sessionNote}>{sessionNote(x)}</span>
+                {idleNotes(x, tz).map((n) => (
+                  <span key={n} className={s.sessionNote}>
+                    {n}
+                  </span>
+                ))}
               </span>
               <span className={s.sessionDur}>{formatDuration(x.tracked_seconds)}</span>
             </li>

@@ -11,6 +11,7 @@ import { migrate } from './db/migrate';
 import { hashPassword, randomToken, sha256Hex } from './lib/crypto';
 import { createOrganization } from './modules/platform/routes';
 import { MemoryObjectStore } from './storage/object-store';
+import { recordIdleDecision } from './modules/idle/service';
 import { ConsoleEmailSender } from './email/sender';
 
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'track-demo-2026';
@@ -209,6 +210,20 @@ async function main() {
         const proj = name === 'sara' ? internal : rand() < 0.65 ? clientA : clientB;
         await demoDay(q, orgId, uid, dev!.id, proj, day, name === 'tom' && d === 2 ? 'permission_missing' : 'ok');
       }
+    }
+    // Stage 4 F1: on her latest day Priya removed one idle run and asked to move another.
+    const last = await one<{ id: string; device_id: string; started_at: string; ended_at: string }>(
+      q,
+      `SELECT id, device_id, started_at, ended_at FROM work_sessions WHERE user_id = $1 AND source = 'agent' ORDER BY started_at DESC LIMIT 1`,
+      [priya],
+    );
+    if (last) {
+      const t0 = new Date(last.started_at).getTime();
+      const span = (fromMin: number, len: number) => [new Date(t0 + fromMin * 60_000).toISOString(), new Date(t0 + (fromMin + len) * 60_000).toISOString()] as const;
+      const [a1, a2] = span(52, 18);
+      const [b1, b2] = span(118, 25);
+      await recordIdleDecision(deps, q, last.device_id, { eventId: randomUUID(), sessionId: last.id, startedAt: a1, endedAt: a2, decision: 'discard', projectId: null, taskId: null });
+      await recordIdleDecision(deps, q, last.device_id, { eventId: randomUUID(), sessionId: last.id, startedAt: b1, endedAt: b2, decision: 'reassign', projectId: internal, taskId: null });
     }
     console.log(`Seeded organization "RoundDigital" (${orgId}).`);
   });
