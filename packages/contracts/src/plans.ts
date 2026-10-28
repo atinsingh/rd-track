@@ -34,11 +34,15 @@ export const ENTITLEMENTS = [
 ] as const;
 export type Entitlement = (typeof ENTITLEMENTS)[number];
 
+/** Billing term: month to month, or an annual term at half the monthly price. */
+export const BILLING_INTERVALS = ['month', 'year'] as const;
+export type BillingInterval = (typeof BILLING_INTERVALS)[number];
+
 export interface Plan {
   id: PlanId;
   name: string;
-  /** Monthly price per billable seat in US cents. */
-  price_per_seat_cents: number;
+  /** Price per billable seat per month, in US cents, by billing term (an annual term is billed 12× up front). */
+  prices: Record<BillingInterval, number>;
   /** Maximum billable seats; null = unlimited. */
   max_billable_seats: number | null;
   /** Whether billable seats may exceed licensed seats by the overage allowance. */
@@ -57,7 +61,7 @@ export const PLANS: Record<PlanId, Plan> = {
   free: {
     id: 'free',
     name: 'Free',
-    price_per_seat_cents: 0,
+    prices: { month: 0, year: 0 },
     max_billable_seats: 2,
     allows_overage: false,
     entitlements: [],
@@ -66,7 +70,7 @@ export const PLANS: Record<PlanId, Plan> = {
   standard: {
     id: 'standard',
     name: 'Standard',
-    price_per_seat_cents: 250,
+    prices: { month: 500, year: 250 },
     max_billable_seats: null,
     allows_overage: true,
     entitlements: ['correction_approvals', 'timesheets', 'time_off'],
@@ -75,7 +79,7 @@ export const PLANS: Record<PlanId, Plan> = {
   pro: {
     id: 'pro',
     name: 'Pro',
-    price_per_seat_cents: 500,
+    prices: { month: 1000, year: 500 },
     max_billable_seats: null,
     allows_overage: true,
     entitlements: [...ENTITLEMENTS],
@@ -87,6 +91,16 @@ export const PLANS: Record<PlanId, Plan> = {
 export const TRIAL_PLAN: PlanId = 'pro';
 export const TRIAL_DAYS = 14;
 export const GRACE_DAYS = 14;
+
+/** Per seat per month for the term; `override` is a negotiated price that replaces the list price. */
+export function seatPriceCents(plan: PlanId, interval: BillingInterval, override?: number | null): number {
+  return override ?? PLANS[plan].prices[interval];
+}
+
+/** Months charged per invoice for the term. */
+export function monthsPerInvoice(interval: BillingInterval): number {
+  return interval === 'year' ? 12 : 1;
+}
 
 export function hasEntitlement(plan: PlanId, e: Entitlement): boolean {
   return PLANS[plan].entitlements.includes(e);

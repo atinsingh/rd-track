@@ -2,7 +2,10 @@ import {
   GRACE_DAYS,
   PLANS,
   licenseState,
+  monthsPerInvoice,
   seatCeiling,
+  seatPriceCents,
+  type BillingInterval,
   type Entitlement,
   type PlanId,
   type SubscriptionDTO,
@@ -20,6 +23,7 @@ interface SubscriptionRow {
   plan: PlanId;
   status: SubscriptionStatus;
   seats: number;
+  billing_interval: BillingInterval;
   price_per_seat_cents: number | null;
   trial_ends_at: string | null;
   grace_ends_at: string | null;
@@ -115,8 +119,9 @@ export async function subscriptionDTO(q: Queryable, orgId: string, now: Date): P
   const sub = await currentSubscription(q, orgId, now);
   const { billable, viewer } = await seatCounts(q, orgId);
   const plan = PLANS[sub.plan];
-  const price = sub.price_per_seat_cents ?? plan.price_per_seat_cents;
+  const price = seatPriceCents(sub.plan, sub.billing_interval, sub.price_per_seat_cents);
   const chargedSeats = sub.plan === 'free' ? 0 : Math.max(sub.seats, billable);
+  const monthly = sub.status === 'trialing' ? 0 : chargedSeats * price;
   return {
     plan: sub.plan,
     plan_name: sub.status === 'trialing' ? `${plan.name} trial` : plan.name,
@@ -126,8 +131,10 @@ export async function subscriptionDTO(q: Queryable, orgId: string, now: Date): P
     billable_seats: billable,
     viewer_seats: viewer,
     seat_ceiling: seatCeiling(sub.plan, sub.seats),
+    billing_interval: sub.billing_interval,
     price_per_seat_cents: price,
-    estimated_monthly_cents: sub.status === 'trialing' ? 0 : chargedSeats * price,
+    estimated_monthly_cents: monthly,
+    estimated_invoice_cents: monthly * monthsPerInvoice(sub.billing_interval),
     trial_ends_at: sub.trial_ends_at,
     grace_ends_at: sub.grace_ends_at,
     current_period_end: sub.current_period_end,
@@ -153,10 +160,39 @@ function stripeFor(deps: Pick<Deps, 'config'>): StripeClient {
   return new StripeClient(deps.config.billing.stripe.secretKey, deps.config.billing.stripe.apiBase);
 }
 
-function stripePrice(deps: Pick<Deps, 'config'>, plan: PlanId): string {
-  const price = plan === 'pro' ? deps.config.billing.stripe.prices.pro : deps.config.billing.stripe.prices.standard;
-  if (!price) throw new AppError(500, 'billing_not_configured', `No Stripe price configured for ${plan}`);
+function stripePrice(deps: Pick<Deps, 'config'>, plan: Exclude<PlanId, 'free'>, interval: BillingInterval): string {
+  const price = deps.config.billing.stripe.prices[plan][interval];
+  if (!price) throw new AppError(500, 'billing_not_configured', `No Stripe price configured for ${plan} (${interval})`);
   return price;
+}
+
+/** The plan and term a Stripe price stands for, or null for a price this deployment doesn't sell. */
+function planForPrice(deps: Pick<Deps, 'config'>, priceId: string | undefined): { plan: Exclude<PlanId, 'free'>; interval: BillingInterval } | null {
+  if (!priceId) return null;
+  for (const plan of ['standard', 'pro'] as const)
+    for (const interval of ['month', 'year'] as const)
+      if (deps.config.billing.stripe.prices[plan][interval] === priceId) return { plan, interval };
+  return null;
+}
+
+/**
+ * An annual term is a commitment: seats and plan can change during it (prorated),
+ * but moving to monthly billing waits for the renewal date.
+ */
+function assertTermChange(before: SubscriptionRow, plan: PlanId, interval: BillingInterval, now: Date) {
+  const inAnnualTerm =
+    before.plan !== 'free' &&
+    before.billing_interval === 'year' &&
+    before.status !== 'trialing' &&
+    before.current_period_end !== null &&
+    new Date(before.current_period_end) > now;
+  if (inAnnualTerm && plan !== 'free' && interval === 'month') {
+    throw errors.conflict(
+      'annual_term_active',
+      `Your annual term runs until ${before.current_period_end!.slice(0, 10)}. You can switch to monthly billing from that date.`,
+      { current_period_end: before.current_period_end },
+    );
+  }
 }
 
 /**
@@ -168,7 +204,7 @@ export async function changePlan(
   deps: Deps,
   q: Queryable,
   actor: UserActor,
-  input: { plan: PlanId; seats: number },
+  input: { plan: PlanId; seats: number; interval?: BillingInterval },
   requestId?: string,
 ): Promise<ChangePlanResponse> {
   const now = deps.now();
@@ -177,6 +213,10 @@ export async function changePlan(
   const { billable } = await seatCounts(q, orgId);
   const seats = input.plan === 'free' ? 0 : input.seats;
   validatePlanChange(input.plan, seats, billable);
+  // Free has no term; a paid plan keeps its term unless one is chosen (month for a first paid plan).
+  const interval: BillingInterval =
+    input.plan === 'free' ? 'month' : (input.interval ?? (before.plan === 'free' || before.status === 'trialing' ? 'month' : before.billing_interval));
+  assertTermChange(before, input.plan, interval, now);
 
   let checkoutUrl: string | null = null;
   let applyLocally = true;
@@ -194,7 +234,7 @@ export async function changePlan(
       await stripe.updateSubscriptionItem({
         subscription: before.provider_subscription_id!,
         item: before.provider_subscription_item_id!,
-        price: stripePrice(deps, input.plan),
+        price: stripePrice(deps, input.plan, interval),
         quantity: seats,
       });
     } else {
@@ -210,7 +250,7 @@ export async function changePlan(
       }
       const session = await stripe.createCheckoutSession({
         customer,
-        price: stripePrice(deps, input.plan),
+        price: stripePrice(deps, input.plan, interval),
         quantity: seats,
         organizationId: orgId,
         successUrl: `${deps.config.webUrl}/admin/billing?checkout=success`,
@@ -222,11 +262,17 @@ export async function changePlan(
   }
 
   if (applyLocally) {
+    // A new term (first paid plan, or monthly → annual) starts today; otherwise the current one runs on.
+    const newTerm = before.plan === 'free' || before.status === 'trialing' || before.billing_interval !== interval || !before.current_period_end;
+    const termEnd = new Date(now);
+    if (interval === 'year') termEnd.setUTCFullYear(termEnd.getUTCFullYear() + 1);
+    else termEnd.setUTCMonth(termEnd.getUTCMonth() + 1);
     await q.query(
-      `UPDATE subscriptions SET plan = $2, seats = $3, status = 'active', grace_ends_at = NULL, trial_ends_at = NULL,
-         current_period_start = $4, current_period_end = COALESCE(current_period_end, $5), updated_at = now()
+      `UPDATE subscriptions SET plan = $2, seats = $3, billing_interval = $4, status = 'active', grace_ends_at = NULL, trial_ends_at = NULL,
+         current_period_start = CASE WHEN $5::boolean THEN $6 ELSE current_period_start END,
+         current_period_end = CASE WHEN $5::boolean THEN $7 ELSE current_period_end END, updated_at = now()
        WHERE organization_id = $1`,
-      [orgId, input.plan, seats, now.toISOString(), new Date(now.getTime() + 30 * DAY).toISOString()],
+      [orgId, input.plan, seats, interval, newTerm, now.toISOString(), termEnd.toISOString()],
     );
   }
   await audit(q, {
@@ -236,7 +282,15 @@ export async function changePlan(
     targetType: 'subscription',
     targetId: orgId,
     requestId,
-    metadata: { from_plan: before.plan, to_plan: input.plan, from_seats: before.seats, to_seats: seats, provider: deps.config.billing.provider },
+    metadata: {
+      from_plan: before.plan,
+      to_plan: input.plan,
+      from_seats: before.seats,
+      to_seats: seats,
+      from_interval: before.billing_interval,
+      to_interval: interval,
+      provider: deps.config.billing.provider,
+    },
   });
   return { subscription: await subscriptionDTO(q, orgId, now), checkout_url: checkoutUrl };
 }
@@ -299,25 +353,24 @@ export async function applyStripeEvent(deps: Deps, q: Queryable, event: StripeEv
     case 'customer.subscription.created':
     case 'customer.subscription.updated': {
       const item = obj.items?.data?.[0];
-      const priceId = item?.price?.id;
-      const prices = deps.config.billing.stripe.prices;
-      const plan: PlanId | null = priceId === prices.pro ? 'pro' : priceId === prices.standard ? 'standard' : null;
+      const sold = planForPrice(deps, item?.price?.id);
       const status = STRIPE_STATUS[obj.status as string];
-      if (!plan || !status) {
-        outcome = `ignored:${plan ? 'status' : 'price'}`;
+      if (!sold || !status) {
+        outcome = `ignored:${sold ? 'status' : 'price'}`;
         break;
       }
+      const { plan, interval } = sold;
       const periodEnd = item?.current_period_end ?? obj.current_period_end;
       await q.query(
-        `UPDATE subscriptions SET provider = 'stripe', plan = $2, seats = $3, status = $4,
+        `UPDATE subscriptions SET provider = 'stripe', plan = $2, seats = $3, status = $4, billing_interval = $10,
            provider_customer_id = $5, provider_subscription_id = $6, provider_subscription_item_id = $7,
            cancel_at_period_end = $8, current_period_end = $9, trial_ends_at = NULL,
            grace_ends_at = CASE WHEN $4 = 'active' THEN NULL ELSE grace_ends_at END, updated_at = now()
          WHERE organization_id = $1`,
         [orgId, plan, item.quantity ?? 0, status, obj.customer, obj.id, item.id, Boolean(obj.cancel_at_period_end),
-          periodEnd ? new Date(periodEnd * 1000).toISOString() : null],
+          periodEnd ? new Date(periodEnd * 1000).toISOString() : null, interval],
       );
-      outcome = `subscription:${plan}:${status}`;
+      outcome = `subscription:${plan}:${interval}:${status}`;
       break;
     }
     case 'customer.subscription.deleted': {

@@ -15,6 +15,8 @@ policy_signing_key_id = "staging-1"
 billing_provider      = "manual"
 # stripe_price_standard = "price_..."
 # stripe_price_pro      = "price_..."
+# stripe_price_standard_annual = "price_..."
+# stripe_price_pro_annual      = "price_..."
 
 alarm_emails = ["ops@rounddigital.example"]
 # alarm_topic_arn = "arn:aws:sns:ca-central-1:111111111111:existing-topic"

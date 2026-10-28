@@ -18,23 +18,25 @@ locals {
   rds_ca_bundle = "/usr/local/share/rds/rds-global-bundle.pem"
 
   app_environment = merge({
-    NODE_ENV                = "production"
-    PORT                    = "4000"
-    LOG_LEVEL               = "info"
-    DB_POOL_MAX             = "10"
-    STORAGE                 = "s3"
-    S3_BUCKET               = module.object_storage.bucket_name
-    S3_REGION               = local.region
-    PUBLIC_API_URL          = local.app_url
-    PUBLIC_WEB_URL          = local.app_url
-    POLICY_SIGNING_KEY_ID   = var.policy_signing_key_id
-    MFA_REQUIRED_FOR_ADMINS = "true"
-    EMAIL_PROVIDER          = "ses"
-    EMAIL_FROM              = var.email_from
-    SES_REGION              = local.region
-    BILLING_PROVIDER        = var.billing_provider
-    STRIPE_PRICE_STANDARD   = var.stripe_price_standard
-    STRIPE_PRICE_PRO        = var.stripe_price_pro
+    NODE_ENV                      = "production"
+    PORT                          = "4000"
+    LOG_LEVEL                     = "info"
+    DB_POOL_MAX                   = "10"
+    STORAGE                       = "s3"
+    S3_BUCKET                     = module.object_storage.bucket_name
+    S3_REGION                     = local.region
+    PUBLIC_API_URL                = local.app_url
+    PUBLIC_WEB_URL                = local.app_url
+    POLICY_SIGNING_KEY_ID         = var.policy_signing_key_id
+    MFA_REQUIRED_FOR_ADMINS       = "true"
+    EMAIL_PROVIDER                = "ses"
+    EMAIL_FROM                    = var.email_from
+    SES_REGION                    = local.region
+    BILLING_PROVIDER              = var.billing_provider
+    STRIPE_PRICE_STANDARD_MONTHLY = var.stripe_price_standard
+    STRIPE_PRICE_PRO_MONTHLY      = var.stripe_price_pro
+    STRIPE_PRICE_STANDARD_ANNUAL  = var.stripe_price_standard_annual
+    STRIPE_PRICE_PRO_ANNUAL       = var.stripe_price_pro_annual
   }, var.extra_app_environment)
 
   web_environment = {

@@ -70,6 +70,6 @@ describe('platform operators', () => {
     expect(s2.body).toMatchObject({ status: 'inactive', license: 'inactive' });
     // Choosing a plan restores service.
     const up = await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 3 });
-    expect(up.body.subscription).toMatchObject({ status: 'active', license: 'active', estimated_monthly_cents: 1500 });
+    expect(up.body.subscription).toMatchObject({ status: 'active', license: 'active', estimated_monthly_cents: 3000 }); // 3 × $10 month to month
   });
 });

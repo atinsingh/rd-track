@@ -4,7 +4,7 @@
 **Inputs:** `RoundDigital Workforce Activity & Time Platform` requirements (2026-10-28) and the architecture diagram.
 **Requirement IDs** (`TIME-04`, `SCR-07`, …) refer to that document.
 **Commercial model:** Track is sold as multi-tenant SaaS (Free up to 2 users, Standard
-$2.50, Pro $5 per user per month) — see [03-commercial-model.md](03-commercial-model.md)
+$2.50 / Pro $5 per user per month on an annual term, $5 / $10 month to month) — see [03-commercial-model.md](03-commercial-model.md)
 and [ADR-0004](../adr/0004-multi-tenant-saas.md). RoundDigital is the first tenant.
 
 This document turns the requirements into a buildable design: module boundaries, data

@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, type KeyObject } from 'node:crypto';
+import type { BillingInterval } from '@rd/contracts';
 
 export interface Config {
   env: 'development' | 'test' | 'production';
@@ -19,7 +20,7 @@ export interface Config {
   email: { provider: 'console' | 'ses' | 'memory'; from: string; region: string };
   billing: {
     provider: 'manual' | 'stripe';
-    stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: { standard: string; pro: string } };
+    stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: Record<'standard' | 'pro', Record<BillingInterval, string>> };
   };
   storage: {
     bucket: string;
@@ -87,7 +88,17 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
         secretKey: process.env.STRIPE_SECRET_KEY ?? '',
         webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
         apiBase: process.env.STRIPE_API_BASE ?? 'https://api.stripe.com',
-        prices: { standard: process.env.STRIPE_PRICE_STANDARD ?? '', pro: process.env.STRIPE_PRICE_PRO ?? '' },
+        // One Stripe price per plan and term. The *_MONTHLY names fall back to the older single-price names.
+        prices: {
+          standard: {
+            month: process.env.STRIPE_PRICE_STANDARD_MONTHLY ?? process.env.STRIPE_PRICE_STANDARD ?? '',
+            year: process.env.STRIPE_PRICE_STANDARD_ANNUAL ?? '',
+          },
+          pro: {
+            month: process.env.STRIPE_PRICE_PRO_MONTHLY ?? process.env.STRIPE_PRICE_PRO ?? '',
+            year: process.env.STRIPE_PRICE_PRO_ANNUAL ?? '',
+          },
+        },
       },
     },
     storage: {

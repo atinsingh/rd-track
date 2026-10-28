@@ -1,4 +1,5 @@
 import type {
+  BillingInterval,
   DirectoryResponse,
   ApprovalType,
   ApprovalsBatchResponse,
@@ -442,7 +443,8 @@ export const rd = {
   },
   billing: {
     subscription: (signal?: AbortSignal) => get<SubscriptionDTO>('/v1/billing/subscription', { signal }),
-    changePlan: (plan: PlanId, seats: number) => post<ChangePlanResponse>('/v1/billing/plan', { plan, seats }),
+    changePlan: (plan: PlanId, seats: number, interval?: BillingInterval) =>
+      post<ChangePlanResponse>('/v1/billing/plan', interval ? { plan, seats, interval } : { plan, seats }),
     portal: () => post<{ url: string }>('/v1/billing/portal', {}),
   },
   approvals: {

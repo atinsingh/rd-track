@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { timestamp, uuid } from './events';
 import { partialPolicySettingsSchema, type FieldSource, type PolicySettings, type ScopeType } from './policy';
 import type { CollectionChange } from './policy';
-import type { Entitlement, LicenseState, PlanId, SubscriptionStatus } from './plans';
+import { BILLING_INTERVALS, type BillingInterval, type Entitlement, type LicenseState, type PlanId, type SubscriptionStatus } from './plans';
 
 /**
  * Web/API request schemas and response shapes (system design §5.4).
@@ -477,8 +477,13 @@ export interface SubscriptionDTO {
   billable_seats: number;
   viewer_seats: number;
   seat_ceiling: number;
+  billing_interval: BillingInterval;
+  /** Per seat per month on this term. */
   price_per_seat_cents: number;
+  /** Seats × price, per month. */
   estimated_monthly_cents: number;
+  /** What one invoice comes to: the monthly estimate, or 12 months of it on an annual term. */
+  estimated_invoice_cents: number;
   trial_ends_at: string | null;
   grace_ends_at: string | null;
   current_period_end: string | null;
@@ -504,6 +509,8 @@ export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).ma
 export const changePlanRequest = z.strictObject({
   plan: z.enum(['free', 'standard', 'pro']),
   seats: z.number().int().min(0).max(100_000),
+  /** Omitted: keep the current term (month for a new paid plan). */
+  interval: z.enum(BILLING_INTERVALS).optional(),
 });
 
 export interface Page<T> {

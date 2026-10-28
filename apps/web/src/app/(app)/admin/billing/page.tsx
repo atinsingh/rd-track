@@ -3,12 +3,14 @@
 import { useState, useSyncExternalStore } from 'react';
 
 const noopSubscribe = () => () => {};
-import { PLANS, PLAN_IDS, type PlanId, type SubscriptionDTO } from '@rd/contracts';
+import { PLANS, PLAN_IDS, type BillingInterval, type PlanId, type SubscriptionDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
+import { Segmented } from '@/components/ui/Field';
 import { Banner, Card, Meter, PageHeader } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { annualSavingPercent, invoiceCents, price, seatPriceText } from '@/lib/billing';
 import { cx } from '@/lib/cx';
 import { formatMoney, plural } from '@/lib/format';
 import { useMe } from '@/lib/me';
@@ -122,7 +124,8 @@ export default function BillingPage() {
   const { access, timezone: tz, reload: reloadMe } = useMe();
   const sub = useApi(access.isAdmin ? 'billing:subscription' : null, (signal) => rd.billing.subscription(signal));
   const [seatsDraft, setSeatsDraft] = useState<string | null>(null);
-  const [switchTo, setSwitchTo] = useState<PlanId | null>(null);
+  const [switchTo, setSwitchTo] = useState<{ plan: PlanId; interval: BillingInterval } | null>(null);
+  const [term, setTerm] = useState<BillingInterval | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const seatAction = useAction();
   const planAction = useAction();
@@ -145,9 +148,16 @@ export default function BillingPage() {
   const minSeats = Math.min(d.billable_seats, maxSeats);
   const seatsValid = /^\d+$/.test(seatsText) && seats >= minSeats && seats <= maxSeats;
   const pricePerSeat = d.price_per_seat_cents;
+  const paid = d.plan !== 'free' && d.status !== 'trialing';
+  const annual = paid && d.billing_interval === 'year';
+  // Plans are shown on the current term; before a paid plan, the annual price leads.
+  const viewTerm: BillingInterval = term ?? (paid ? d.billing_interval : 'year');
+  const annualTermEnd = annual && d.current_period_end && new Date(d.current_period_end) > new Date() ? d.current_period_end : null;
+  const monthlyBlocked = viewTerm === 'month' && annualTermEnd !== null;
+  const invoiceLabel = paid && d.billing_interval === 'year' ? 'Each annual invoice' : 'Estimated this month';
 
-  const apply = async (target: PlanId, n: number, action: typeof seatAction) => {
-    const res = await action.run(() => rd.billing.changePlan(target, n));
+  const apply = async (target: PlanId, n: number, action: typeof seatAction, interval?: BillingInterval) => {
+    const res = await action.run(() => rd.billing.changePlan(target, n, interval));
     if (res?.checkout_url) {
       // New paid subscriptions are paid for on the provider's hosted page; the webhook applies them.
       window.location.assign(res.checkout_url);
@@ -164,7 +174,8 @@ export default function BillingPage() {
     return !!r;
   };
 
-  const target = switchTo ? PLANS[switchTo] : null;
+  const target = switchTo ? PLANS[switchTo.plan] : null;
+  const targetTerm = switchTo?.interval ?? 'month';
   const targetSeats = target ? Math.min(Math.max(d.seats, d.billable_seats), target.max_billable_seats ?? 100_000) : 0;
   const tooManyForTarget = !!target && target.max_billable_seats !== null && d.billable_seats > target.max_billable_seats;
   const losesScreenshots = !!target && d.entitlements.includes('screenshots') && !target.entitlements.includes('screenshots');
@@ -198,20 +209,22 @@ export default function BillingPage() {
             <h2 id="plan-h" className={s.planName}>
               {d.plan_name}
             </h2>
-            <span className={s.planPrice}>{pricePerSeat === 0 ? 'Free · up to 2 people' : `${formatMoney(pricePerSeat)} per user / month`}</span>
+            <span className={s.planPrice}>{pricePerSeat === 0 ? 'Free · up to 2 people' : seatPriceText(pricePerSeat, d.billing_interval)}</span>
           </div>
           <div className={s.status}>
             <span className={cx(s.statusDot, d.license !== 'active' && s.statusDotWarn)} aria-hidden="true" />
             {statusLine(d, tz)}
           </div>
           <div className={s.cost}>
-            <span>Estimated this month</span>
-            <span className={s.costValue}>{formatMoney(d.estimated_monthly_cents)}</span>
+            <span>{invoiceLabel}</span>
+            <span className={s.costValue}>{formatMoney(d.estimated_invoice_cents)}</span>
           </div>
           <span className={s.fine}>
             {pricePerSeat === 0
               ? 'No charge on Free.'
-              : `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${formatMoney(pricePerSeat)}. Seats added mid-month are prorated by day.`}
+              : d.billing_interval === 'year'
+                ? `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${price(pricePerSeat)} × 12 months. Seats added during the term are prorated by day.`
+                : `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${price(pricePerSeat)}. Seats added mid-month are prorated by day.`}
           </span>
           {d.billing_provider === 'stripe' ? (
             <Button
@@ -281,7 +294,9 @@ export default function BillingPage() {
               {plan.max_billable_seats !== null
                 ? `Free covers up to ${plan.max_billable_seats} people who track time.`
                 : `At least ${d.billable_seats} — that many people track time.`}
-              {seatsValid && seats !== d.seats && pricePerSeat > 0 ? ` New estimate ${formatMoney(pricePerSeat * Math.max(seats, d.billable_seats))} / month.` : ''}
+              {seatsValid && seats !== d.seats && pricePerSeat > 0
+                ? ` New estimate ${formatMoney(pricePerSeat * Math.max(seats, d.billable_seats) * (d.billing_interval === 'year' ? 12 : 1))} / ${d.billing_interval === 'year' ? 'year' : 'month'}.`
+                : ''}
             </span>
           </form>
           <ActionError error={seatAction.error} />
@@ -289,10 +304,34 @@ export default function BillingPage() {
       </div>
 
       <Card title="Plans" subtitle="Privacy protections — self-service, corrections, deletion requests, access audit — are in every plan.">
+        <div className={s.termRow}>
+          <Segmented<BillingInterval>
+            legend="Billing term"
+            name="term"
+            value={viewTerm}
+            onChange={setTerm}
+            describedBy="term-hint"
+            options={[
+              { value: 'year', label: `Annual term · save ${annualSavingPercent('pro')}%` },
+              { value: 'month', label: 'Month to month' },
+            ]}
+          />
+          <span id="term-hint" className="small secondary">
+            {monthlyBlocked
+              ? `Your annual term runs until ${day(annualTermEnd, tz)}. Month-to-month billing can start from that date.`
+              : viewTerm === 'year'
+                ? 'Billed once a year. Add seats any time; they are prorated to the end of the term.'
+                : 'Billed monthly. Change or cancel at the end of any month.'}
+          </span>
+        </div>
         <div className={s.plans}>
           {PLAN_IDS.map((id) => {
             const p = PLANS[id];
-            const current = id === d.plan;
+            const perMonth = p.prices[viewTerm];
+            // Free has no term; a paid plan is "current" only on the term being shown.
+            const current = id === d.plan && (id === 'free' || (paid && d.billing_interval === viewTerm));
+            const samePlanOtherTerm = id === d.plan && id !== 'free' && paid && !current;
+            const blocked = id !== 'free' && monthlyBlocked;
             return (
               <article key={id} className={cx(s.plan, current && s.planCurrent)} aria-labelledby={`plan-${id}`}>
                 <div className={s.planHead}>
@@ -300,9 +339,18 @@ export default function BillingPage() {
                   {current ? <span className={s.tag}>CURRENT</span> : null}
                 </div>
                 <div className={s.price}>
-                  <span className={s.priceValue}>{p.price_per_seat_cents === 0 ? '$0' : formatMoney(p.price_per_seat_cents).replace(/\.00$/, '')}</span>
+                  <span className={s.priceValue}>{price(perMonth)}</span>
                   <span className="small muted">{p.max_billable_seats !== null ? `up to ${p.max_billable_seats} people` : 'per user / month'}</span>
                 </div>
+                {perMonth > 0 ? (
+                  <span className={s.priceTerm}>
+                    {viewTerm === 'year'
+                      ? `Billed annually, ${price(perMonth * 12)} per user / year`
+                      : `Billed monthly · ${price(p.prices.year)} on an annual term`}
+                  </span>
+                ) : (
+                  <span className={s.priceTerm}>No card needed</span>
+                )}
                 <ul className={s.features}>
                   {PLAN_FEATURES[id].map((f) => (
                     <li key={f.text} className={f.on ? undefined : s.off}>
@@ -321,8 +369,8 @@ export default function BillingPage() {
                     Current plan
                   </Button>
                 ) : (
-                  <Button className={s.planBtn} onClick={() => setSwitchTo(id)}>
-                    Switch to {p.name}
+                  <Button className={s.planBtn} disabled={blocked} onClick={() => setSwitchTo({ plan: id, interval: viewTerm })}>
+                    {samePlanOtherTerm ? `Switch to ${viewTerm === 'year' ? 'annual' : 'monthly'} billing` : `Switch to ${p.name}`}
                   </Button>
                 )}
               </article>
@@ -344,16 +392,16 @@ export default function BillingPage() {
           setSwitchTo(null);
           planAction.reset();
         }}
-        title={target ? `Switch to ${target.name}?` : 'Switch plan'}
+        title={target ? (switchTo?.plan === d.plan ? `Switch to ${targetTerm === 'year' ? 'an annual term' : 'monthly billing'}?` : `Switch to ${target.name}?`) : 'Switch plan'}
         footer={
           <>
             <Button onClick={() => setSwitchTo(null)}>Cancel</Button>
             <Button
               variant="primary"
               disabled={planAction.busy || tooManyForTarget}
-              onClick={() => switchTo && void apply(switchTo, targetSeats, planAction)}
+              onClick={() => switchTo && void apply(switchTo.plan, targetSeats, planAction, switchTo.plan === 'free' ? undefined : switchTo.interval)}
             >
-              {planAction.busy ? 'Switching…' : `Switch to ${target?.name ?? ''} →`}
+              {planAction.busy ? 'Switching…' : 'Confirm →'}
             </Button>
           </>
         }
@@ -361,13 +409,23 @@ export default function BillingPage() {
         {target ? (
           <>
             <dl className={s.dlConfirm}>
+              <dt>Plan</dt>
+              <dd>{target.name}</dd>
               <dt>Price</dt>
-              <dd>{target.price_per_seat_cents === 0 ? '$0' : `${formatMoney(target.price_per_seat_cents)} per user / month`}</dd>
+              <dd>{target.id === 'free' ? '$0' : seatPriceText(target.prices[targetTerm], targetTerm)}</dd>
               <dt>Licensed seats</dt>
               <dd>{targetSeats}</dd>
-              <dt>Estimated monthly</dt>
-              <dd>{formatMoney(target.price_per_seat_cents * Math.max(targetSeats, d.billable_seats))}</dd>
+              <dt>{target.id !== 'free' && targetTerm === 'year' ? 'Each annual invoice' : 'Estimated monthly'}</dt>
+              <dd>{formatMoney(target.id === 'free' ? 0 : invoiceCents(target.id, targetTerm, Math.max(targetSeats, d.billable_seats)))}</dd>
             </dl>
+            {target.id !== 'free' && targetTerm === 'year' ? (
+              <p className="small secondary">
+                An annual term is a one-year commitment. During it you can change seats or plan (prorated by day); month-to-month billing can start from the renewal date.
+              </p>
+            ) : null}
+            {target.id === 'free' && annualTermEnd ? (
+              <p className="small secondary">Your paid annual term runs to {day(annualTermEnd, tz)}; you move to Free after that.</p>
+            ) : null}
             {tooManyForTarget ? (
               <Banner tone="warn" role="alert" title={`${d.billable_seats} people track time; ${target.name} allows ${target.max_billable_seats}`}>
                 Turn tracking off for {d.billable_seats - (target.max_billable_seats ?? 0)} of them in People first.

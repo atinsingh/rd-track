@@ -1,7 +1,8 @@
 # RoundDigital Track
 
 A transparent work-session, project-time and computer-activity platform, sold as
-multi-tenant SaaS (Free up to 2 users · Standard $2.50 · Pro $5 per user per month).
+multi-tenant SaaS (Free up to 2 tracked users · Standard $2.50 · Pro $5 per user per month on an annual
+term, or $5 / $10 month to month).
 
 - Employees explicitly start and stop work sessions; nothing is collected outside them.
 - Activity is aggregated per minute (counts, never keys or content); app names only.

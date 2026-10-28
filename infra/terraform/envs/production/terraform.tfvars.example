@@ -13,6 +13,8 @@ policy_signing_key_id = "production-1"
 billing_provider      = "manual" # switch to "stripe" after filling the Stripe secrets
 # stripe_price_standard = "price_..."
 # stripe_price_pro      = "price_..."
+# stripe_price_standard_annual = "price_..."
+# stripe_price_pro_annual      = "price_..."
 
 # Prefer an existing topic wired to the on-call tool:
 # alarm_topic_arn = "arn:aws:sns:ca-central-1:222222222222:oncall"

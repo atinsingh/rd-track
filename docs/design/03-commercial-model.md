@@ -24,10 +24,12 @@ rules keep that position credible:
 ## 2. Plans and prices
 
 Prices per **billable seat** (§3) per month, USD, as decided by RoundDigital on 2026-10-28.
+Terms confirmed on 2026-10-29: an annual term is half the month-to-month price.
 
 | | **Free** | **Standard** | **Pro** |
 |---|---|---|---|
-| Price | $0 | **$2.50** per user / month | **$5** per user / month |
+| Annual term | $0 | **$2.50** per user / month ($30 per user / year) | **$5** per user / month ($60 per user / year) |
+| Month to month | $0 | **$5** per user / month | **$10** per user / month |
 | Billable seats | up to 2 | unlimited | unlimited |
 | Work sessions, projects and tasks, idle detection | ✓ | ✓ | ✓ |
 | Computer activity (minute aggregates) and app names | ✓ | ✓ | ✓ |
@@ -45,16 +47,27 @@ Prices per **billable seat** (§3) per month, USD, as decided by RoundDigital on
 | MDM deployment packages, staged agent rollout | — | — | ✓ |
 | Support | Community / docs | Email | Email + chat |
 
-* **Free means the whole organization has at most 2 billable seats.** Adding a third
-  tracked user requires a paid plan, and then every billable seat is charged (the first
-  two are not free on paid plans). *Assumption — confirm.*
+* **Free means the whole organization has at most 2 billable seats** (people who track
+  time; admins, auditors and managers who don't track are free). Adding a third tracked
+  user requires a paid plan, and then every billable seat is charged (the first two are
+  not free on paid plans). *Confirmed 2026-10-29.*
 * **Trial:** 14 days of Pro for new organizations, no card. Screenshots stay off during
   the trial unless the trial admin publishes a screenshot policy.
-* **Annual billing:** not priced yet (open question §8).
+* **Billing terms** (`subscriptions.billing_interval`):
+  * **Annual term**: billed once a year, up front, at the annual price × 12. During the
+    term an organization can change seats or plan (prorated by day to the end of the
+    term). Moving to month-to-month billing starts at the renewal date;
+    the API refuses it earlier with `annual_term_active`. Cancelling keeps the paid term
+    to its end, then the organization moves to Free.
+  * **Month to month**: billed monthly at the full price; change or cancel at the end of
+    any month.
+  * A new paid plan is month to month unless the admin picks the annual term. The billing
+    page shows the annual price first.
+  * Stripe needs four prices: `STRIPE_PRICE_{STANDARD,PRO}_{MONTHLY,ANNUAL}`.
 * **Market reference** (third-party summaries, October 2026, re-check before launch):
   Hubstaff $4.99 / $7.50 / $10 per user per month on annual billing (Enterprise about
   $25); Time Doctor about $6.67–$16.70; ActivTrak paid plans from about $10; Insightful from
-  about $8. Track at $2.50 / $5 undercuts the market's entry price and gives Pro features
+  about $8. Track at $2.50 / $5 (annual) or $5 / $10 (monthly) undercuts the market's entry price and gives Pro features
   (SSO, screenshots, API) that competitors keep for their top tiers, so self-serve signup,
   automated billing and low support load are essential to the margin.
 * **Unit cost sanity check:** with the requirements' capacity model (6 screenshots/hour,
@@ -138,9 +151,9 @@ See [ADR-0004](../adr/0004-multi-tenant-saas.md).
 
 ## 8. Open commercial questions
 
-1. Free tier: confirm that "up to 2 users free" means organizations with at most 2 tracked
-   users, not "the first 2 users of every organization".
-2. Annual pricing and discount; currency (USD vs CAD for Canadian public sector).
+1. ~~Free tier~~: confirmed 2026-10-29 — organizations with at most 2 tracked users.
+2. ~~Annual pricing~~: confirmed 2026-10-29 (annual term at half the monthly price).
+   Still open: currency (USD vs CAD for Canadian public sector).
 3. Is per-seat peak billing acceptable, or should seats be prepaid?
 4. Which regions are needed at launch?
 5. Will RoundDigital resell through partners (needs reseller/parent-organization model)?

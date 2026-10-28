@@ -287,3 +287,16 @@
     border-left: 0;
   }
 }
+
+/* Billing term switch above the plan cards. */
+.termRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.priceTerm {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-top: -6px;
+}

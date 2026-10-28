@@ -199,13 +199,25 @@ variable "billing_provider" {
 }
 
 variable "stripe_price_standard" {
-  description = "STRIPE_PRICE_STANDARD (price id, not secret)."
+  description = "STRIPE_PRICE_STANDARD_MONTHLY: Standard, month to month (price id, not secret)."
   type        = string
   default     = ""
 }
 
 variable "stripe_price_pro" {
-  description = "STRIPE_PRICE_PRO (price id, not secret)."
+  description = "STRIPE_PRICE_PRO_MONTHLY: Pro, month to month (price id, not secret)."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_standard_annual" {
+  description = "STRIPE_PRICE_STANDARD_ANNUAL: Standard, annual term (price id, not secret)."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_pro_annual" {
+  description = "STRIPE_PRICE_PRO_ANNUAL: Pro, annual term (price id, not secret)."
   type        = string
   default     = ""
 }

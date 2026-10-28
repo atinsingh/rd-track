@@ -49,13 +49,25 @@ variable "billing_provider" {
 }
 
 variable "stripe_price_standard" {
-  description = "Stripe price id for Standard."
+  description = "Stripe price id for Standard, month to month."
   type        = string
   default     = ""
 }
 
 variable "stripe_price_pro" {
-  description = "Stripe price id for Pro."
+  description = "Stripe price id for Pro, month to month."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_standard_annual" {
+  description = "Stripe price id for Standard on an annual term."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_pro_annual" {
+  description = "Stripe price id for Pro on an annual term."
   type        = string
   default     = ""
 }
