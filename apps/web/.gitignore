@@ -2,3 +2,6 @@
 out/
 *.tsbuildinfo
 next-env.d.ts
+
+# Written by `next dev`
+/AGENTS.md
