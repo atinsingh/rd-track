@@ -1,0 +1,246 @@
+.layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  align-items: flex-start;
+}
+.tree {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.treeGroup {
+  display: flex;
+  flex-direction: column;
+}
+.treeLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 0 16px 6px;
+}
+.treeList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.treeItem {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--target);
+  padding: 9px 16px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--text);
+}
+.treeItem:hover {
+  background: var(--canvas);
+}
+.treeItem[aria-current='true'] {
+  background: var(--canvas);
+  box-shadow: inset 3px 0 0 var(--brand-red);
+  font-weight: 600;
+}
+.treeMeta {
+  font-size: 12px;
+  color: var(--text-3);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.treeEmpty {
+  color: var(--text-2);
+  padding: 9px 16px;
+  font-size: 13px;
+}
+.editor {
+  flex: 3 1 640px;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.editorHead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.editorHead h2 {
+  font-size: 20px;
+}
+.cols,
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 300px) minmax(0, 1.1fr);
+  gap: 16px;
+}
+.cols {
+  padding: 8px 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  border-bottom: 1px solid var(--text);
+}
+.group {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  padding: 18px 0 4px;
+  margin: 0;
+}
+.fieldRow {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  align-items: start;
+}
+.fieldText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.fieldLabel {
+  font-weight: 600;
+}
+.fieldHelp {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.numInput {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.numInput input {
+  width: 110px;
+}
+.effective {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.effValue {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  word-break: break-word;
+}
+.because {
+  font-size: 12px;
+  color: var(--text-2);
+}
+.days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.days label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  font-size: 13px;
+}
+.whRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.whRow input,
+.whRow select {
+  width: auto;
+  min-width: 0;
+}
+.publish {
+  margin-top: 18px;
+  border: 1px solid var(--text);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.expansion {
+  margin-top: 18px;
+  border: 1px solid var(--text);
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.expEyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--warn-text);
+}
+.expEyebrow::before {
+  content: '';
+  width: 16px;
+  height: 2px;
+  background: var(--warn-dash);
+}
+.expTitle {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.diff {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.history li {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule-soft);
+}
+@media (max-width: 900px) {
+  .cols {
+    display: none;
+  }
+  .fieldRow {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+}

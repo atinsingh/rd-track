@@ -1,0 +1,93 @@
+.dialog {
+  border: 1px solid var(--text);
+  border-radius: 0;
+  padding: 0;
+  background: var(--surface);
+  color: var(--text);
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+}
+.sm {
+  width: min(440px, calc(100vw - 32px));
+}
+.lg {
+  width: min(760px, calc(100vw - 32px));
+}
+.dialog::backdrop {
+  background: rgb(11 12 15 / 0.45);
+}
+.sheet {
+  margin: 0 0 0 auto;
+  height: 100vh;
+  max-height: 100vh;
+  border-width: 0 0 0 1px;
+}
+.ink {
+  background: var(--ink);
+  border-color: var(--ink-border);
+  color: var(--ink-text);
+}
+.ink h2 {
+  color: #fff;
+}
+.ink .close {
+  color: #fff;
+  border-color: var(--ink-border);
+  background: transparent;
+}
+.ink :focus-visible {
+  outline-color: #fff;
+}
+.inner {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.head {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 22px 24px 8px;
+}
+.headText {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.desc {
+  color: var(--text-2);
+}
+.ink .desc {
+  color: var(--ink-text);
+}
+.close {
+  flex: none;
+  width: var(--target);
+  height: var(--target);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--control-border);
+  background: var(--surface);
+  color: var(--text);
+}
+.body {
+  padding: 12px 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  flex: 1;
+}
+.footer {
+  padding: 16px 24px 22px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--rule);
+}
+.ink .footer {
+  border-top-color: var(--ink-rule);
+}

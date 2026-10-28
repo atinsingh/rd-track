@@ -1,0 +1,70 @@
+/* RoundDigital Track design tokens (UX design §5). */
+:root {
+  /* Ink: navigation rail, dark panels */
+  --ink: #0b0c0f;
+  --ink-raised: #17191d;
+  --ink-avatar: #22252a;
+  --ink-rule: #1f2227;
+  --ink-border: #3a3f46;
+  --ink-muted: #8c939c;
+  --ink-text: #c9cdd2;
+
+  /* Text */
+  --text: #0e1013;
+  --text-2: #3f444b;
+  --text-3: #5e646c;
+  --text-on-ink: #ffffff;
+
+  /* Surfaces and rules */
+  --surface: #ffffff;
+  --canvas: #f4f4f5;
+  --rule: #e4e4e7;
+  --rule-soft: #ecedef;
+  --control-border: #c9cdd2;
+
+  /* Brand red: chrome, eyebrow dash, active marker, tracking dot. Never a person's activity. */
+  --brand-red: #fd3d41;
+  /* Action red: primary buttons (white text, 5:1) */
+  --action-red: #d42b2b;
+  --action-red-hover: #b52222;
+  --link: #c42424;
+  --link-hover: #8f1a1a;
+  --link-on-ink: #ff8a8a;
+  --danger-text: #a12020;
+
+  /* Data: three lightness steps, never hue alone */
+  --data-1: #23272e;
+  --data-2: #7c838c;
+  --data-3: #c9cdd2;
+  --data-track: #ecedef;
+  --data-none: #d4d7db;
+  --hatch-paused: repeating-linear-gradient(135deg, #7c838c 0 2px, #e9eaec 2px 5px);
+  --hatch-offline: repeating-linear-gradient(45deg, #bfc3c8 0 2px, #f4f4f5 2px 6px);
+  --hatch-permission: repeating-linear-gradient(0deg, #a5abb2 0 1px, transparent 1px 4px),
+    repeating-linear-gradient(90deg, #a5abb2 0 1px, #f7f7f8 1px 4px);
+  --hatch-other: repeating-linear-gradient(45deg, #7c838c 0 2px, #ffffff 2px 5px);
+
+  /* Warning: permission missing, device behind on policy */
+  --warn-text: #6e4105;
+  --warn-text-2: #5c3a0a;
+  --warn-bg: #fff8e8;
+  --warn-border: #f0d29a;
+  --warn-dash: #c77a0a;
+
+  /* Type (set by next/font in the root layout) */
+  --font-ui: var(--font-inter), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  /* Shape */
+  --target: 44px;
+  --target-sm: 36px;
+  --gutter: 40px;
+  --rail-width: 240px;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --gutter: 16px;
+  }
+}

@@ -1,0 +1,71 @@
+.memberLink {
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+}
+.memberLink:hover {
+  color: var(--link);
+  text-decoration: underline;
+}
+.act {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.actNum {
+  font-family: var(--font-mono);
+  width: 40px;
+}
+.actTrack {
+  flex: 1;
+  max-width: 90px;
+  min-width: 40px;
+  height: 6px;
+  background: var(--data-track);
+}
+.actFill {
+  display: block;
+  height: 6px;
+  background: var(--data-2);
+}
+.attention {
+  flex: 1 1 280px;
+}
+.members {
+  flex: 3 1 640px;
+}
+.attItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px;
+  border: 1px solid var(--rule);
+  color: var(--text);
+  text-decoration: none;
+}
+a.attItem:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+.attTitle {
+  font-weight: 600;
+}
+.attBody {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.attWarn {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+.attWarn .attTitle {
+  color: var(--warn-text);
+}
+.attWarn .attBody {
+  color: var(--warn-text-2);
+}
+.thActivity {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

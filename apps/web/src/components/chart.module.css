@@ -1,0 +1,97 @@
+.plot {
+  display: grid;
+  grid-template-columns: repeat(var(--days), minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+  height: 236px;
+  border-bottom: 1px solid var(--text);
+  padding: 0 8px;
+}
+.day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  height: 100%;
+  min-width: 0;
+}
+.total {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.stack {
+  width: min(56px, 100%);
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+}
+.seg {
+  min-height: 2px;
+}
+.labels {
+  display: grid;
+  grid-template-columns: repeat(var(--days), minmax(0, 1fr));
+  gap: 16px;
+  padding: 0 8px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatch {
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+.data-1 {
+  background: var(--data-1);
+}
+.data-2 {
+  background: var(--data-2);
+}
+.data-3 {
+  background: var(--data-3);
+}
+.other {
+  background: var(--hatch-other);
+  outline: 1px solid var(--data-2);
+  outline-offset: -1px;
+}
+.toggle {
+  background: none;
+  border: 0;
+  padding: 0;
+  min-height: 44px;
+  color: var(--link);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  .plot,
+  .labels {
+    gap: 6px;
+    padding: 0;
+  }
+  .total {
+    font-size: 10px;
+  }
+}

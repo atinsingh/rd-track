@@ -1,0 +1,118 @@
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  background: var(--canvas);
+}
+.aside {
+  background: var(--ink);
+  color: var(--ink-text);
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 32px;
+}
+.aside h2 {
+  color: #fff;
+  font-size: 28px;
+  letter-spacing: -0.03em;
+  max-width: 18ch;
+}
+.aside ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.aside li {
+  display: flex;
+  gap: 10px;
+}
+.aside li::before {
+  content: '';
+  flex: none;
+  width: 16px;
+  height: 2px;
+  margin-top: 10px;
+  background: var(--brand-red);
+}
+.reversed {
+  display: block;
+  height: 24px;
+  width: auto;
+}
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+}
+.card {
+  width: min(420px, 100%);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.logo {
+  display: block;
+  height: 28px;
+  width: auto;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.secret {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.1em;
+  word-break: break-all;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  padding: 12px;
+  user-select: all;
+}
+.otpauth {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+  color: var(--text-2);
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+  padding: 10px 12px;
+  user-select: all;
+}
+.steps {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fine {
+  font-size: 12px;
+  color: var(--text-3);
+}
+@media (max-width: 860px) {
+  .page {
+    grid-template-columns: 1fr;
+  }
+  .aside {
+    display: none;
+  }
+  .panel {
+    padding: 24px 16px;
+    align-items: flex-start;
+  }
+  .card {
+    padding: 24px 20px;
+  }
+}
