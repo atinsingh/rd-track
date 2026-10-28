@@ -7,3 +7,4 @@ export * from './describe';
 export * from './insights';
 export * from './timesheets';
 export * from './scheduling';
+export * from './money';

@@ -15,7 +15,9 @@ export type JobKind =
   | 'seats.snapshot'
   | 'notify.policy_expansion'
   | 'webhook.deliver'
-  | 'time_off.accrue';
+  | 'time_off.accrue'
+  | 'payroll.generate'
+  | 'budgets.check';
 
 export interface Job {
   id: number;

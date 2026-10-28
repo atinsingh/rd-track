@@ -45,6 +45,10 @@ const RELATION: Record<string, string> = { team_manager: 'Team manager', project
 // Action names as written by the API's audit log (apps/api/src/modules/**).
 const ACTION_TEXT: Record<string, string> = {
   'screenshot.view': 'Opened one of your screenshots',
+  'pay_rate.view': 'Viewed your pay rate',
+  'pay_rate.create': 'Set a new pay rate for you',
+  'pay_rate.delete': 'Cancelled a scheduled change to your pay rate',
+  'bill_rate.create': 'Set a client bill rate for your time',
   'screenshot.list': 'Listed your screenshots',
   'screenshot.deleted': 'One of your screenshots was deleted',
   'activity.view': 'Viewed your computer activity',

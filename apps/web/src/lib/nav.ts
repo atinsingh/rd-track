@@ -15,7 +15,8 @@ export type Capability =
   | 'teamSchedule'
   | 'adminSchedules'
   | 'adminHolidays'
-  | 'adminTimeOff';
+  | 'adminTimeOff'
+  | 'money';
 
 export interface Access {
   role: OrgRole;
@@ -72,6 +73,9 @@ export function can(a: Access, c: Capability): boolean {
       return a.isAdmin && (schedules || timeOff);
     case 'adminTimeOff':
       return a.isAdmin && timeOff;
+    case 'money':
+      // Clients, rates, budgets and invoices (Pro): org admins only.
+      return a.isAdmin && a.entitlements.includes('budgets_invoicing');
   }
 }
 
@@ -122,6 +126,9 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
       { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff' },
       { href: '/admin/requests', label: 'Deletion requests', capability: 'admin' },
+      { href: '/admin/clients', label: 'Clients', capability: 'money' },
+      { href: '/admin/rates', label: 'Rates and budgets', capability: 'money' },
+      { href: '/admin/invoices', label: 'Invoices', capability: 'money' },
       { href: '/admin/billing', label: 'Billing', capability: 'admin' },
       { href: '/audit', label: 'Audit log', capability: 'audit' },
     ],
