@@ -6,6 +6,9 @@ import {
   S3Client,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, normalize } from 'node:path';
 import type { Config } from '../config';
 
 /**
@@ -106,5 +109,69 @@ export class MemoryObjectStore implements ObjectStore {
   }
   async delete(key: string) {
     this.objects.delete(key);
+  }
+}
+
+/**
+ * Development-only store: files on disk, presigned URLs served by the API itself at
+ * `/v1/_storage/<key>?method&exp&sig` (HMAC-SHA256). Lets the real agent upload
+ * without S3/MinIO. Never enable in production.
+ */
+export class LocalObjectStore implements ObjectStore {
+  constructor(
+    private readonly dir: string,
+    private readonly baseUrl: string,
+    private readonly secret: Buffer,
+  ) {}
+
+  private path(key: string) {
+    const p = normalize(join(this.dir, key));
+    if (!p.startsWith(normalize(this.dir))) throw new Error('invalid key');
+    return p;
+  }
+
+  sign(method: string, key: string, exp: number): string {
+    return createHmac('sha256', this.secret).update(`${method}\n${key}\n${exp}`).digest('hex');
+  }
+
+  verify(method: string, key: string, exp: number, sig: string): boolean {
+    if (!Number.isFinite(exp) || exp < Date.now() / 1000) return false;
+    const expected = Buffer.from(this.sign(method, key, exp));
+    const given = Buffer.from(sig);
+    return expected.length === given.length && timingSafeEqual(expected, given);
+  }
+
+  private url(method: string, key: string, expiresInSec: number) {
+    const exp = Math.floor(Date.now() / 1000) + expiresInSec;
+    return `${this.baseUrl}/v1/_storage/${encodeURIComponent(key)}?method=${method}&exp=${exp}&sig=${this.sign(method, key, exp)}`;
+  }
+
+  async presignPut(key: string, contentType: string, expiresInSec: number) {
+    return { url: this.url('PUT', key, expiresInSec), headers: { 'content-type': contentType } };
+  }
+  async presignGet(key: string, expiresInSec: number) {
+    return this.url('GET', key, expiresInSec);
+  }
+  async head(key: string) {
+    try {
+      return { size: (await stat(this.path(key))).size };
+    } catch {
+      return null;
+    }
+  }
+  async get(key: string) {
+    try {
+      return await readFile(this.path(key));
+    } catch {
+      return null;
+    }
+  }
+  async put(key: string, body: Buffer | string, _contentType?: string) {
+    const p = this.path(key);
+    await mkdir(dirname(p), { recursive: true });
+    await writeFile(p, body);
+  }
+  async delete(key: string) {
+    await rm(this.path(key), { force: true });
   }
 }

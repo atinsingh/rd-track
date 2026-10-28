@@ -2,7 +2,7 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createPool } from './db/pool';
 import { migrate } from './db/migrate';
-import { MemoryObjectStore, S3ObjectStore } from './storage/object-store';
+import { createObjectStore } from './storage/factory';
 
 const config = loadConfig();
 if (process.env.MIGRATE_ON_START === 'true') await migrate(config.databaseUrl);
@@ -12,7 +12,7 @@ const app = await buildApp(
   {
     pool,
     config,
-    store: process.env.STORAGE === 'memory' ? new MemoryObjectStore() : new S3ObjectStore(config.storage),
+    store: createObjectStore(config),
     now: () => new Date(),
   },
   { logger: true },

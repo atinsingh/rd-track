@@ -4,13 +4,13 @@ import type { Deps } from './context';
 import { createPool } from './db/pool';
 import { claim, complete, fail } from './jobs/queue';
 import { handleJob, scheduleRecurring } from './jobs/runner';
-import { MemoryObjectStore, S3ObjectStore } from './storage/object-store';
+import { createObjectStore } from './storage/factory';
 
 const config = loadConfig();
 const deps: Deps = {
   pool: createPool(config.databaseUrl),
   config,
-  store: process.env.STORAGE === 'memory' ? new MemoryObjectStore() : new S3ObjectStore(config.storage),
+  store: createObjectStore(config),
   now: () => new Date(),
 };
 const workerId = `${hostname()}:${process.pid}`;
