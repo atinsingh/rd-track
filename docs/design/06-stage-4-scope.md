@@ -55,6 +55,28 @@ What "best in class" means here, measured on the canvas *RoundDigital Track UI* 
   - Status never shown by colour alone.
   - Reduced motion respected.
 
+### Visual direction: solid glass (decided 2026-10-28)
+
+The canvas's *Design system* artboard is the reference.
+
+- **Glass panels:** frosted panels, `rgba(255,255,255,0.78)` with a 24 px backdrop blur, a white hairline edge and soft shadow. They sit over a backdrop of `#ECEEF2` with two faint light fields, blue and brand red, never more.
+- **Dark glass:** the floating navigation and live-state banners are dark glass (`rgba(11,12,15,0.86)`).
+- **Radius:** 16 on panels, 10 on controls and menu items, 6 on badges.
+- **Muted text:** moves to `#53595F` so it reaches 4.9:1 even on the bare backdrop. All glass text pairs stay ≥ 5.3:1.
+- **Unchanged:** type (Inter Tight / Inter / JetBrains Mono), and brand red only as a chrome mark.
+
+### Data palette
+
+Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vision ΔE ≥ 19.6.
+
+- **Categorical, fixed order, never cycled:** blue `#2a78d6`, orange `#eb6834`, aqua `#1baf7a`, yellow `#eda100`, magenta `#e87ba4`, green `#008300`, violet `#6250d6`. "Other" is `#9AA0A8`.
+  - There is no red series: brand red never marks a person's data.
+  - Slots 3–5 are under 3:1 on white, so charts using them keep their value labels and "View as table".
+- **Single-series magnitude:** blue. Part-of-whole (focus inside tracked time) uses the blue ramp `#2a78d6` / `#86b6ef`.
+- **Diverging (under ↔ over expected):** blue ↔ orange around grey.
+- **Not data:** states (paused, asleep, no permission) stay grey textures, and status stays amber with a label.
+- **Labels:** values sit beside marks in text colour, never inside them (white on the series blue is only 4.4:1).
+
 ## 3. Build order
 
 1. F1 idle prompt (agent, API, web history)
