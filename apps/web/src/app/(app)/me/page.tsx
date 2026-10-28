@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { DayView } from '@/components/day/DayView';
+import { ScheduleNote } from '@/components/scheduling/ScheduleNote';
 import { Button } from '@/components/ui/Button';
 import { Banner, PageHeader } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
@@ -38,6 +39,7 @@ export default function MyDayPage() {
           You can&apos;t start work sessions, so nothing new is collected about you. Older records stay visible here.
         </Banner>
       ) : null}
+      <ScheduleNote date={date} tz={tz} />
       {notice ? (
         <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
           Track its status in <a href="/me/time">My time</a>.

@@ -8,7 +8,12 @@ export type Capability =
   | 'projects'
   | 'admin'
   | 'audit'
-  | 'exports';
+  | 'exports'
+  | 'schedule'
+  | 'teamSchedule'
+  | 'adminSchedules'
+  | 'adminHolidays'
+  | 'adminTimeOff';
 
 export interface Access {
   role: OrgRole;
@@ -32,6 +37,8 @@ export function accessFor(me: Me): Access {
 }
 
 export function can(a: Access, c: Capability): boolean {
+  const schedules = a.entitlements.includes('schedules');
+  const timeOff = a.entitlements.includes('time_off');
   switch (c) {
     case 'me':
     case 'exports':
@@ -39,14 +46,26 @@ export function can(a: Access, c: Capability): boolean {
     case 'screenshots':
       return a.entitlements.includes('screenshots');
     case 'team':
-    case 'approvals':
       return a.managesTeams;
+    case 'approvals':
+      // Org admins review time off for people without a team manager.
+      return a.managesTeams || (a.isAdmin && timeOff);
     case 'projects':
       return a.managesProjects;
     case 'admin':
       return a.isAdmin;
     case 'audit':
       return a.isAdmin || a.isAuditor;
+    case 'schedule':
+      return schedules || timeOff;
+    case 'teamSchedule':
+      return a.managesTeams && (schedules || timeOff);
+    case 'adminSchedules':
+      return a.isAdmin && schedules;
+    case 'adminHolidays':
+      return a.isAdmin && (schedules || timeOff);
+    case 'adminTimeOff':
+      return a.isAdmin && timeOff;
   }
 }
 
@@ -67,6 +86,7 @@ const GROUPS: NavGroup[] = [
     items: [
       { href: '/me', label: 'My day', capability: 'me' },
       { href: '/me/time', label: 'My time', capability: 'me' },
+      { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
       { href: '/me/privacy', label: "What's collected", capability: 'me' },
       { href: '/exports', label: 'Exports', capability: 'exports' },
@@ -76,6 +96,7 @@ const GROUPS: NavGroup[] = [
     label: 'Team',
     items: [
       { href: '/team', label: 'Team', capability: 'team' },
+      { href: '/team/attendance', label: 'Attendance and calendar', capability: 'teamSchedule' },
       { href: '/approvals', label: 'Approvals', capability: 'approvals', badge: 'approvals' },
       { href: '/projects', label: 'Projects', capability: 'projects' },
     ],
@@ -87,6 +108,9 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/teams', label: 'Teams and projects', capability: 'admin' },
       { href: '/admin/devices', label: 'Devices', capability: 'admin' },
       { href: '/admin/policies', label: 'Policies', capability: 'admin' },
+      { href: '/admin/schedules', label: 'Schedules', capability: 'adminSchedules' },
+      { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
+      { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff' },
       { href: '/admin/requests', label: 'Deletion requests', capability: 'admin' },
       { href: '/admin/billing', label: 'Billing', capability: 'admin' },
       { href: '/audit', label: 'Audit log', capability: 'audit' },

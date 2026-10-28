@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues } from '@rd/contracts';
+import { TimeOffApprovals } from '@/components/scheduling/TimeOffApprovals';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { TextArea } from '@/components/ui/Field';
@@ -85,14 +86,15 @@ export default function ApprovalsPage() {
     if (!id) return 'No project';
     return projects.data?.find((p) => p.id === id)?.name ?? `Project ${id.slice(0, 8)}`;
   };
-  if (!access.managesTeams) return <NoAccess what="Approvals are for team managers." />;
+  const timeOffReview = me.entitlements.includes('time_off') && (access.managesTeams || access.isAdmin);
+  if (!access.managesTeams && !timeOffReview) return <NoAccess what="Approvals are for team managers." />;
 
   return (
     <>
       <PageHeader
         eyebrow="Team manager · Corrections"
         title="Approvals"
-        description="Corrections and manual time proposed by people in your teams. Original values are kept whatever you decide."
+        description="Corrections, manual time and time off requested by people in your teams. Original values are kept whatever you decide."
       />
       {!me.entitlements.includes('correction_approvals') ? (
         <Banner tag="NOTE" title="Your plan doesn't include the approval workflow">
@@ -123,6 +125,7 @@ export default function ApprovalsPage() {
           )
         }
       </Resource>
+      {timeOffReview ? <TimeOffApprovals tz={tz} /> : null}
     </>
   );
 }
