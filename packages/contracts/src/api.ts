@@ -135,6 +135,8 @@ export interface ScreenshotDTO {
   height: number | null;
   retention_after: string;
   deletion_request_status: 'pending' | 'approved' | 'rejected' | null;
+  /** App in front at capture time, when app names are collected. */
+  app_name: string | null;
 }
 export interface ViewUrlResponse {
   url: string;
@@ -243,6 +245,13 @@ export interface TeamReport {
   /** what the requesting manager may see for this team under policy */
   visibility: { activity: boolean; apps: boolean; screenshots: boolean };
 }
+/** GET /v1/users/{id}/visibility: what the requester may see about this person. */
+export interface MemberVisibility {
+  time: boolean;
+  activity: boolean;
+  apps: boolean;
+  screenshots: boolean;
+}
 export interface ProjectReport {
   project: { id: string; name: string };
   from: string;
@@ -263,6 +272,10 @@ export const exportCreateRequest = z.strictObject({
 export interface ExportDTO {
   id: string;
   kind: 'sessions' | 'activity_daily';
+  from: string;
+  to: string;
+  team_id: string | null;
+  user_count: number;
   status: 'queued' | 'running' | 'ready' | 'failed' | 'expired';
   row_count: number | null;
   created_at: string;

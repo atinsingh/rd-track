@@ -3,6 +3,7 @@ import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Deps } from './context';
+import { SYSTEM_SCOPE, tenantScope } from './db/tenant-scope';
 import { PLATFORM_COOKIE, SESSION_COOKIE } from './http';
 import { AppError } from './lib/errors';
 import { adminRoutes } from './modules/admin-routes';
@@ -15,6 +16,13 @@ import { authenticatePlatform, platformRoutes } from './modules/platform/routes'
 import { localStorageRoutes } from './storage/local-routes';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
+/** From here on, row-level security limits this request to one organization. */
+function narrowScope(organizationId: string) {
+  const store = tenantScope.getStore();
+  if (!store) throw new AppError(500, 'internal_error', 'Request has no tenant scope');
+  store.org = organizationId;
+}
 
 export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Promise<FastifyInstance> {
   const app = Fastify({
@@ -35,6 +43,11 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
 
   await app.register(cookie);
   await app.register(rateLimit, { global: false });
+
+  // Every request runs in its own tenant scope (system until authentication narrows it).
+  app.addHook('onRequest', (_req, _reply, done) => {
+    tenantScope.run({ org: SYSTEM_SCOPE }, done);
+  });
 
   app.addHook('onSend', async (req, reply) => {
     reply.header('x-request-id', req.id);
@@ -57,6 +70,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       if (d === 'revoked') throw new AppError(401, 'device_revoked', 'This device has been revoked');
       if (!d) throw new AppError(401, 'unauthenticated', 'Unknown device credential');
       req.device = d;
+      narrowScope(d.organizationId);
       return;
     }
 
@@ -80,6 +94,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
     }
     if (!u.mfaVerified && !cfg.allowWithoutMfa) throw new AppError(403, 'mfa_required', 'Multi-factor authentication is required');
     req.user = u;
+    narrowScope(u.organizationId);
   });
 
   app.setErrorHandler((err, req, reply) => {

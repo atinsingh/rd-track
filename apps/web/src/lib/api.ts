@@ -1,4 +1,5 @@
 import type {
+  MemberVisibility,
   ChangePlanResponse,
   ActivityResponse,
   ApiErrorBody,
@@ -243,6 +244,7 @@ export const rd = {
   },
   me: (opts?: RequestOptions) => get<Me>('/v1/me', opts),
   person: {
+    visibility: (userId: string, signal?: AbortSignal) => get<MemberVisibility>(`/v1/users/${enc(userId)}/visibility`, { signal }),
     sessions: (base: PersonBase, r: Range, signal?: AbortSignal) =>
       list<SessionDTO>(`${base}/sessions`, { query: { ...r }, signal }),
     activity: (base: PersonBase, r: Range, signal?: AbortSignal) =>
@@ -270,8 +272,8 @@ export const rd = {
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {
     list: (signal?: AbortSignal) => list<TeamSummary>('/v1/teams', { signal }),
-    report: (id: string, r: Range, tz: string, signal?: AbortSignal) =>
-      get<TeamReport>(`/v1/teams/${enc(id)}/report`, { query: { ...r, tz }, signal }),
+    report: (id: string, r: Range, tz: string, signal?: AbortSignal, projectId?: string | null) =>
+      get<TeamReport>(`/v1/teams/${enc(id)}/report`, { query: { ...r, tz, ...(projectId ? { project_id: projectId } : {}) }, signal }),
   },
   projects: {
     list: (signal?: AbortSignal) => list<ProjectDTO>('/v1/projects', { signal }),

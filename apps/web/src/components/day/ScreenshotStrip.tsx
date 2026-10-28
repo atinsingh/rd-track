@@ -120,6 +120,7 @@ export function ScreenshotStrip({
                 <span className={s.shotCaption}>
                   <span>
                     <span className="mono">{time}</span>
+                    {shot.app_name ? ` · ${shot.app_name}` : ''}
                     {deletion ? ` · ${deletion}` : status ? ` · ${status}` : ''}
                   </span>
                   {isSelf && viewable && !shot.deletion_request_status ? (

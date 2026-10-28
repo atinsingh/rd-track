@@ -183,7 +183,7 @@ describe('corrections, exports and retention', () => {
     expect(r.status).toBe(201);
     await env.drain();
     const ready = await org.users.manager!.client.get(`/v1/exports/${r.body.id}`);
-    expect(ready.body.status).toBe('ready');
+    expect(ready.body).toMatchObject({ status: 'ready', from: '2026-10-26T00:00:00Z', to: '2026-10-27T00:00:00Z', team_id: org.teamId, user_count: 3 });
     expect(ready.body.download_url).toMatch(/^memory:/);
     const key = (await env.deps.pool.query('SELECT object_key FROM export_jobs WHERE id = $1', [r.body.id])).rows[0].object_key;
     const csv = (await env.store.get(key))!.toString();

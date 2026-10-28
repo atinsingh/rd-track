@@ -473,6 +473,13 @@ rd-agent            binary: enroll, run (headless), status; wires real or simula
   screenshot routes never log bodies; validation errors never echo payload values.
 * Login rate-limited per IP and per account.
 * Policy signing key: Ed25519, from the secret manager; `key_id` allows rotation.
+* **Row-level security** (migration 003, ADR-0004): every tenant table has a FORCE'd policy
+  keyed on `rd.org_id`. The API's pool sets it per connection from an AsyncLocalStorage
+  scope: the authenticated user's or device's organization for tenant requests; `'*'`
+  (system) only for public routes (login, enrollment, signup, webhooks), platform routes and
+  the worker loop; tenant jobs run scoped to their organization. An unset scope sees
+  nothing. The app must connect as a non-superuser role without `BYPASSRLS`; the
+  integration tests run as such a role.
 
 ## 10. Testing strategy
 

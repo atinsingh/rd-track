@@ -130,6 +130,7 @@ export default function ExportsPage() {
                     <tr>
                       <th scope="col">Created</th>
                       <th scope="col">What</th>
+                      <th scope="col">Range</th>
                       <th scope="col">Status</th>
                       <th scope="col" className={numClass}>
                         Rows
@@ -147,6 +148,10 @@ export default function ExportsPage() {
                         <tr key={e.id}>
                           <td className="mono small">{formatDateTime(e.created_at, tz)}</td>
                           <td>{KIND_LABEL[e.kind]}</td>
+                          <td className="mono small">
+                            {e.from.slice(0, 10)} – {e.to.slice(0, 10)}
+                            {e.user_count > 1 ? ` · ${e.user_count} people` : ''}
+                          </td>
                           <td>
                             <Badge tone={e.status === 'ready' ? 'solid' : e.status === 'failed' ? 'warn' : 'outline'}>{STATUS_LABEL[e.status]}</Badge>
                           </td>

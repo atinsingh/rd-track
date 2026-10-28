@@ -16,6 +16,7 @@ interface ExportScope {
   user_ids: string[];
   from: string;
   to: string;
+  team_id: string | null;
 }
 
 export async function createExport(
@@ -47,7 +48,7 @@ export async function createExport(
     await assertCanView(deps, q, actor, uid, purpose, { requestId });
     userIds = [uid];
   }
-  const scope: ExportScope = { user_ids: userIds, from: input.from, to: input.to };
+  const scope: ExportScope = { user_ids: userIds, from: input.from, to: input.to, team_id: input.team_id ?? null };
   const r = await one<{ id: string }>(
     q,
     `INSERT INTO export_jobs (organization_id, requester_id, kind, scope) VALUES ($1, $2, $3, $4) RETURNING id`,
@@ -124,7 +125,10 @@ export async function generateExport(deps: Deps, q: Queryable, exportId: string)
 export async function getExport(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<ExportDTO> {
   const e = await one<ExportDTO & { object_key: string | null }>(
     q,
-    `SELECT id, kind, status, row_count, created_at, expires_at, object_key FROM export_jobs
+    `SELECT id, kind, status, row_count, created_at, expires_at, object_key,
+            scope->>'from' AS "from", scope->>'to' AS "to", scope->>'team_id' AS team_id,
+            jsonb_array_length(scope->'user_ids') AS user_count
+     FROM export_jobs
      WHERE id = $1 AND organization_id = $2 AND requester_id = $3`,
     [id, actor.organizationId, actor.userId],
   );

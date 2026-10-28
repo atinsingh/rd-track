@@ -1,4 +1,5 @@
-import { deletionRequestCreate, exportCreateRequest, reviewRequest, timeCorrectionRequest } from '@rd/contracts';
+import { deletionRequestCreate, exportCreateRequest, reviewRequest, timeCorrectionRequest, type MemberVisibility } from '@rd/contracts';
+import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Deps, UserActor } from '../context';
 import { isAdmin } from '../context';
@@ -8,11 +9,11 @@ import { errors } from '../lib/errors';
 import { parse, parseRange } from '../lib/validate';
 import { activityFor, appsFor, projectReport, sessionsFor, teamReport } from './activity/queries';
 import { accessLogFor, audit } from './audit/service';
-import { assertCanView, managedProjectIds, managedTeamIds, type ViewPurpose } from './authz';
+import { assertCanView, managedProjectIds, managedTeamIds, visibilityFor, type ViewPurpose } from './authz';
 import { myCorrections, pendingForReviewer, proposeCorrection, reviewCorrection } from './corrections/service';
 import { createExport, getExport, listExports } from './exports/service';
 import { listProjects, projectsForUser } from './org/service';
-import { myPolicy } from './policy/service';
+import { myPolicy, resolveFor } from './policy/service';
 import { listNotifications, markNotificationRead, requestDeletion } from './privacy/service';
 import { listScreenshots, viewUrl } from './screenshots/service';
 
@@ -102,6 +103,26 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     const { actor, target } = await viewing(req, 'screenshots', 'screenshot.list');
     return { items: await listScreenshots(pool, actor.organizationId, target, parseRange(req.query)) };
   });
+  app.get<{ Params: { id: string } }>('/v1/users/:id/visibility', user, async (req): Promise<MemberVisibility> => {
+    const actor = userOf(req);
+    await assertCanView(deps, pool, actor, req.params.id, 'time', { requestId: req.id });
+    if (req.params.id === actor.userId) return { time: true, activity: true, apps: true, screenshots: true };
+    const v = await visibilityFor(deps, pool, actor.organizationId, req.params.id);
+    // Screenshot access is granted per project: check the projects this person tracked recently.
+    const projects = await many<{ project_id: string }>(
+      pool,
+      `SELECT DISTINCT project_id FROM work_sessions
+       WHERE user_id = $1 AND project_id IS NOT NULL AND started_at > now() - interval '90 days'`,
+      [req.params.id],
+    );
+    let screenshots = v.screenshots;
+    for (const p of projects) {
+      if (screenshots) break;
+      const { settings } = await resolveFor(deps, pool, actor.organizationId, req.params.id, { projectId: p.project_id });
+      screenshots = settings.screenshots.enabled && settings.viewers.manager_can_view_screenshots;
+    }
+    return { time: true, activity: v.activity, apps: v.apps, screenshots };
+  });
   app.get<{ Params: { id: string } }>('/v1/screenshots/:id/view-url', user, async (req) =>
     withTx(pool, (tx) => viewUrl(deps, tx, userOf(req), req.params.id, req.id)),
   );
@@ -119,13 +140,14 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
       ),
     };
   });
-  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string; tz?: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { from?: string; to?: string; tz?: string; project_id?: string } }>(
     '/v1/teams/:id/report',
     user,
     async (req) => {
       const a = userOf(req);
       if (!(await managedTeamIds(pool, a.userId)).includes(req.params.id)) throw errors.forbidden();
-      const report = await teamReport(deps, pool, a.organizationId, req.params.id, parseRange(req.query), tz(req.query.tz));
+      const projectId = req.query.project_id ? parse(z.uuid(), req.query.project_id) : null;
+      const report = await teamReport(deps, pool, a.organizationId, req.params.id, parseRange(req.query), tz(req.query.tz), projectId);
       await auditTeamView(a, report.members.map((m) => m.user_id), req.params.id, req.id);
       return report;
     },

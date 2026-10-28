@@ -148,6 +148,7 @@ export async function teamReport(
   teamId: string,
   r: Range,
   tz: string,
+  projectId: string | null = null,
 ): Promise<TeamReport> {
   const team = await one<{ id: string; name: string }>(q, 'SELECT id, name FROM teams WHERE id = $1 AND organization_id = $2', [
     teamId,
@@ -171,27 +172,29 @@ export async function teamReport(
             count(*) FILTER (WHERE data_quality = 'permission_missing')::int AS missing,
             count(DISTINCT (bucket_start AT TIME ZONE $5)::date)::int AS days
      FROM activity_buckets WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND bucket_start >= $3 AND bucket_start < $4
+       AND ($6::uuid IS NULL OR session_id IN (SELECT id FROM work_sessions WHERE project_id = $6))
      GROUP BY user_id`,
-    [orgId, ids, r.from, r.to, tz],
+    [orgId, ids, r.from, r.to, tz, projectId],
   );
   const manual = await many<{ user_id: string; seconds: number }>(
     q,
     `SELECT user_id, sum(EXTRACT(EPOCH FROM (least(ended_at, $4::timestamptz) - greatest(started_at, $3::timestamptz))))::int AS seconds
      FROM work_sessions WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND source = 'manual'
-       AND started_at < $4 AND ended_at > $3 GROUP BY user_id`,
-    [orgId, ids, r.from, r.to],
+       AND started_at < $4 AND ended_at > $3 AND ($5::uuid IS NULL OR project_id = $5) GROUP BY user_id`,
+    [orgId, ids, r.from, r.to, projectId],
   );
   const gaps = await many<{ user_id: string; seconds: number }>(
     q,
     `SELECT user_id, sum(EXTRACT(EPOCH FROM (least(gap_end, $4::timestamptz) - greatest(gap_start, $3::timestamptz))))::int AS seconds
-     FROM data_gaps WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND gap_start < $4 AND gap_end > $3 GROUP BY user_id`,
-    [orgId, ids, r.from, r.to],
+     FROM data_gaps WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND gap_start < $4 AND gap_end > $3
+       AND ($5::uuid IS NULL OR session_id IN (SELECT id FROM work_sessions WHERE project_id = $5)) GROUP BY user_id`,
+    [orgId, ids, r.from, r.to, projectId],
   );
   const sessions = await many<{ id: string; user_id: string }>(
     q,
     `SELECT id, user_id FROM work_sessions WHERE organization_id = $1 AND user_id = ANY($2::uuid[])
-       AND started_at < $4 AND (ended_at IS NULL OR ended_at > $3)`,
-    [orgId, ids, r.from, r.to],
+       AND started_at < $4 AND (ended_at IS NULL OR ended_at > $3) AND ($5::uuid IS NULL OR project_id = $5)`,
+    [orgId, ids, r.from, r.to, projectId],
   );
   const pauses = await pauseIntervals(q, sessions.map((s) => s.id), r, deps.now());
   const pausedBy = new Map<string, number>();
@@ -227,7 +230,10 @@ export async function teamReport(
     });
   }
 
-  const daily = await dailyByProject(q, orgId, ids, r, tz);
+  const daily = (await dailyByProject(q, orgId, ids, r, tz)).map((d) => ({
+    ...d,
+    projects: projectId ? d.projects.filter((p) => p.project_id === projectId) : d.projects,
+  }));
   return {
     team: { id: team.id, name: team.name, member_count: members.length },
     from: r.from,

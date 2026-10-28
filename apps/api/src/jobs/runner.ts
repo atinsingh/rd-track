@@ -1,5 +1,6 @@
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
+import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
 import { snapshotSeats } from '../modules/billing/service';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
@@ -7,7 +8,12 @@ import { runRetention } from '../modules/retention/service';
 import { deleteScreenshot, verifyScreenshot } from '../modules/screenshots/service';
 import { claim, complete, enqueue, fail, requeueStale, type Job } from './queue';
 
-export async function handleJob(deps: Deps, job: Job): Promise<void> {
+/** Tenant jobs run scoped to their organization; cross-tenant jobs (retention) run as system. */
+export function handleJob(deps: Deps, job: Job): Promise<void> {
+  return withScope(job.organization_id ?? SYSTEM_SCOPE, () => runJob(deps, job));
+}
+
+async function runJob(deps: Deps, job: Job): Promise<void> {
   const p = job.payload as Record<string, string>;
   switch (job.kind) {
     case 'ingest.process':

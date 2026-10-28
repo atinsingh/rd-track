@@ -66,6 +66,7 @@ describe('screenshots', () => {
 
     const mine = await org.users.emp!.client.get(`/v1/me/screenshots?${RANGE}`);
     expect(mine.body.items).toHaveLength(1);
+    expect(mine.body.items[0]).toHaveProperty('app_name', null); // no app usage reported yet
 
     const asManager = await org.users.manager!.client.get(`/v1/screenshots/${shot.id}/view-url`);
     expect(asManager.status).toBe(200);
@@ -156,6 +157,17 @@ describe('audit and access', () => {
     const res = await env.app.inject({ method: 'POST', url: '/v1/admin/teams', payload: { name: 'x' }, headers: { cookie: org.admin.cookie } });
     expect(res.statusCode).toBe(403);
     expect(JSON.parse(res.body).error.code).toBe('csrf_failed');
+  });
+
+  it('reports per-member visibility and filters team reports by project', async () => {
+    const v = await org.users.manager!.client.get(`/v1/users/${org.users.emp!.id}/visibility`);
+    expect(v.body).toEqual({ time: true, activity: true, apps: true, screenshots: true });
+    expect((await org.users.emp2!.client.get(`/v1/users/${org.users.emp!.id}/visibility`)).status).toBe(403);
+    const filtered = await org.users.manager!.client.get(`/v1/teams/${org.teamId}/report?${RANGE}&project_id=${org.projectId}`);
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.daily.every((d: { projects: { project_id: string }[] }) => d.projects.every((p) => p.project_id === org.projectId))).toBe(true);
+    const other = await org.users.manager!.client.get(`/v1/teams/${org.teamId}/report?${RANGE}&project_id=${randomUUID()}`);
+    expect(other.body.members.every((m: { tracked_seconds: number }) => m.tracked_seconds === 0)).toBe(true);
   });
 
   it('a team manager sees team reports, with one audit entry per member viewed', async () => {

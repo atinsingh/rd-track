@@ -144,6 +144,7 @@ export default function TeamPage() {
   const [teamId, setTeamId] = useState<string | null>(null);
   const [day, setDay] = useState(() => todayInTz(tz));
   const [exported, setExported] = useState(false);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const exportAction = useAction();
   const teams = useApi(access.managesTeams ? 'teams' : null, (signal) => rd.teams.list(signal));
   const pending = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
@@ -151,8 +152,8 @@ export default function TeamPage() {
   const range = daysRange(week, 7, tz);
   const sortedTeams = [...(teams.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   const current = sortedTeams.find((t) => t.id === teamId) ?? sortedTeams[0];
-  const report = useApi(current ? `team|${current.id}|${range.from}|${tz}` : null, (signal) =>
-    rd.teams.report(current!.id, { from: range.from, to: range.to }, tz, signal),
+  const report = useApi(current ? `team|${current.id}|${range.from}|${tz}|${projectId ?? ''}` : null, (signal) =>
+    rd.teams.report(current!.id, { from: range.from, to: range.to }, tz, signal, projectId),
   );
 
   if (!access.managesTeams) return <NoAccess what="Team reports are for team managers." />;
@@ -185,6 +186,14 @@ export default function TeamPage() {
                 ))}
               </InlineSelect>
             ) : null}
+            <InlineSelect label="Project" value={projectId ?? ''} onChange={(e) => setProjectId(e.target.value || null)}>
+              <option value="">All projects</option>
+              {projectOptions(report.data, projectId).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </InlineSelect>
             <DateSwitcher
               date={day}
               onDate={setDay}
@@ -227,4 +236,12 @@ export default function TeamPage() {
       )}
     </>
   );
+}
+
+/** Projects that appear in the report (the filtered report only contains the selected one). */
+function projectOptions(report: TeamReport | null | undefined, selected: string | null): { id: string; name: string }[] {
+  const seen = new Map<string, string>();
+  for (const d of report?.daily ?? []) for (const p of d.projects) if (p.project_id) seen.set(p.project_id, p.project_name);
+  if (selected && !seen.has(selected)) seen.set(selected, 'Selected project');
+  return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }

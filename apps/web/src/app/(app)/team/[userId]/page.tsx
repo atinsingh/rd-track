@@ -31,7 +31,11 @@ export default function MemberDayPage() {
   );
   const member = report.data?.members.find((m) => m.user_id === userId);
   const name = member?.display_name ?? search.get('name') ?? 'Team member';
-  const visibility: Visibility | undefined = report.data?.visibility;
+  // What policy shares with this manager about this one person (not the team as a whole).
+  const vis = useApi(access.managesTeams && userId ? `visibility|${userId}` : null, (signal) => rd.person.visibility(userId, signal));
+  const visibility: Visibility | undefined = vis.data
+    ? { activity: vis.data.activity, apps: vis.data.apps, screenshots: vis.data.screenshots }
+    : undefined;
 
   if (!access.managesTeams) return <NoAccess what="Member pages are for team managers." />;
 
@@ -54,7 +58,9 @@ export default function MemberDayPage() {
         Your view of {name}&apos;s data is recorded and listed on their “What&apos;s collected” page. Computer activity
         can&apos;t see meetings, calls, reading or thinking.
       </Banner>
-      {teamId && report.loading && !report.data ? (
+      {vis.error ? (
+        <Banner tag="NOTE">You can&apos;t view this person&apos;s data. Only their team managers can.</Banner>
+      ) : !vis.data ? (
         <Loading label="Checking what policy shares with you" />
       ) : (
         <DayView
@@ -62,7 +68,7 @@ export default function MemberDayPage() {
           personName={name}
           date={date}
           tz={tz}
-          visibility={visibility ?? { activity: true, apps: true, screenshots: false }}
+          visibility={visibility ?? { activity: false, apps: false, screenshots: false }}
         />
       )}
     </>

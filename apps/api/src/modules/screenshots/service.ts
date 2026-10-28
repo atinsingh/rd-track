@@ -139,7 +139,10 @@ export async function listScreenshots(q: Queryable, orgId: string, userId: strin
   return many<ScreenshotDTO>(
     q,
     `SELECT s.id, s.session_id, s.user_id, s.captured_at, s.status, s.width, s.height, s.retention_after,
-            (SELECT d.status FROM deletion_requests d WHERE d.target_id = s.id ORDER BY d.created_at DESC LIMIT 1) AS deletion_request_status
+            (SELECT d.status FROM deletion_requests d WHERE d.target_id = s.id ORDER BY d.created_at DESC LIMIT 1) AS deletion_request_status,
+            (SELECT a.app_name FROM app_usage a WHERE a.session_id = s.session_id AND a.started_at <= s.captured_at
+               AND a.started_at + make_interval(secs => a.duration_seconds) > s.captured_at
+             ORDER BY a.started_at DESC LIMIT 1) AS app_name
      FROM screenshots s
      WHERE s.organization_id = $1 AND s.user_id = $2 AND s.status IN ('stored', 'verifying')
        AND s.captured_at >= $3 AND s.captured_at < $4

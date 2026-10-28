@@ -13,6 +13,17 @@ import { MemoryObjectStore } from '../src/storage/object-store';
 import { MemoryEmailSender } from '../src/email/sender';
 
 export const TEST_DB = process.env.TEST_DATABASE_URL ?? 'postgres://rd:rd@localhost:5432/rd_track_test';
+/**
+ * The API under test connects as a non-superuser role so row-level security (migration
+ * 003) is enforced exactly as in production; superusers would bypass it.
+ */
+const APP_ROLE = 'rd_app';
+export const TEST_APP_DB = (() => {
+  const u = new URL(TEST_DB);
+  u.username = APP_ROLE;
+  u.password = APP_ROLE;
+  return u.toString();
+})();
 export const PASSWORD = 'correct-horse-battery';
 
 /** A controllable clock: tests move time forward explicitly. */
@@ -31,8 +42,17 @@ export async function resetDatabase() {
   const c = new pg.Client({ connectionString: TEST_DB });
   await c.connect();
   await c.query('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-  await c.end();
+  await c.query(`DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${APP_ROLE}') THEN
+        CREATE ROLE ${APP_ROLE} LOGIN PASSWORD '${APP_ROLE}' NOSUPERUSER NOBYPASSRLS;
+      END IF;
+    END $$;`);
   await migrate(TEST_DB, () => undefined);
+  await c.query(`GRANT USAGE ON SCHEMA public TO ${APP_ROLE};
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO ${APP_ROLE};
+    GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${APP_ROLE};
+    GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO ${APP_ROLE};`);
+  await c.end();
 }
 
 export interface TestEnv {
@@ -51,7 +71,7 @@ export async function testEnv(overrides: Partial<Config> = {}): Promise<TestEnv>
   const store = new MemoryObjectStore();
   const config = loadConfig({ databaseUrl: TEST_DB, mfaRequiredForAdmins: false, authRateLimitPerMinute: 10_000, ...overrides });
   const email = new MemoryEmailSender();
-  const deps: Deps = { pool: createPool(TEST_DB), config, store, email, now: clock.now };
+  const deps: Deps = { pool: createPool(TEST_APP_DB), config, store, email, now: clock.now };
   const app = await buildApp(deps, { logger: Boolean(process.env.DEBUG_API) });
   return {
     app,
