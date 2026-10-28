@@ -372,6 +372,16 @@ export interface PolicyListResponse {
   org_revision: number;
   scopes: PolicyScopeDTO[];
 }
+/** GET /v1/policies/{scope_type}/{scope_id}: the scope's own document plus the effective
+ * result of organization (+ this scope) + plan, with per-field sources for "because …". */
+export interface PolicyScopeDetail {
+  scope: PolicyScopeDTO;
+  history: PolicyVersionDTO[];
+  effective: { settings: PolicySettings; sources: Record<string, FieldSource[]> };
+  /** fields the current plan blocks, e.g. "screenshots.enabled" on Standard */
+  plan_locked_fields: string[];
+  affected_users: number;
+}
 export interface ExpansionConflict {
   affected_users: number;
   changes: CollectionChange[];

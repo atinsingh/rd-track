@@ -220,16 +220,26 @@ acknowledged event loss").
 
 ### 5.4 Web endpoints (cookie auth)
 
-| Area | Endpoints |
+Response and request types live in `packages/contracts/src/api.ts`. Lists return
+`{ "items": [...] }`. Mutations require the `x-rd-csrf: 1` header.
+
+| Area | Endpoint → response |
 |---|---|
-| Me | `GET /v1/me`, `GET /v1/me/sessions?from&to`, `GET /v1/me/activity?from&to`, `GET /v1/me/apps?from&to`, `GET /v1/me/screenshots?from&to`, `GET /v1/me/corrections`, `POST /v1/me/time-corrections`, `POST /v1/me/deletion-requests`, `GET /v1/me/notifications`, `GET /v1/me/policy` (plain-language view of what is collected about me) |
-| Screenshots | `GET /v1/screenshots/{id}/view-url` → `{url, expires_at}` (60 s, audited) |
-| Team | `GET /v1/teams` (managed), `GET /v1/teams/{id}/report?from&to&tz`, `GET /v1/users/{id}/activity\|apps\|sessions\|screenshots?from&to` (authz-checked) |
-| Projects | `GET /v1/projects`, `GET /v1/projects/{id}/report?from&to` |
-| Corrections | `GET /v1/corrections/pending`, `POST /v1/corrections/{id}/approve\|reject` |
-| Exports | `POST /v1/exports {kind: "sessions"\|"activity_daily", from, to, team_id?, user_id?}`, `GET /v1/exports/{id}` → status + `download_url` when ready (expires 24 h) |
-| Admin | `GET/POST /v1/admin/users`, `POST /v1/admin/users/{id}/deactivate`, `GET/POST /v1/admin/teams`, `POST /v1/admin/teams/{id}/members`, `GET/POST /v1/admin/projects`, `POST /v1/admin/enrollment-codes`, `GET /v1/admin/devices`, `POST /v1/admin/devices/{id}/revoke`, `GET /v1/policies`, `GET /v1/policies/{scope_type}/{scope_id}`, `PUT /v1/policies/{scope_type}/{scope_id}`, `GET /v1/admin/deletion-requests`, `POST /v1/admin/deletion-requests/{id}/approve\|reject`, `POST /v1/admin/legal-holds` |
-| Audit | `GET /v1/audit-events?from&to&action&actor_id` (auditor, org admin) |
+| Auth | `POST /v1/auth/login` `{email,password}` → `LoginResponse` (sets cookie) · `POST /v1/auth/mfa/verify` `{code}` · `POST /v1/auth/mfa/enroll` → `MfaEnrollResponse` · `POST /v1/auth/mfa/enroll/confirm` `{code}` · `POST /v1/auth/logout` |
+| Me | `GET /v1/me` → `Me` · `GET /v1/me/sessions?from&to` → `SessionDTO[]` · `GET /v1/me/activity?from&to` → `ActivityResponse` · `GET /v1/me/apps?from&to` → `AppUsageResponse` · `GET /v1/me/screenshots?from&to` → `ScreenshotDTO[]` · `GET /v1/me/corrections` → `CorrectionDTO[]` · `POST /v1/me/time-corrections` → `CorrectionDTO` · `POST /v1/me/deletion-requests` → `DeletionRequestDTO` · `GET /v1/me/notifications` · `POST /v1/me/notifications/{id}/read` · `GET /v1/me/policy` → `MyPolicyResponse` · `GET /v1/me/access-log` → `AuditEventDTO[]` (who viewed my data) · `GET /v1/me/projects` → `ProjectDTO[]` |
+| People I may view | `GET /v1/users/{id}/sessions\|activity\|apps\|screenshots?from&to` (same shapes as Me; `authz.assertCanView`) · `GET /v1/screenshots/{id}/view-url` → `ViewUrlResponse` (60 s, audited) |
+| Team / project | `GET /v1/teams` → `TeamSummary[]` (managed) · `GET /v1/teams/{id}/report?from&to&tz` → `TeamReport` · `GET /v1/projects` → `ProjectDTO[]` (managed) · `GET /v1/projects/{id}/report?from&to` → `ProjectReport` |
+| Corrections | `GET /v1/corrections/pending` → `CorrectionDTO[]` · `POST /v1/corrections/{id}/approve\|reject` `{note?}` |
+| Exports | `POST /v1/exports` → `ExportDTO` · `GET /v1/exports` · `GET /v1/exports/{id}` |
+| Admin | `GET/POST /v1/admin/users` (`POST` → `{user, initial_password?}`) · `PATCH /v1/admin/users/{id}` · `POST /v1/admin/users/{id}/deactivate` · `GET/POST /v1/admin/teams` · `POST /v1/admin/teams/{id}/members` · `DELETE /v1/admin/teams/{id}/members/{user_id}` · `GET/POST /v1/admin/projects` · `POST /v1/admin/projects/{id}/tasks` · `POST /v1/admin/projects/{id}/members` · `POST /v1/admin/enrollment-codes` → `EnrollmentCodeResponse` · `GET /v1/admin/devices` → `DeviceDTO[]` · `POST /v1/admin/devices/{id}/revoke` · `GET /v1/admin/deletion-requests` · `POST /v1/admin/deletion-requests/{id}/approve\|reject` · `POST /v1/admin/legal-holds` |
+| Policies | `GET /v1/policies` → `PolicyListResponse` · `GET /v1/policies/{scope_type}/{scope_id}` → `PolicyScopeDetail` · `PUT /v1/policies/{scope_type}/{scope_id}` `{settings, change_note, confirm_expansion}` → `PolicyScopeDetail`, or `409 expansion_requires_confirmation` (details: `ExpansionConflict`), or `402 plan_upgrade_required` |
+| Billing | `GET /v1/billing/subscription` → `SubscriptionDTO` · `POST /v1/billing/plan` `{plan, seats}` → `SubscriptionDTO` |
+| Audit | `GET /v1/audit-events?from&to&action&actor_id&cursor` → `Page<AuditEventDTO>` (auditor, org admin) |
+
+Error codes the UI must handle: `unauthenticated` (401), `mfa_required` (403),
+`forbidden` (403), `not_found` (404), `validation_failed` (400),
+`expansion_requires_confirmation` (409), `seat_limit_reached` (409),
+`plan_upgrade_required` (402), `subscription_inactive` (403).
 
 ## 6. Key flows
 
