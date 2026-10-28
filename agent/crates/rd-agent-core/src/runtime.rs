@@ -176,7 +176,7 @@ pub enum Notice {
 }
 
 /// An unanswered idle-return prompt (at most one at a time).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IdlePrompt {
     /// Prompt id, passed back in [`Command::ResolveIdle`].
     pub id: Uuid,

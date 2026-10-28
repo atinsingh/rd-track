@@ -115,6 +115,23 @@ fn stop_session(ctl: Ctl<'_>) -> Result<(), String> {
     ctl.send(Command::Stop(StopReason::User))
 }
 
+/// The person's answer to the idle-return prompt. Only the popover calls this, on the
+/// person's click; nothing decides for them.
+#[tauri::command]
+async fn resolve_idle(
+    app: AppHandle,
+    ctl: Ctl<'_>,
+    id: String,
+    decision: String,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<AppView, String> {
+    let c = ctl.inner().clone();
+    blocking(move || c.resolve_idle(&id, &decision, project_id, task_id)).await?;
+    ctl.emit(&app);
+    Ok(ctl.view())
+}
+
 #[tauri::command]
 fn dismiss_banner(app: AppHandle, ctl: Ctl<'_>, id: String) {
     ctl.dismiss(&id);
@@ -242,6 +259,7 @@ fn main() {
             pause_session,
             resume_session,
             stop_session,
+            resolve_idle,
             dismiss_banner,
             open_dashboard,
             open_permission_settings,

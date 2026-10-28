@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
+use chrono::{Local, Utc};
 use rd_agent::config::{self, Paths};
 use rd_agent::native::logic::PromptLedger;
 use rd_agent::native::{self, NativePlatform, Permission};
@@ -22,7 +22,7 @@ use rd_agent_core::runtime::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::view::{self, Banner, BannerContext, SessionNotice, TrayState};
+use crate::view::{self, Banner, BannerContext, IdleView, SessionNotice, TrayState};
 
 /// Where the app is in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -69,6 +69,8 @@ pub struct AppView {
     pub sync: String,
     /// Banners.
     pub banners: Vec<Banner>,
+    /// The "Welcome back" panel while an idle-return prompt is unanswered.
+    pub idle: Option<IdleView>,
     /// Whether a session can be started now.
     pub can_start: bool,
     /// The policy requires a project.
@@ -460,6 +462,55 @@ impl Controller {
         Ok(notice)
     }
 
+    /// The person's answer to the idle-return prompt `id` (`keep`, `discard` or
+    /// `reassign` with a project from the offered list). Queued by the runtime as
+    /// `idle.decision.v1`; waits (≤ 2 s) until the prompt is cleared. Blocking.
+    pub fn resolve_idle(
+        &self,
+        id: &str,
+        decision: &str,
+        project_id: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<(), String> {
+        let decision = view::parse_idle_decision(decision).ok_or("unknown choice")?;
+        let id = uuid::Uuid::parse_str(id).map_err(|_| "unknown prompt")?;
+        let (project_id, task_id) = {
+            let i = lock(&self.inner);
+            let prompt = i
+                .live
+                .as_ref()
+                .and_then(|l| l.idle_prompt.as_ref())
+                .filter(|p| p.id == id)
+                .ok_or("This was already answered.")?;
+            if decision == rd_agent_core::events::IdleDecision::Reassign {
+                let v = view::idle_view(prompt, &i.projects, &Local);
+                view::check_idle_target(&v, project_id.as_deref(), task_id.as_deref())?;
+                (project_id, task_id)
+            } else {
+                (None, None)
+            }
+        };
+        self.send(Command::ResolveIdle {
+            id,
+            decision,
+            project_id,
+            task_id,
+        })?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let pending = lock(&self.inner)
+                .live
+                .as_ref()
+                .and_then(|l| l.idle_prompt.as_ref())
+                .is_some_and(|p| p.id == id);
+            if !pending {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err("Your choice was not saved. Try again.".into())
+    }
+
     /// Dismisses a banner.
     pub fn dismiss(&self, id: &str) {
         let mut i = lock(&self.inner);
@@ -547,6 +598,9 @@ impl Controller {
                 .map(|l| view::sync_line(l, Utc::now()))
                 .unwrap_or_else(|| "Starting…".into()),
             banners,
+            idle: live
+                .and_then(|l| l.idle_prompt.as_ref())
+                .map(|p| view::idle_view(p, &i.projects, &Local)),
             can_start: live.is_some_and(|l| {
                 l.session.is_none() && l.agent.tracking_unavailable.is_none() && !l.revoked
             }),
@@ -618,6 +672,11 @@ impl RuntimeObserver for Observer {
     }
 
     fn notice(&mut self, notice: &Notice) {
+        if let Notice::IdleReturn { .. } = notice {
+            // The panel itself comes from `LiveStatus::idle_prompt`; bring it into view.
+            crate::tray::show_for_prompt(&self.app);
+            return;
+        }
         let mut i = lock(&self.ctl.inner);
         let id = i.next_notice;
         i.next_notice += 1;
