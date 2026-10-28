@@ -1,14 +1,15 @@
 //! Pure view-model logic for the tray popover: everything the UI shows is computed
 //! here from the runtime's [`LiveStatus`], so it is unit tested without a window.
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use rd_agent_core::api::{DeviceProject, LicenseStatus};
 use rd_agent_core::describe::{
     describe_collection, format_duration, CollectionItem, NEVER_COLLECTED,
 };
+use rd_agent_core::events::IdleDecision;
 use rd_agent_core::platform::PermissionStatus;
 use rd_agent_core::policy::PolicySettings;
-use rd_agent_core::runtime::{LiveStatus, Notice, PolicyPreview};
+use rd_agent_core::runtime::{IdlePrompt, LiveStatus, Notice, PolicyPreview};
 use serde::Serialize;
 
 /// Tray icon state.
@@ -227,6 +228,107 @@ pub fn session_notice(
     }
 }
 
+/// "28 min", "1 h", "1 h 5 min": an idle span, rounded to the minute (at least 1).
+pub fn away_duration(seconds: u32) -> String {
+    let minutes = ((seconds + 30) / 60).max(1);
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+/// The "Welcome back" panel for an unanswered idle-return prompt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdleView {
+    /// Prompt id, passed back to `resolve_idle`.
+    pub id: String,
+    /// "You were away for 28 min".
+    pub title: String,
+    /// "09:12 – 09:41" (local time; with dates when the span crosses midnight).
+    pub times: String,
+    /// The session's project name, or "No project".
+    pub project: String,
+    /// "Keep 28 min".
+    pub keep_label: String,
+    /// "Remove 28 min".
+    pub discard_label: String,
+    /// "Send for approval".
+    pub reassign_label: &'static str,
+    /// Projects the time can be moved to (the session's own project left out).
+    pub targets: Vec<DeviceProject>,
+}
+
+/// Builds the idle-return panel; times are shown in `tz` (the device's local zone).
+pub fn idle_view<Tz: TimeZone>(prompt: &IdlePrompt, projects: &[DeviceProject], tz: &Tz) -> IdleView
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let duration = away_duration(prompt.seconds);
+    let (from, to) = (
+        prompt.started_at.with_timezone(tz),
+        prompt.ended_at.with_timezone(tz),
+    );
+    let times = if from.date_naive() == to.date_naive() {
+        format!("{} – {}", from.format("%H:%M"), to.format("%H:%M"))
+    } else {
+        format!(
+            "{} – {}",
+            from.format("%-d %b %H:%M"),
+            to.format("%-d %b %H:%M")
+        )
+    };
+    let project = match prompt.project_id.as_deref() {
+        Some(id) => project_name(projects, Some(id)).unwrap_or(id).to_owned(),
+        None => "No project".to_owned(),
+    };
+    IdleView {
+        id: prompt.id.to_string(),
+        title: format!("You were away for {duration}"),
+        times,
+        project,
+        keep_label: format!("Keep {duration}"),
+        discard_label: format!("Remove {duration}"),
+        reassign_label: "Send for approval",
+        targets: projects
+            .iter()
+            .filter(|p| Some(p.id.as_str()) != prompt.project_id.as_deref())
+            .cloned()
+            .collect(),
+    }
+}
+
+/// Parses the popover's choice (`keep`, `discard`, `reassign`).
+pub fn parse_idle_decision(s: &str) -> Option<IdleDecision> {
+    match s {
+        "keep" => Some(IdleDecision::Keep),
+        "discard" => Some(IdleDecision::Discard),
+        "reassign" => Some(IdleDecision::Reassign),
+        _ => None,
+    }
+}
+
+/// Checks a `reassign` target against the project list the popover offered: the
+/// project must be listed (and not the session's own), the task one of its tasks.
+pub fn check_idle_target(
+    view: &IdleView,
+    project_id: Option<&str>,
+    task_id: Option<&str>,
+) -> Result<(), String> {
+    let pid = project_id.ok_or("Choose the project to move this time to.")?;
+    let p = view
+        .targets
+        .iter()
+        .find(|p| p.id == pid)
+        .ok_or("Choose one of the listed projects.")?;
+    if let Some(t) = task_id {
+        if !p.tasks.iter().any(|x| x.id == t) {
+            return Err("Choose one of the project's tasks.".into());
+        }
+    }
+    Ok(())
+}
+
 /// Inputs to [`banners`] beyond the runtime status.
 #[derive(Debug, Clone, Default)]
 pub struct BannerContext<'a> {
@@ -330,6 +432,8 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
             ),
             Notice::OutsideWorkHours => continue, // shown from the live status above
             Notice::LicenseUnavailable { .. } | Notice::Revoked => continue,
+            // Shown as its own panel from `LiveStatus::idle_prompt`.
+            Notice::IdleReturn { .. } => continue,
             Notice::LicenseRestored => {
                 Banner::new(format!("n{id}"), "info", "Tracking is available again.")
             }
@@ -467,6 +571,7 @@ mod tests {
             sync: SyncStatus::default(),
             outbox_depth: 0,
             revoked: false,
+            idle_prompt: None,
         }
     }
 
@@ -660,6 +765,108 @@ mod tests {
         let b = banners(Some(&l), &BannerContext::default());
         assert_eq!(b[0].id, "license-grace");
         assert!(b[0].text.contains("31 Oct 2026"));
+    }
+
+    fn prompt(seconds: u32, project: Option<&str>) -> IdlePrompt {
+        serde_json::from_value(serde_json::json!({
+            "id": "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+            "session_id": "00000000-0000-0000-0000-000000000000",
+            "started_at": "2026-10-28T09:12:30Z",
+            "ended_at": "2026-10-28T09:41:00Z",
+            "seconds": seconds,
+            "project_id": project,
+            "task_id": null
+        }))
+        .unwrap()
+    }
+
+    fn projects() -> Vec<DeviceProject> {
+        serde_json::from_value(serde_json::json!([
+            {"id": "p1", "name": "Client A"},
+            {"id": "p2", "name": "Client B", "tasks": [{"id": "t1", "name": "Design"}]},
+        ]))
+        .unwrap()
+    }
+
+    #[test]
+    fn away_durations_round_to_the_minute() {
+        assert_eq!(away_duration(29), "1 min");
+        assert_eq!(away_duration(60), "1 min");
+        assert_eq!(away_duration(1710), "29 min");
+        assert_eq!(away_duration(1689), "28 min");
+        assert_eq!(away_duration(3600), "1 h");
+        assert_eq!(away_duration(3900), "1 h 5 min");
+    }
+
+    #[test]
+    fn idle_panel_wording_times_and_targets() {
+        let v = idle_view(&prompt(1710, Some("p1")), &projects(), &Utc);
+        assert_eq!(v.id, "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b");
+        assert_eq!(v.title, "You were away for 29 min");
+        assert_eq!(v.times, "09:12 – 09:41");
+        assert_eq!(v.project, "Client A");
+        assert_eq!(v.keep_label, "Keep 29 min");
+        assert_eq!(v.discard_label, "Remove 29 min");
+        assert_eq!(v.reassign_label, "Send for approval");
+        let ids: Vec<_> = v.targets.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["p2"], "the session's own project is not a target");
+
+        let v = idle_view(&prompt(1710, None), &projects(), &Utc);
+        assert_eq!(v.project, "No project");
+        assert_eq!(v.targets.len(), 2);
+        let v = idle_view(&prompt(1710, Some("p9")), &[], &Utc);
+        assert_eq!(v.project, "p9", "unknown project: show its id");
+
+        // Shown in the device's zone, with dates when the span crosses midnight.
+        let mut p = prompt(36_000, None);
+        p.started_at = Utc.with_ymd_and_hms(2026, 10, 28, 22, 10, 0).unwrap();
+        p.ended_at = Utc.with_ymd_and_hms(2026, 10, 29, 8, 10, 0).unwrap();
+        let riga = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        assert_eq!(idle_view(&p, &[], &riga).times, "00:10 – 10:10");
+        assert_eq!(
+            idle_view(&p, &[], &Utc).times,
+            "28 Oct 22:10 – 29 Oct 08:10"
+        );
+    }
+
+    #[test]
+    fn idle_choices_and_targets_are_checked() {
+        assert_eq!(parse_idle_decision("keep"), Some(IdleDecision::Keep));
+        assert_eq!(parse_idle_decision("discard"), Some(IdleDecision::Discard));
+        assert_eq!(
+            parse_idle_decision("reassign"),
+            Some(IdleDecision::Reassign)
+        );
+        assert_eq!(parse_idle_decision("delete"), None);
+        let v = idle_view(&prompt(600, Some("p1")), &projects(), &Utc);
+        assert!(check_idle_target(&v, Some("p2"), None).is_ok());
+        assert!(check_idle_target(&v, Some("p2"), Some("t1")).is_ok());
+        assert!(check_idle_target(&v, None, None).is_err());
+        assert!(
+            check_idle_target(&v, Some("p1"), None).is_err(),
+            "own project"
+        );
+        assert!(check_idle_target(&v, Some("zz"), None).is_err());
+        assert!(check_idle_target(&v, Some("p2"), Some("t9")).is_err());
+    }
+
+    #[test]
+    fn idle_return_notice_is_not_a_banner() {
+        let notices = vec![(
+            3,
+            Notice::IdleReturn {
+                id: uuid::Uuid::nil(),
+                started_at: t(0),
+                ended_at: t(600),
+                seconds: 600,
+                project_id: None,
+            },
+        )];
+        let ctx = BannerContext {
+            notices: &notices,
+            ..Default::default()
+        };
+        assert!(banners(Some(&live()), &ctx).is_empty());
     }
 
     #[test]

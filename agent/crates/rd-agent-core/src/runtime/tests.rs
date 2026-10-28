@@ -1174,3 +1174,462 @@ fn runtime_publishes_live_status_and_previews_to_the_observer() {
     assert_eq!(last.agent.state, "stopped");
     assert!(!last.revoked);
 }
+
+// ----- idle return prompt (Stage 4 F1) ---------------------------------------------
+
+fn at(h: u32, m: u32, s: u32) -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 10, 28, h, m, s).unwrap()
+}
+
+fn active_input() -> InputSample {
+    InputSample {
+        keyboard_count: 3,
+        mouse_count: 5,
+        counts_available: true,
+        seconds_since_last_input: Some(0.1),
+    }
+}
+
+/// Base policy revision 5 with a 60 s idle threshold plus `extra` idle settings.
+fn idle_policy(h: &mut Harness, extra: Value) {
+    let mut idle = json!({"threshold_seconds": 60});
+    if let (Some(a), Some(b)) = (idle.as_object_mut(), extra.as_object()) {
+        a.extend(b.clone());
+    }
+    h.agent
+        .on_policy(None, &doc(None, 5, json!({ "idle": idle })));
+}
+
+/// `secs` seconds without input (the OS idle timer counting up).
+fn away(h: &mut Harness, secs: u32) {
+    for i in 1..=secs {
+        h.input.idle(f64::from(i));
+        h.step(1);
+    }
+}
+
+/// `secs` seconds without input, then one second with input.
+fn away_and_back(h: &mut Harness, secs: u32) {
+    away(h, secs);
+    h.input.set(active_input());
+    h.step(1);
+}
+
+fn idle_returns(notices: &[Notice]) -> Vec<Notice> {
+    notices
+        .iter()
+        .filter(|n| matches!(n, Notice::IdleReturn { .. }))
+        .cloned()
+        .collect()
+}
+
+fn decisions(h: &Harness) -> Vec<Envelope> {
+    h.of_type("idle.decision.v1")
+}
+
+#[test]
+fn idle_return_publishes_a_notice_and_one_pending_prompt() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    let session = h.agent.start(Some("p1".into()), Some("t1".into())).unwrap();
+    h.step(30); // active to 09:01:00
+    away_and_back(&mut h, 120); // idle 09:01:00–09:03:00, back at 09:03:00
+    let notices = idle_returns(&h.agent.take_notices());
+    let prompt = h.agent.idle_prompt().cloned().expect("a pending prompt");
+    assert_eq!(
+        notices,
+        vec![Notice::IdleReturn {
+            id: prompt.id,
+            started_at: at(9, 1, 0),
+            ended_at: at(9, 3, 0),
+            seconds: 120,
+            project_id: Some("p1".into()),
+        }]
+    );
+    assert_eq!(prompt.session_id, session);
+    assert_eq!(prompt.task_id.as_deref(), Some("t1"));
+    // The notice serializes for the UI with RFC 3339 times.
+    let v = serde_json::to_value(&notices[0]).unwrap();
+    assert_eq!(v["kind"], "idle_return");
+    assert_eq!(v["started_at"], "2026-10-28T09:01:00Z");
+    assert_eq!(v["ended_at"], "2026-10-28T09:03:00Z");
+    // Prompting sends nothing and changes nothing: tracking carries on.
+    assert!(decisions(&h).is_empty());
+    assert_eq!(h.agent.state(), SessionState::Active);
+    h.step(10);
+    assert!(h.agent.take_notices().is_empty(), "notified once");
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.tracked_seconds(), (30 + 1 + 10, 120));
+}
+
+#[test]
+fn resolving_queues_the_exact_idle_decision_event_and_clears_the_prompt() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    let session = h.agent.start(Some("p1".into()), None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 120);
+    h.step(5); // answered at 09:03:06
+    let id = h.agent.idle_prompt().unwrap().id;
+    let before = h.events().last().unwrap().sequence;
+    assert!(h
+        .agent
+        .resolve_idle(id, IdleDecision::Discard, Some("ignored".into()), None)
+        .unwrap());
+    assert!(h.agent.idle_prompt().is_none(), "cleared once answered");
+    let evs = decisions(&h);
+    assert_eq!(evs.len(), 1);
+    let e = &evs[0];
+    assert!(e.sequence > before);
+    assert_eq!(e.event_id.get_version_num(), 4);
+    let mut v = serde_json::to_value(e).unwrap();
+    let obj = v.as_object_mut().unwrap();
+    obj.remove("event_id");
+    obj.remove("sequence");
+    assert_eq!(
+        v,
+        json!({
+            "organization_id": "org",
+            "device_id": "dev",
+            "session_id": session.to_string(),
+            "policy_version": 5,
+            "event_type": "idle.decision.v1",
+            "occurred_at": "2026-10-28T09:03:06Z",
+            "monotonic_ms": 156_000,
+            "payload": {
+                "idle_started_at": "2026-10-28T09:01:00Z",
+                "idle_ended_at": "2026-10-28T09:03:00Z",
+                "decision": "discard"
+            }
+        })
+    );
+    // A second answer (double click, stale window) or an unknown id is ignored.
+    assert!(!h
+        .agent
+        .resolve_idle(id, IdleDecision::Keep, None, None)
+        .unwrap());
+    assert!(!h
+        .agent
+        .resolve_idle(Uuid::new_v4(), IdleDecision::Keep, None, None)
+        .unwrap());
+    assert_eq!(decisions(&h).len(), 1);
+    // Tracking carried on; the server, not the agent, removes the idle seconds.
+    assert_eq!(h.agent.state(), SessionState::Active);
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.tracked_seconds(), (36, 120));
+}
+
+#[test]
+fn reassign_needs_a_project_and_keep_sends_no_project() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    h.agent.start(Some("p1".into()), None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 90);
+    let id = h.agent.idle_prompt().unwrap().id;
+    assert!(matches!(
+        h.agent
+            .resolve_idle(id, IdleDecision::Reassign, None, Some("t9".into())),
+        Err(AgentError::IdleProjectRequired)
+    ));
+    assert!(matches!(
+        h.agent
+            .resolve_idle(id, IdleDecision::Reassign, Some(String::new()), None),
+        Err(AgentError::IdleProjectRequired)
+    ));
+    assert!(
+        h.agent.idle_prompt().is_some(),
+        "still pending after a refusal"
+    );
+    assert!(decisions(&h).is_empty());
+    assert!(h
+        .agent
+        .resolve_idle(
+            id,
+            IdleDecision::Reassign,
+            Some("p2".into()),
+            Some("t9".into())
+        )
+        .unwrap());
+    let v = serde_json::to_value(&decisions(&h)[0]).unwrap();
+    assert_eq!(
+        v["payload"],
+        json!({
+            "idle_started_at": "2026-10-28T09:01:00Z",
+            "idle_ended_at": "2026-10-28T09:02:30Z",
+            "decision": "reassign",
+            "project_id": "p2",
+            "task_id": "t9"
+        })
+    );
+
+    away_and_back(&mut h, 90);
+    let id = h.agent.idle_prompt().unwrap().id;
+    h.agent
+        .resolve_idle(id, IdleDecision::Keep, Some("p2".into()), Some("t9".into()))
+        .unwrap();
+    let v = serde_json::to_value(&decisions(&h)[1]).unwrap();
+    assert_eq!(
+        v["payload"],
+        json!({
+            "idle_started_at": "2026-10-28T09:02:31Z",
+            "idle_ended_at": "2026-10-28T09:04:01Z",
+            "decision": "keep"
+        })
+    );
+}
+
+#[test]
+fn prompt_on_return_false_never_prompts_and_never_sends() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({"prompt_on_return": false}));
+    h.agent.start(None, None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 300);
+    assert!(idle_returns(&h.agent.take_notices()).is_empty());
+    assert!(h.agent.idle_prompt().is_none());
+    h.agent.stop(StopReason::User).unwrap();
+    assert!(decisions(&h).is_empty());
+    // The idle time is kept, exactly as before F1.
+    assert_eq!(h.tracked_seconds(), (31, 300));
+}
+
+#[test]
+fn turning_prompts_off_drops_a_pending_prompt_as_keep() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 90);
+    let id = h.agent.idle_prompt().unwrap().id;
+    h.agent.on_policy(
+        None,
+        &doc(None, 6, json!({"idle": {"prompt_on_return": false}})),
+    );
+    assert!(h.agent.idle_prompt().is_none());
+    assert!(!h
+        .agent
+        .resolve_idle(id, IdleDecision::Discard, None, None)
+        .unwrap());
+    assert!(decisions(&h).is_empty());
+}
+
+#[test]
+fn a_newer_idle_run_replaces_an_unanswered_prompt_which_counts_as_keep() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 90); // 09:01:00–09:02:30
+    let first = h.agent.idle_prompt().unwrap().id;
+    h.step(10);
+    away_and_back(&mut h, 75); // 09:02:41–09:03:56
+    let second = h.agent.idle_prompt().cloned().unwrap();
+    assert_ne!(second.id, first);
+    assert_eq!(
+        (second.started_at, second.ended_at, second.seconds),
+        (at(9, 2, 41), at(9, 3, 56), 75)
+    );
+    assert_eq!(
+        idle_returns(&h.agent.take_notices()).len(),
+        2,
+        "one notice per run"
+    );
+    // The replaced prompt can no longer be answered, and sent nothing.
+    assert!(!h
+        .agent
+        .resolve_idle(first, IdleDecision::Discard, None, None)
+        .unwrap());
+    assert!(decisions(&h).is_empty());
+    h.agent
+        .resolve_idle(second.id, IdleDecision::Discard, None, None)
+        .unwrap();
+    let evs = decisions(&h);
+    assert_eq!(evs.len(), 1);
+    assert_eq!(
+        serde_json::to_value(&evs[0]).unwrap()["payload"]["idle_started_at"],
+        "2026-10-28T09:02:41Z"
+    );
+}
+
+#[test]
+fn pause_suspend_and_stop_during_an_idle_run_are_not_a_return() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    h.step(30);
+
+    // Away, then paused (work hours, or the tray menu), then resumed with input.
+    away(&mut h, 120);
+    h.agent.pause().unwrap();
+    h.step(30);
+    h.input.set(active_input());
+    h.agent.resume().unwrap();
+    h.step(5);
+    assert!(h.agent.idle_prompt().is_none(), "pause is not a return");
+
+    // Away, then the machine sleeps for an hour and wakes with the person back.
+    away(&mut h, 120);
+    h.clock.advance(Duration::from_secs(3600));
+    h.input.set(active_input());
+    h.agent.tick();
+    h.step(5);
+    assert!(h.agent.idle_prompt().is_none(), "suspend is not a return");
+    assert_eq!(h.of_type("data_gap.v1").len(), 1);
+
+    // Away, then the wall clock jumps.
+    away(&mut h, 120);
+    h.clock.advance(Duration::from_secs(1));
+    h.clock.jump_wall(TimeDelta::hours(1));
+    h.input.set(active_input());
+    h.agent.tick();
+    h.step(5);
+    assert!(
+        h.agent.idle_prompt().is_none(),
+        "a clock change is not a return"
+    );
+
+    // Away, then stopped.
+    away(&mut h, 120);
+    h.agent.stop(StopReason::User).unwrap();
+    assert!(h.agent.idle_prompt().is_none(), "stop is not a return");
+    assert!(idle_returns(&h.agent.take_notices()).is_empty());
+    assert!(decisions(&h).is_empty());
+}
+
+#[test]
+fn a_prompt_answered_after_stop_belongs_to_the_session_of_the_idle_run() {
+    let mut h = harness();
+    idle_policy(&mut h, json!({}));
+    let first = h.agent.start(Some("p1".into()), None).unwrap();
+    h.step(30);
+    away_and_back(&mut h, 90);
+    h.agent.stop(StopReason::User).unwrap();
+    let second = h.agent.start(None, None).unwrap();
+    h.step(3);
+    let id = h.agent.idle_prompt().unwrap().id;
+    h.agent
+        .resolve_idle(id, IdleDecision::Discard, None, None)
+        .unwrap();
+    let evs = decisions(&h);
+    assert_eq!(evs.len(), 1);
+    assert_eq!(evs[0].session_id, first);
+    assert_ne!(evs[0].session_id, second);
+    // Milliseconds since the first session's start, on the same monotonic clock.
+    assert_eq!(evs[0].monotonic_ms, (30 + 90 + 1 + 3) * 1000);
+}
+
+#[test]
+fn spans_longer_than_twelve_hours_are_sent_in_pieces() {
+    let start = at(20, 0, 0);
+    let end = start + TimeDelta::hours(13) + TimeDelta::minutes(30);
+    let p = idle_decision_payloads(start, end, IdleDecision::Reassign, Some("p2".into()), None);
+    assert_eq!(p.len(), 2);
+    assert_eq!(p[0].idle_started_at, start);
+    assert_eq!(p[0].idle_ended_at, start + TimeDelta::hours(12));
+    assert_eq!(p[1].idle_started_at, p[0].idle_ended_at);
+    assert_eq!(p[1].idle_ended_at, end);
+    assert!(p.iter().all(|x| x.project_id.as_deref() == Some("p2")));
+    let exactly = idle_decision_payloads(
+        start,
+        start + TimeDelta::hours(12),
+        IdleDecision::Keep,
+        Some("x".into()),
+        Some("y".into()),
+    );
+    assert_eq!(exactly.len(), 1);
+    assert_eq!(
+        (exactly[0].project_id.clone(), exactly[0].task_id.clone()),
+        (None, None)
+    );
+    assert!(idle_decision_payloads(start, start, IdleDecision::Keep, None, None).is_empty());
+}
+
+#[test]
+fn runtime_resolve_idle_command_queues_the_event_and_clears_live_status() {
+    let clock = FakeClock::new(t0());
+    let input = FakeInput::new();
+    let outbox = shared_outbox();
+    let (mut rt, _handle) = Runtime::new(
+        AgentConfig::new(identity()),
+        RuntimeDeps {
+            clock: Arc::new(clock.clone()),
+            input: Box::new(input.clone()),
+            foreground: Box::new(FakeForeground::new("app")),
+            capturer: FakeCapturer::new(64, 32),
+            transport: FakeTransport::new(),
+            credentials: Arc::new(MemoryCredentials::default()),
+            outbox: outbox.clone(),
+            device_credential: "cred".into(),
+            seed: Some(1),
+        },
+    )
+    .unwrap();
+    rt.agent_mut().on_policy(
+        None,
+        &doc(None, 5, json!({"idle": {"threshold_seconds": 60}})),
+    );
+    let rec = Recorder::default();
+    let mut rt = rt.with_observer(Box::new(rec.clone()));
+    rt.handle_command(Command::Start {
+        project_id: Some("p1".into()),
+        task_id: None,
+    });
+    let tick = |rt: &mut Runtime, n: u32| {
+        for _ in 0..n {
+            clock.advance(Duration::from_secs(1));
+            rt.agent.tick();
+            rt.forward_agent_outputs();
+        }
+    };
+    tick(&mut rt, 30);
+    for i in 1..=90 {
+        input.idle(f64::from(i));
+        tick(&mut rt, 1);
+    }
+    input.set(active_input());
+    tick(&mut rt, 1);
+    let prompt = rt.live_status().idle_prompt.expect("published for the UI");
+    assert_eq!(prompt.seconds, 90);
+    assert_eq!(prompt.project_id.as_deref(), Some("p1"));
+    assert!(rec
+        .0
+        .lock()
+        .unwrap()
+        .1
+        .iter()
+        .any(|n| matches!(n, Notice::IdleReturn { id, .. } if *id == prompt.id)));
+    // Stale ids are ignored without touching the pending prompt.
+    rt.handle_command(Command::ResolveIdle {
+        id: Uuid::new_v4(),
+        decision: IdleDecision::Discard,
+        project_id: None,
+        task_id: None,
+    });
+    assert!(rt.live_status().idle_prompt.is_some());
+    rt.handle_command(Command::ResolveIdle {
+        id: prompt.id,
+        decision: IdleDecision::Keep,
+        project_id: None,
+        task_id: None,
+    });
+    let (statuses, _) = rec.0.lock().unwrap().clone();
+    assert!(
+        statuses.last().unwrap().idle_prompt.is_none(),
+        "the published status clears the prompt"
+    );
+    let queued = lock(&outbox).peek_oldest(1000).unwrap();
+    let ev: Vec<_> = queued
+        .iter()
+        .filter(|e| e.body.event_type() == "idle.decision.v1")
+        .collect();
+    assert_eq!(ev.len(), 1);
+    assert_eq!(
+        serde_json::to_value(ev[0]).unwrap()["payload"],
+        json!({
+            "idle_started_at": "2026-10-28T09:01:00Z",
+            "idle_ended_at": "2026-10-28T09:02:30Z",
+            "decision": "keep"
+        })
+    );
+}

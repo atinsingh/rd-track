@@ -116,6 +116,28 @@ pub fn show_centered(app: &AppHandle) {
     }
 }
 
+/// Shows the popover for the idle-return prompt: under (or above) the tray icon when
+/// its position is known, else centred. It does not take focus, so keys the person is
+/// typing as they come back stay in their own app (and cannot pick a choice).
+pub fn show_for_prompt(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    if w.is_visible().unwrap_or(false) {
+        return;
+    }
+    match app
+        .tray_by_id(TRAY_ID)
+        .and_then(|t| t.rect().ok().flatten())
+    {
+        Some(rect) => place_at(app, &w, rect),
+        None => {
+            let _ = w.center();
+        }
+    }
+    let _ = w.show();
+}
+
 fn toggle_at(app: &AppHandle, rect: Rect) {
     let Some(w) = app.get_webview_window("main") else {
         return;
@@ -127,6 +149,13 @@ fn toggle_at(app: &AppHandle, rect: Rect) {
     if now_ms().saturating_sub(LAST_BLUR_HIDE_MS.load(Ordering::Relaxed)) < 300 {
         return;
     }
+    place_at(app, &w, rect);
+    let _ = w.show();
+    let _ = w.set_focus();
+}
+
+/// Positions the popover next to the tray icon at `rect`.
+fn place_at(app: &AppHandle, w: &tauri::WebviewWindow, rect: Rect) {
     let scale = w.scale_factor().unwrap_or(1.0);
     let pos = rect.position.to_physical::<f64>(scale);
     let size = rect.size.to_physical::<f64>(scale);
@@ -157,6 +186,4 @@ fn toggle_at(app: &AppHandle, rect: Rect) {
             let _ = w.center();
         }
     }
-    let _ = w.show();
-    let _ = w.set_focus();
 }

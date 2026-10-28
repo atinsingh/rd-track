@@ -16,6 +16,17 @@ interface BannerAction { label: string; command: string; arg: string | null }
 interface Banner { id: string; kind: "info" | "warn"; text: string; action: BannerAction | null; dismissible: boolean }
 interface Task { id: string; name: string }
 interface Project { id: string; name: string; tasks: Task[] }
+interface IdleView {
+  id: string;
+  title: string;
+  times: string;
+  project: string;
+  keep_label: string;
+  discard_label: string;
+  reassign_label: string;
+  targets: Project[];
+}
+type IdleDecision = "keep" | "discard" | "reassign";
 interface AppView {
   phase: "enroll" | "starting" | "running" | "stopping" | "revoked" | "error";
   error: string | null;
@@ -29,6 +40,7 @@ interface AppView {
   activity: string | null;
   sync: string;
   banners: Banner[];
+  idle: IdleView | null;
   can_start: boolean;
   require_project: boolean;
   projects: Project[];
@@ -61,6 +73,13 @@ let busy = false;
 let error: string | null = null;
 let projectsRequested = false;
 const enrollForm = { server: "", code: "", name: "" };
+// The person's pending choice on the idle-return panel (reset for each new prompt).
+const idleChoice: { id: string; decision: IdleDecision; project: string; task: string } = {
+  id: "",
+  decision: "keep",
+  project: "",
+  task: "",
+};
 
 // ----- tiny DOM helper ------------------------------------------------------------------
 
@@ -292,8 +311,123 @@ function sessionButtons(v: AppView): HTMLElement {
   );
 }
 
+function onResolveIdle(iv: IdleView): void {
+  const move = idleChoice.decision === "reassign";
+  void run(async () => {
+    view = await invoke<AppView>("resolve_idle", {
+      id: iv.id,
+      decision: idleChoice.decision,
+      projectId: move ? opt(idleChoice.project) : null,
+      taskId: move ? opt(idleChoice.task) : null,
+    });
+  });
+}
+
+// "Welcome back": what should happen to the idle run the person just came back from.
+// Only they can answer; tracking carries on whatever they pick.
+function idleView(v: AppView, iv: IdleView): HTMLElement {
+  if (idleChoice.id !== iv.id) {
+    Object.assign(idleChoice, { id: iv.id, decision: "keep", project: "", task: "" });
+    error = null;
+  }
+  const canMove = iv.targets.length > 0;
+  const choice = (value: IdleDecision, text: string, enabled = true): HTMLElement => {
+    const on = idleChoice.decision === value;
+    return h(
+      "label",
+      { class: `choice${on ? " on" : ""}${enabled ? "" : " disabled"}` },
+      h("input", {
+        type: "radio",
+        name: "idle-choice",
+        value,
+        checked: on,
+        disabled: busy || !enabled,
+        onchange: () => {
+          idleChoice.decision = value;
+          error = null;
+          render();
+        },
+      }),
+      h("span", {}, text),
+    );
+  };
+  const move = idleChoice.decision === "reassign";
+  const target = iv.targets.find((p) => p.id === idleChoice.project);
+  const tasks = target?.tasks ?? [];
+  const picker: Node[] = [];
+  if (move) {
+    const projectSelect = h(
+      "select",
+      {
+        disabled: busy,
+        onchange: (e: Event) => {
+          idleChoice.project = (e.target as HTMLSelectElement).value;
+          idleChoice.task = "";
+          render();
+        },
+      },
+      h("option", { value: "" }, "Choose a project…"),
+      ...iv.targets.map((p) => h("option", { value: p.id }, p.name)),
+    );
+    projectSelect.value = idleChoice.project;
+    picker.push(h("label", { class: "field" }, "Project", projectSelect));
+    if (tasks.length > 0) {
+      const taskSelect = h(
+        "select",
+        {
+          disabled: busy,
+          onchange: (e: Event) => {
+            idleChoice.task = (e.target as HTMLSelectElement).value;
+          },
+        },
+        h("option", { value: "" }, "No task"),
+        ...tasks.map((t) => h("option", { value: t.id }, t.name)),
+      );
+      taskSelect.value = idleChoice.task;
+      picker.push(h("label", { class: "field" }, "Task", taskSelect));
+    }
+    picker.push(h("p", { class: "hint" }, "Goes to your manager for approval, like any correction."));
+  }
+  const primary =
+    idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;
+  return h(
+    "section",
+    { class: "popover", "aria-labelledby": "idle-h" },
+    header(v),
+    h(
+      "div",
+      { class: "idle-panel" },
+      h("span", { class: "eyebrow" }, "Welcome back"),
+      h("h1", { class: "title", id: "idle-h" }, iv.title),
+      h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project),
+      h(
+        "fieldset",
+        { class: "choices" },
+        h("legend", { class: "sr-only" }, "What should happen to this time?"),
+        choice("keep", "Keep it as working time"),
+        choice("discard", "Remove it"),
+        choice("reassign", "Move it to another project", canMove),
+      ),
+      !canMove && h("p", { class: "hint" }, "There is no other project to move it to."),
+      ...picker,
+      error && h("p", { class: "error", role: "alert" }, error),
+      h(
+        "div",
+        { class: "actions one" },
+        h(
+          "button",
+          { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) },
+          primary,
+        ),
+      ),
+      h("p", { class: "idle-foot" }, "Your choice — your manager can't make it for you. Tracking carries on either way."),
+    ),
+  );
+}
+
 function mainView(v: AppView): HTMLElement {
   loadProjects();
+  if (v.idle) return idleView(v, v.idle);
   return h(
     "section",
     { class: "popover", "aria-label": "RoundDigital Track" },
