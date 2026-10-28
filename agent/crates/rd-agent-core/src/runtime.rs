@@ -23,13 +23,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::activity::ActivityAggregator;
+use crate::activity::{ActivityAggregator, IdleRun};
 use crate::api::{ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo};
 use crate::apps::AppTracker;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
 use crate::events::{
-    ActivityBucket, DataGap, DataQuality, EventBody, GapReason, PauseReason, SessionStopped,
-    StopReason,
+    ActivityBucket, DataGap, DataQuality, EventBody, GapReason, IdleDecision, IdleDecisionPayload,
+    PauseReason, SessionStopped, StopReason, MAX_IDLE_SPAN_SECONDS,
 };
 use crate::identity::DeviceIdentity;
 use crate::outbox::{lock, NewEvent, OutboxConfig, OutboxPolicyCache, SharedOutbox};
@@ -74,6 +74,9 @@ pub enum AgentError {
     /// Local storage error.
     #[error(transparent)]
     Outbox(#[from] crate::outbox::OutboxError),
+    /// Moving idle time to another project needs that project.
+    #[error("choose the project to move this time to")]
+    IdleProjectRequired,
 }
 
 /// What to do with a session that was open when the agent last stopped running.
@@ -152,6 +155,90 @@ pub enum Notice {
         /// `true` if resumed, `false` if stopped at the last time the agent was seen.
         resumed: bool,
     },
+    /// The person came back from an idle run (Stage 4 F1): ask whether to keep, remove
+    /// or move that time, then answer with [`Command::ResolveIdle`] using `id`. The
+    /// pending prompt is also in [`LiveStatus::idle_prompt`] until it is answered or
+    /// replaced by a newer run (an unanswered prompt counts as keep; nothing is sent).
+    IdleReturn {
+        /// Prompt id ([`IdlePrompt::id`]).
+        id: Uuid,
+        /// First second of the idle run.
+        #[serde(with = "crate::ts")]
+        started_at: DateTime<Utc>,
+        /// When the person came back.
+        #[serde(with = "crate::ts")]
+        ended_at: DateTime<Utc>,
+        /// Idle seconds in the run.
+        seconds: u32,
+        /// The session's project (`None` = no project).
+        project_id: Option<String>,
+    },
+}
+
+/// An unanswered idle-return prompt (at most one at a time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IdlePrompt {
+    /// Prompt id, passed back in [`Command::ResolveIdle`].
+    pub id: Uuid,
+    /// The session in which the idle run happened (the decision's `session_id`).
+    pub session_id: Uuid,
+    /// First second of the idle run.
+    #[serde(with = "crate::ts")]
+    pub started_at: DateTime<Utc>,
+    /// When the person came back.
+    #[serde(with = "crate::ts")]
+    pub ended_at: DateTime<Utc>,
+    /// Idle seconds in the run.
+    pub seconds: u32,
+    /// The session's project (`None` = no project).
+    pub project_id: Option<String>,
+    /// The session's task.
+    pub task_id: Option<String>,
+    /// Monotonic origin of that session (for the decision's `monotonic_ms`).
+    #[serde(skip)]
+    mono_origin: Duration,
+}
+
+impl IdlePrompt {
+    fn notice(&self) -> Notice {
+        Notice::IdleReturn {
+            id: self.id,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            seconds: self.seconds,
+            project_id: self.project_id.clone(),
+        }
+    }
+}
+
+/// The `idle.decision.v1` payloads for a span: one per ≤ 12 h piece (the contract's
+/// limit), in order, each with the same decision. Empty for an empty span.
+pub fn idle_decision_payloads(
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    decision: IdleDecision,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Vec<IdleDecisionPayload> {
+    let max = TimeDelta::seconds(MAX_IDLE_SPAN_SECONDS);
+    let (project_id, task_id) = match decision {
+        IdleDecision::Reassign => (project_id, task_id),
+        IdleDecision::Keep | IdleDecision::Discard => (None, None),
+    };
+    let mut out = Vec::new();
+    let mut from = started_at;
+    while from < ended_at {
+        let to = (from + max).min(ended_at);
+        out.push(IdleDecisionPayload {
+            idle_started_at: from,
+            idle_ended_at: to,
+            decision,
+            project_id: project_id.clone(),
+            task_id: task_id.clone(),
+        });
+        from = to;
+    }
+    out
 }
 
 /// Snapshot of the agent for `rd-agent status` and the UI.
@@ -310,6 +397,8 @@ pub struct LiveStatus {
     pub outbox_depth: u64,
     /// The device was revoked (collection stopped, local data wiped).
     pub revoked: bool,
+    /// The unanswered idle-return prompt, if any (cleared once answered).
+    pub idle_prompt: Option<IdlePrompt>,
 }
 
 /// Receives [`LiveStatus`] snapshots and [`Notice`]s from a running [`Runtime`] (the
@@ -374,6 +463,7 @@ pub struct Agent {
     policy_requests: Vec<Option<String>>,
     today: TodayTotals,
     session_tracked: Duration,
+    idle_prompt: Option<IdlePrompt>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -437,6 +527,7 @@ impl Agent {
             policy_requests: vec![None],
             today: TodayTotals::default(),
             session_tracked: Duration::ZERO,
+            idle_prompt: None,
             effective,
             policy,
             cfg,
@@ -550,6 +641,57 @@ impl Agent {
     /// Takes user-facing notices produced since the last call.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.notices)
+    }
+
+    /// The unanswered idle-return prompt, if any.
+    pub fn idle_prompt(&self) -> Option<&IdlePrompt> {
+        self.idle_prompt.as_ref()
+    }
+
+    /// Answers the idle-return prompt `id` with the person's choice: queues
+    /// `idle.decision.v1` in the outbox (so it is delivered even after going offline or
+    /// restarting) for the session the run happened in, and clears the prompt. A span
+    /// longer than the contract's 12 h is sent as consecutive ≤ 12 h pieces.
+    ///
+    /// Returns `Ok(false)` (and changes nothing) for an unknown or stale `id`.
+    /// `project_id` / `task_id` are only sent with [`IdleDecision::Reassign`], which
+    /// requires a project. Tracking is never affected.
+    pub fn resolve_idle(
+        &mut self,
+        id: Uuid,
+        decision: IdleDecision,
+        project_id: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<bool, AgentError> {
+        if self.revoked {
+            return Err(AgentError::Revoked);
+        }
+        if self.idle_prompt.as_ref().is_none_or(|p| p.id != id) {
+            log::info!("ignoring an answer to an idle prompt that is no longer pending");
+            return Ok(false);
+        }
+        let project_id = project_id.filter(|p| !p.is_empty());
+        let task_id = task_id.filter(|t| !t.is_empty() && project_id.is_some());
+        if decision == IdleDecision::Reassign && project_id.is_none() {
+            return Err(AgentError::IdleProjectRequired);
+        }
+        let Some(p) = self.idle_prompt.take() else {
+            return Ok(false);
+        };
+        let now = ClockReading::now(self.clock.as_ref());
+        let monotonic_ms = mono_ms(now.mono, p.mono_origin);
+        for payload in
+            idle_decision_payloads(p.started_at, p.ended_at, decision, project_id, task_id)
+        {
+            self.emit_raw(
+                p.session_id,
+                EventBody::IdleDecision(payload),
+                now.wall,
+                monotonic_ms,
+            );
+        }
+        log::info!("idle time answered: {decision:?}");
+        Ok(true)
     }
 
     /// Takes the projects whose policy should be fetched now (`None` = base policy).
@@ -727,6 +869,9 @@ impl Agent {
         }
         let interval = self.effective.settings.screenshot_interval();
         self.scheduler.set_interval(interval, now, &mut self.rng);
+        if !self.effective.settings.idle.prompt_on_return && self.idle_prompt.take().is_some() {
+            log::info!("idle prompts were turned off; the pending idle time is kept");
+        }
         self.write_status();
     }
 
@@ -803,6 +948,7 @@ impl Agent {
             return;
         }
         self.revoked = true;
+        self.idle_prompt = None;
         self.gates.close_all();
         if self.machine.is_open() {
             let now = ClockReading::now(self.clock.as_ref());
@@ -943,6 +1089,9 @@ impl Agent {
         let sample = self.input.sample();
         let buckets = self.activity.record(now.wall, elapsed, sample);
         self.emit_buckets(buckets, now.wall);
+        for run in self.activity.take_idle_returns() {
+            self.on_idle_return(run);
+        }
 
         let s = &self.effective.settings;
         let want_apps = s.apps.capture_app_name;
@@ -959,6 +1108,37 @@ impl Agent {
                 .record(now.wall, elapsed, self.last_foreground.clone());
             self.emit_apps(segs, now.wall);
         }
+    }
+
+    /// Input resumed after an idle run while the session is `Active`: prompt (unless the
+    /// policy says to keep idle time without asking). A newer run replaces an unanswered
+    /// prompt; the older span then simply stays as recorded (keep), with no event.
+    fn on_idle_return(&mut self, run: IdleRun) {
+        if !self.effective.settings.idle.prompt_on_return {
+            return;
+        }
+        if run.ended_at <= run.started_at || run.idle_seconds == 0 {
+            return;
+        }
+        let Some(sess) = self.machine.session() else {
+            return;
+        };
+        let prompt = IdlePrompt {
+            id: Uuid::new_v4(),
+            session_id: sess.id,
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            seconds: run.idle_seconds,
+            project_id: sess.project_id.clone(),
+            task_id: sess.task_id.clone(),
+            mono_origin: sess.mono_origin,
+        };
+        if self.idle_prompt.is_some() {
+            log::info!("an unanswered idle prompt was replaced by a newer one; its time is kept");
+        }
+        log::info!("back after {} s idle", run.idle_seconds);
+        self.notices.push(prompt.notice());
+        self.idle_prompt = Some(prompt);
     }
 
     fn on_suspend(&mut self, gap_start: DateTime<Utc>, gap_end: DateTime<Utc>, now: ClockReading) {
@@ -1235,6 +1415,19 @@ pub enum Command {
         /// Project (`None` = no project).
         project_id: Option<String>,
     },
+    /// The person's answer to [`Notice::IdleReturn`]: queues `idle.decision.v1` and
+    /// clears [`LiveStatus::idle_prompt`]. Unknown or stale ids are ignored. Only the
+    /// person answers: nothing else in the agent sends this.
+    ResolveIdle {
+        /// [`IdlePrompt::id`].
+        id: Uuid,
+        /// Keep, discard or reassign.
+        decision: IdleDecision,
+        /// Target project (required for `reassign`, ignored otherwise).
+        project_id: Option<String>,
+        /// Target task (`reassign` only, optional).
+        task_id: Option<String>,
+    },
 }
 
 /// Messages from the network worker.
@@ -1482,6 +1675,7 @@ impl Runtime {
                 .clone(),
             outbox_depth: depth,
             revoked: self.agent.is_revoked(),
+            idle_prompt: self.agent.idle_prompt().cloned(),
         }
     }
 
@@ -1530,6 +1724,10 @@ impl Runtime {
                 Notice::Recovered { resumed, .. } => log::info!(
                     "NOTICE: a session from a previous run was {}",
                     if resumed { "resumed" } else { "closed" }
+                ),
+                Notice::IdleReturn { seconds, .. } => log::info!(
+                    "NOTICE: welcome back after {} min idle; unless answered in the app, the time is kept",
+                    (seconds + 30) / 60
                 ),
             }
         }
@@ -1663,6 +1861,15 @@ impl Runtime {
                 self.preview = Some(project_id);
                 Ok(())
             }
+            Command::ResolveIdle {
+                id,
+                decision,
+                project_id,
+                task_id,
+            } => self
+                .agent
+                .resolve_idle(id, decision, project_id, task_id)
+                .map(|_| ()),
         };
         if let Err(e) = r {
             log::warn!("command refused: {e}");

@@ -83,12 +83,18 @@ pub struct SessionSettings {
 pub struct IdleSettings {
     /// `idle.threshold_seconds` (60–1800, default 300).
     pub threshold_seconds: u32,
+    /// `idle.prompt_on_return` (default `true`): when the person comes back from an idle
+    /// run, ask whether to keep, remove or move that time. `false` never asks and never
+    /// sends `idle.decision.v1` (the idle time is kept). Older documents without the
+    /// field keep the default.
+    pub prompt_on_return: bool,
 }
 
 impl Default for IdleSettings {
     fn default() -> Self {
         Self {
             threshold_seconds: 300,
+            prompt_on_return: true,
         }
     }
 }
@@ -723,6 +729,7 @@ pub(crate) mod tests {
         let s = &d.settings;
         assert!(s.session.require_project);
         assert_eq!(s.idle.threshold_seconds, 120);
+        assert!(s.idle.prompt_on_return, "absent → default true");
         assert!(s.screenshots.enabled);
         assert_eq!(s.screenshots.interval_minutes, 20);
         assert_eq!(s.screenshots.max_width_px, 1024);
@@ -747,6 +754,21 @@ pub(crate) mod tests {
         assert!(d.settings.apps.capture_app_name);
         assert!(d.settings.work_hours.is_none());
         assert_eq!(d.settings.retention, RetentionSettings::default());
+    }
+
+    #[test]
+    fn idle_prompt_on_return_defaults_to_true_and_can_be_turned_off() {
+        // Older documents (and older cached copies) have no `prompt_on_return`.
+        let d = pinned()
+            .verify(&doc(None, 1, json!({"idle": {"threshold_seconds": 300}})))
+            .unwrap();
+        assert!(d.settings.idle.prompt_on_return);
+        assert!(PolicySettings::default().idle.prompt_on_return);
+        let d = pinned()
+            .verify(&doc(None, 2, json!({"idle": {"prompt_on_return": false}})))
+            .unwrap();
+        assert!(!d.settings.idle.prompt_on_return);
+        assert_eq!(d.settings.idle.threshold_seconds, 300);
     }
 
     #[test]

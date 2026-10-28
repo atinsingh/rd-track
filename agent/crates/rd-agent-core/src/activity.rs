@@ -19,6 +19,13 @@
 //! Buckets are emitted once their minute is over and they hold no pending seconds. A
 //! bucket is never emitted twice: seconds that would land in an already-emitted minute
 //! (after a backwards clock change) are dropped.
+//!
+//! **Idle returns** (Stage 4 F1). When an inactive run that reached the threshold ends
+//! because input resumed, the aggregator reports it as an [`IdleRun`]: from the first
+//! second of the run (the same second idle is attributed back to) to the start of the
+//! first second with input. A run cut short by [`ActivityAggregator::interrupt`] (pause,
+//! suspend, clock change) or [`ActivityAggregator::flush_all`] (stop) is not a return
+//! and is never reported.
 
 use std::collections::BTreeMap;
 use std::time::Duration;
@@ -70,6 +77,18 @@ impl Acc {
     }
 }
 
+/// An idle run that ended because the person came back (input resumed while capturing).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IdleRun {
+    /// Start of the run's first second (UTC wall clock, as the buckets attribute it).
+    pub started_at: DateTime<Utc>,
+    /// Start of the first second with input again, i.e. the end of the last idle second.
+    pub ended_at: DateTime<Utc>,
+    /// Idle seconds the run put into buckets (seconds without any input data, or dropped
+    /// after a backwards clock change, are not counted).
+    pub idle_seconds: u32,
+}
+
 /// Folds per-tick input samples into minute buckets for one session.
 #[derive(Debug, Clone)]
 pub struct ActivityAggregator {
@@ -79,6 +98,10 @@ pub struct ActivityAggregator {
     pending: BTreeMap<DateTime<Utc>, u32>,
     idle_mode: bool,
     own_idle_secs: u32,
+    /// Start of the first second of the current inactive run.
+    run_start: Option<DateTime<Utc>>,
+    /// Idle runs that ended with input, not yet taken.
+    returns: Vec<IdleRun>,
     carry_ms: u128,
     carry_keyboard: u64,
     carry_mouse: u64,
@@ -96,6 +119,8 @@ impl ActivityAggregator {
             pending: BTreeMap::new(),
             idle_mode: false,
             own_idle_secs: 0,
+            run_start: None,
+            returns: Vec::new(),
             carry_ms: 0,
             carry_keyboard: 0,
             carry_mouse: 0,
@@ -118,6 +143,12 @@ impl ActivityAggregator {
     /// `true` when no bucket is open.
     pub fn is_empty(&self) -> bool {
         self.open.is_empty()
+    }
+
+    /// Takes the idle runs that ended with the person coming back since the last call
+    /// (oldest first; at most one per [`ActivityAggregator::record`]).
+    pub fn take_idle_returns(&mut self) -> Vec<IdleRun> {
+        std::mem::take(&mut self.returns)
     }
 
     /// Records one tick ending at wall time `at`, covering `elapsed` monotonic time.
@@ -168,11 +199,25 @@ impl ActivityAggregator {
                 self.add(minute, |a| a.degraded += 1);
             }
             if had_input {
+                if self.idle_mode {
+                    // The person is back: the run covered [run_start, ts).
+                    if let Some(started_at) = self.run_start {
+                        self.returns.push(IdleRun {
+                            started_at,
+                            ended_at: ts,
+                            idle_seconds: self.own_idle_secs,
+                        });
+                    }
+                }
                 self.resolve_pending(true);
                 self.idle_mode = false;
                 self.own_idle_secs = 0;
+                self.run_start = None;
                 self.add(minute, |a| a.active += 1);
                 continue;
+            }
+            if self.own_idle_secs == 0 {
+                self.run_start = Some(ts);
             }
             self.own_idle_secs = self.own_idle_secs.saturating_add(1);
             if self.idle_mode {
@@ -242,6 +287,7 @@ impl ActivityAggregator {
     fn reset_run(&mut self) {
         self.idle_mode = false;
         self.own_idle_secs = 0;
+        self.run_start = None;
         self.carry_ms = 0;
         self.carry_input = false;
         self.carry_keyboard = 0;
@@ -486,6 +532,128 @@ mod tests {
         let rest = agg.flush_all();
         assert_eq!(rest.len(), 1);
         assert_eq!(rest[0].bucket_start, t(9, 2, 0));
+    }
+
+    fn nothing() -> InputSample {
+        InputSample {
+            counts_available: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn idle_run_ending_with_input_is_reported_from_its_first_second() {
+        let mut agg = ActivityAggregator::new(60);
+        // 09:00:00–09:00:30 input, 09:00:30–09:03:00 nothing, then input again.
+        let mut out = drive(&mut agg, t(9, 0, 0), 180, |i| {
+            if i < 30 {
+                input(1)
+            } else {
+                nothing()
+            }
+        });
+        assert!(
+            agg.take_idle_returns().is_empty(),
+            "still away: no return yet"
+        );
+        out.extend(agg.record(t(9, 3, 1), SEC, input(1)));
+        let runs = agg.take_idle_returns();
+        assert_eq!(
+            runs,
+            vec![IdleRun {
+                started_at: t(9, 0, 30),
+                ended_at: t(9, 3, 0),
+                idle_seconds: 150,
+            }]
+        );
+        assert!(agg.take_idle_returns().is_empty(), "taken once");
+        // The span matches the idle the buckets hold.
+        out.extend(agg.flush_all());
+        assert_eq!(sum(&out), (31, 150));
+    }
+
+    #[test]
+    fn idle_run_reported_when_one_tick_covers_several_seconds() {
+        let mut agg = ActivityAggregator::new(60);
+        drive(&mut agg, t(9, 0, 0), 10, |_| input(1));
+        drive(&mut agg, t(9, 0, 10), 90, |_| nothing());
+        // A late tick covering 3 s with input: the return is the first of them.
+        agg.record(t(9, 1, 43), Duration::from_secs(3), input(1));
+        let runs = agg.take_idle_returns();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].started_at, t(9, 0, 10));
+        assert_eq!(runs[0].ended_at, t(9, 1, 40));
+        assert_eq!(runs[0].idle_seconds, 90);
+    }
+
+    #[test]
+    fn os_reported_idle_run_starts_at_first_observed_second() {
+        // The OS says the person left long ago, but idle is only attributed back to the
+        // first second this aggregator saw, so the reported span starts there too.
+        let mut agg = ActivityAggregator::new(300);
+        drive(&mut agg, t(9, 0, 0), 20, |i| InputSample {
+            counts_available: true,
+            seconds_since_last_input: Some(900.0 + f64::from(i)),
+            ..Default::default()
+        });
+        agg.record(t(9, 0, 21), SEC, input(1));
+        let runs = agg.take_idle_returns();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            (runs[0].started_at, runs[0].ended_at),
+            (t(9, 0, 0), t(9, 0, 20))
+        );
+        assert_eq!(runs[0].idle_seconds, 20);
+    }
+
+    #[test]
+    fn short_inactivity_is_not_an_idle_return() {
+        let mut agg = ActivityAggregator::new(120);
+        drive(&mut agg, t(9, 0, 0), 100, |_| nothing());
+        drive(&mut agg, t(9, 1, 40), 5, |_| input(1));
+        assert!(agg.take_idle_returns().is_empty());
+    }
+
+    #[test]
+    fn pause_suspend_or_stop_ending_an_idle_run_is_not_a_return() {
+        let mut agg = ActivityAggregator::new(60);
+        drive(&mut agg, t(9, 0, 0), 120, |_| nothing());
+        // Pause / suspend / clock change.
+        agg.interrupt(t(9, 2, 0));
+        // Resume: the first second has input, but the run already ended.
+        drive(&mut agg, t(9, 5, 0), 5, |_| input(1));
+        assert!(agg.take_idle_returns().is_empty());
+
+        drive(&mut agg, t(9, 5, 5), 120, |_| nothing());
+        agg.flush_all();
+        assert!(agg.take_idle_returns().is_empty(), "stop is not a return");
+
+        // A new run after the interruption starts afresh.
+        let mut agg = ActivityAggregator::new(60);
+        drive(&mut agg, t(9, 0, 0), 30, |_| nothing());
+        agg.interrupt(t(9, 0, 30));
+        drive(&mut agg, t(9, 0, 40), 70, |_| nothing());
+        agg.record(t(9, 1, 51), SEC, input(1));
+        let runs = agg.take_idle_returns();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].started_at, t(9, 0, 40));
+        assert_eq!(runs[0].idle_seconds, 70);
+    }
+
+    #[test]
+    fn seconds_without_input_data_do_not_end_or_count_in_a_run() {
+        let mut agg = ActivityAggregator::new(60);
+        drive(&mut agg, t(9, 0, 0), 40, |_| nothing());
+        drive(&mut agg, t(9, 0, 40), 10, |_| InputSample::default());
+        drive(&mut agg, t(9, 0, 50), 40, |_| nothing());
+        agg.record(t(9, 1, 31), SEC, input(1));
+        let runs = agg.take_idle_returns();
+        assert_eq!(runs.len(), 1);
+        assert_eq!(
+            (runs[0].started_at, runs[0].ended_at),
+            (t(9, 0, 0), t(9, 1, 30))
+        );
+        assert_eq!(runs[0].idle_seconds, 80);
     }
 
     #[test]
