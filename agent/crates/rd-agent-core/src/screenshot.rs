@@ -254,7 +254,7 @@ pub fn run_job(
     if !job.gate.is_open() {
         return ScreenshotOutcome::Cancelled;
     }
-    let frame = match capturer.capture(job.primary_monitor_only) {
+    let frame = match capturer.capture_scaled(job.primary_monitor_only, job.max_width) {
         Ok(f) => f,
         Err(e) => return ScreenshotOutcome::Failed(e.to_string()),
     };
@@ -307,6 +307,20 @@ fn validate(frame: &RawFrame) -> Result<(), String> {
     Ok(())
 }
 
+/// The size a `width × height` frame has after [`downscale`] to `max_width`: unchanged
+/// when it already fits, otherwise `max_width` wide with the height rounded to keep the
+/// aspect ratio (at least 1). Native capturers use it to scale while capturing so the
+/// pipeline's own downscale becomes a no-op.
+pub fn scaled_size(width: u32, height: u32, max_width: u32) -> (u32, u32) {
+    let max_width = max_width.max(1);
+    if width <= max_width || width == 0 {
+        return (width, height);
+    }
+    let (sw, sh, dw) = (u64::from(width), u64::from(height), u64::from(max_width));
+    let dh = ((sh * dw + sw / 2) / sw).max(1);
+    (max_width, u32::try_from(dh).unwrap_or(u32::MAX))
+}
+
 /// Downscales (area average) so that `width <= max_width`, preserving aspect ratio.
 pub fn downscale(frame: &RawFrame, max_width: u32) -> Result<RawFrame, String> {
     validate(frame)?;
@@ -315,8 +329,8 @@ pub fn downscale(frame: &RawFrame, max_width: u32) -> Result<RawFrame, String> {
         return Ok(frame.clone());
     }
     let (sw, sh) = (u64::from(frame.width), u64::from(frame.height));
-    let dw = u64::from(max_width);
-    let dh = ((sh * dw + sw / 2) / sw).max(1);
+    let (dw, dh) = scaled_size(frame.width, frame.height, max_width);
+    let (dw, dh) = (u64::from(dw), u64::from(dh));
     let mut out = vec![0u8; usize::try_from(dw * dh * 4).map_err(|_| "frame too large")?];
     for dy in 0..dh {
         let (y0, y1) = (dy * sh / dh, ((dy + 1) * sh / dh).max(dy * sh / dh + 1));
@@ -362,6 +376,7 @@ pub fn encode_jpeg(frame: &RawFrame, quality: u8) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use crate::clock::FakeClock;
+    use crate::platform::CaptureError;
     use crate::testing::FakeCapturer;
     use chrono::TimeZone;
     use rand::rngs::StdRng;
@@ -595,5 +610,55 @@ mod tests {
         };
         assert!(downscale(&bad, 2).is_err());
         assert!(encode_jpeg(&bad, 70).is_err());
+    }
+
+    #[test]
+    fn scaled_size_matches_downscale_and_is_idempotent() {
+        assert_eq!(scaled_size(5120, 2880, 1280), (1280, 720));
+        assert_eq!(scaled_size(2560, 1600, 1280), (1280, 800));
+        assert_eq!(scaled_size(1366, 768, 640), (640, 360));
+        assert_eq!(scaled_size(1000, 1000, 1920), (1000, 1000));
+        assert_eq!(scaled_size(4000, 1, 640), (640, 1));
+        assert_eq!(scaled_size(0, 0, 640), (0, 0));
+        assert_eq!(scaled_size(10, 10, 0), (1, 1));
+        for (w, h, m) in [(3, 7, 2), (1920, 1080, 1280), (3456, 2234, 1280)] {
+            let f = RawFrame {
+                width: w,
+                height: h,
+                rgba: vec![7; (w * h * 4) as usize],
+            };
+            let d = downscale(&f, m).unwrap();
+            assert_eq!((d.width, d.height), scaled_size(w, h, m));
+            // A frame pre-scaled by a native capturer passes through unchanged.
+            let (sw, sh) = scaled_size(w, h, m);
+            assert_eq!(scaled_size(sw, sh, m), (sw, sh));
+        }
+    }
+
+    #[test]
+    fn pipeline_passes_max_width_to_the_capturer() {
+        struct Scaling(std::sync::Mutex<Option<u32>>);
+        impl ScreenCapturer for Scaling {
+            fn capture(&self, _p: bool) -> Result<RawFrame, CaptureError> {
+                Err(CaptureError::Failed("unscaled path used".into()))
+            }
+            fn capture_scaled(&self, _p: bool, max_width: u32) -> Result<RawFrame, CaptureError> {
+                *self.0.lock().unwrap() = Some(max_width);
+                Ok(RawFrame {
+                    width: 4,
+                    height: 2,
+                    rgba: vec![9; 32],
+                })
+            }
+        }
+        let gates = GateController::new();
+        let cap = Scaling(std::sync::Mutex::new(None));
+        let clock = FakeClock::new(t0());
+        let out = run_job(&job(&gates), &FakeApi::default(), &cap, &clock);
+        assert!(
+            matches!(out, ScreenshotOutcome::Completed { .. }),
+            "{out:?}"
+        );
+        assert_eq!(*cap.0.lock().unwrap(), Some(job(&gates).max_width));
     }
 }

@@ -98,6 +98,18 @@ pub trait ScreenCapturer: Send + Sync {
     /// Captures the primary monitor (or all monitors when `primary_monitor_only` is
     /// `false` and the platform supports it).
     fn capture(&self, primary_monitor_only: bool) -> Result<RawFrame, CaptureError>;
+    /// Captures like [`ScreenCapturer::capture`], but lets the platform scale the frame
+    /// down to at most `max_width` pixels wide while capturing (saving a full-resolution
+    /// buffer on high-DPI screens). The pipeline downscales again if the frame is still
+    /// wider, so implementations may ignore the hint; the default does.
+    fn capture_scaled(
+        &self,
+        primary_monitor_only: bool,
+        max_width: u32,
+    ) -> Result<RawFrame, CaptureError> {
+        let _ = max_width;
+        self.capture(primary_monitor_only)
+    }
     /// Screen Recording permission status.
     fn permission(&self) -> PermissionStatus {
         PermissionStatus::NotRequired

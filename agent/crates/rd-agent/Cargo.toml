@@ -7,6 +7,10 @@ license.workspace = true
 publish.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "rd_agent"
+path = "src/lib.rs"
+
 [[bin]]
 name = "rd-agent"
 path = "src/main.rs"
@@ -31,6 +35,25 @@ serde_json.workspace = true
 thiserror.workspace = true
 ureq.workspace = true
 uuid.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Storage_FileSystem",
+  "Win32_System_LibraryLoader",
+  "Win32_System_SystemInformation",
+  "Win32_System_Threading",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-foundation.workspace = true
+objc2-app-kit.workspace = true
+objc2-core-foundation.workspace = true
+objc2-core-graphics.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

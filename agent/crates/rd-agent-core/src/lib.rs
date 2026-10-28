@@ -17,6 +17,7 @@
 //! | [`outbox`] | Encrypted SQLite outbox with a persistent sequence counter |
 //! | [`sync`] | Batching, per-event result handling, backoff |
 //! | [`clock`] | Wall + monotonic clock, suspend / clock-change detection |
+//! | [`describe`] | Plain-language "what this session collects" (session-start notice) |
 //! | [`platform`] | OS integration traits |
 //! | [`api`] | Wire types and a client for the agent endpoints |
 //! | [`events`] | The event envelope and strict payload types |
@@ -26,6 +27,7 @@ pub mod activity;
 pub mod api;
 pub mod apps;
 pub mod clock;
+pub mod describe;
 pub mod events;
 pub mod identity;
 pub mod outbox;

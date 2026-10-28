@@ -818,9 +818,12 @@ fn license_block_soft_stops_session_keeps_outbox_and_refuses_new_sessions() {
             LicenseBlock::SubscriptionInactive
         ))
     ));
-    assert!(h.agent.take_notices().contains(&Notice::LicenseUnavailable(
-        LicenseBlock::SubscriptionInactive
-    )));
+    assert!(h
+        .agent
+        .take_notices()
+        .contains(&Notice::LicenseUnavailable {
+            block: LicenseBlock::SubscriptionInactive
+        }));
     let st = h.agent.status();
     assert_eq!(
         st.tracking_unavailable,
@@ -1041,4 +1044,132 @@ fn runtime_resumes_after_heartbeat_succeeds_again() {
         st.license.unwrap().status,
         crate::api::LicenseStatus::Active
     );
+}
+
+#[test]
+fn live_session_counts_only_active_time_and_today_sums_buckets() {
+    let outbox = shared_outbox();
+    let mut h = harness_at(t0(), outbox.clone(), AgentConfig::new(identity()));
+    assert_eq!(h.agent.live_session(), None);
+    h.agent.start(Some("p1".into()), Some("t1".into())).unwrap();
+    h.step(125);
+    h.agent.pause().unwrap();
+    h.step(60);
+    let live = h.agent.live_session().unwrap();
+    assert_eq!(live.state, "paused");
+    assert_eq!(live.paused_reason, Some(PauseReason::User));
+    assert_eq!(live.tracked_seconds, 125);
+    assert_eq!(live.task_id.as_deref(), Some("t1"));
+    h.agent.resume().unwrap();
+    h.step(10);
+    assert_eq!(h.agent.live_session().unwrap().tracked_seconds, 135);
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.agent.live_session(), None);
+
+    let (active, idle) = h.tracked_seconds();
+    let today = h.agent.today();
+    assert_eq!(today.tracked_seconds, u64::from(active + idle));
+    assert_eq!(today.active_seconds, u64::from(active));
+    assert_eq!(today.activity_percent(), Some(100));
+    drop(h);
+    // Survives a restart.
+    let h = harness_at(
+        t0() + TimeDelta::minutes(10),
+        outbox,
+        AgentConfig::new(identity()),
+    );
+    assert_eq!(h.agent.today().tracked_seconds, today.tracked_seconds);
+}
+
+#[test]
+fn today_totals_reset_on_a_new_day_and_skip_permission_missing() {
+    let d1 = chrono::NaiveDate::from_ymd_opt(2026, 10, 28).unwrap();
+    let d2 = d1.succ_opt().unwrap();
+    let bucket = |active, idle, q| ActivityBucket {
+        bucket_start: t0(),
+        active_seconds: active,
+        idle_seconds: idle,
+        keyboard_count: 0,
+        mouse_count: 0,
+        data_quality: q,
+    };
+    let mut t = TodayTotals::default();
+    t.add(d1, &bucket(40, 20, DataQuality::Ok));
+    t.add(d1, &bucket(10, 0, DataQuality::Partial));
+    t.add(d1, &bucket(0, 30, DataQuality::PermissionMissing));
+    assert_eq!(t.tracked_seconds, 100);
+    assert_eq!((t.active_seconds, t.idle_seconds), (50, 20));
+    assert_eq!(t.activity_percent(), Some(71));
+    assert_eq!(t.for_date(d2).tracked_seconds, 0);
+    t.add(d2, &bucket(5, 5, DataQuality::Ok));
+    assert_eq!((t.date, t.tracked_seconds), (Some(d2), 10));
+}
+
+#[test]
+fn policy_preview_reports_fallback_until_the_project_document_arrives() {
+    let mut h = harness();
+    let p = h.agent.policy_preview(Some("p9"));
+    assert_eq!(p.source, "defaults");
+    assert!(!p.settings.screenshots.enabled);
+    let _ = h.agent.take_policy_requests();
+    h.agent.request_policy(Some("p9".into()));
+    assert_eq!(
+        h.agent.take_policy_requests(),
+        vec![None, Some("p9".to_owned())]
+    );
+    screenshot_policy(&mut h, "p9", json!({}));
+    let p = h.agent.policy_preview(Some("p9"));
+    assert_eq!(p.source, "exact");
+    assert!(p.settings.screenshots.enabled);
+    assert_eq!(p.settings.screenshots.interval_minutes, 10);
+    // Previewing collects nothing and opens no session.
+    assert_eq!(h.agent.state(), SessionState::Idle);
+    assert!(h.events().is_empty());
+}
+
+#[derive(Clone, Default)]
+struct Recorder(Arc<Mutex<(Vec<LiveStatus>, Vec<Notice>)>>);
+
+impl RuntimeObserver for Recorder {
+    fn status(&mut self, status: &LiveStatus) {
+        self.0.lock().unwrap().0.push(status.clone());
+    }
+    fn notice(&mut self, notice: &Notice) {
+        self.0.lock().unwrap().1.push(notice.clone());
+    }
+}
+
+#[test]
+fn runtime_publishes_live_status_and_previews_to_the_observer() {
+    let t = FakeTransport::new();
+    fake_server(&t, false);
+    let rec = Recorder::default();
+    let (rt, handle) = runtime(
+        t.clone(),
+        Arc::new(MemoryCredentials::default()),
+        shared_outbox(),
+    );
+    let rt = rt.with_observer(Box::new(rec.clone()));
+    handle.send(Command::Preview {
+        project_id: Some("p1".into()),
+    });
+    let summary = rt.run(fast_opts()).unwrap();
+    assert_eq!(summary.outbox_depth, 0);
+    let (statuses, _) = rec.0.lock().unwrap().clone();
+    assert!(statuses.len() > 10, "published every tick");
+    assert!(statuses.iter().any(|s| s
+        .session
+        .as_ref()
+        .is_some_and(|x| x.project_id.as_deref() == Some("p1"))));
+    assert!(statuses.iter().any(|s| s
+        .preview
+        .as_ref()
+        .is_some_and(|p| p.project_id.as_deref() == Some("p1")
+            && p.source == "exact"
+            && p.settings.idle.threshold_seconds == 120)));
+    assert!(statuses.iter().any(|s| s.sync.last_success_at.is_some()));
+    let last = statuses.last().unwrap();
+    assert!(last.session.is_none(), "final snapshot after shutdown");
+    assert_eq!(last.agent.state, "stopped");
+    assert!(!last.revoked);
 }

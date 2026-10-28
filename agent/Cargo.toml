@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/rd-agent-core", "crates/rd-agent"]
+members = ["crates/rd-agent-core", "crates/rd-agent", "crates/rd-agent-desktop"]
 
 [workspace.package]
 version = "0.1.0"
@@ -31,6 +31,14 @@ tempfile = "3"
 thiserror = "2"
 ureq = { version = "2", default-features = false, features = ["tls", "json"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Native collectors (rd-agent, behind cfg(target_os)).
+windows-sys = "0.61"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSRunningApplication", "NSWorkspace"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFRunLoop", "CFString", "CFDate"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGBitmapContext", "CGColorSpace", "CGContext", "CGDirectDisplay", "CGEventSource", "CGEventTypes", "CGEvent", "CGImage", "CGRemoteOperation", "CGWindow", "CGGeometry"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

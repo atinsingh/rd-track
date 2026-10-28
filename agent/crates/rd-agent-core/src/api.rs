@@ -185,6 +185,35 @@ impl LicenseBlock {
     }
 }
 
+/// A task in a [`DeviceProject`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceTask {
+    /// Task id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+}
+
+/// A project the device's user can book time to (`GET /v1/device/projects`, proposed).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceProject {
+    /// Project id.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Open tasks (may be empty or omitted).
+    #[serde(default)]
+    pub tasks: Vec<DeviceTask>,
+}
+
+/// Accepts both `[...]` and `{"projects": [...]}`.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum DeviceProjectList {
+    Bare(Vec<DeviceProject>),
+    Wrapped { projects: Vec<DeviceProject> },
+}
+
 /// `POST /v1/ingestion/event-batches` request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EventBatchRequest {
@@ -521,6 +550,18 @@ impl ApiClient {
         self.call(Method::Get, url, None, true)
     }
 
+    /// `GET /v1/device/projects` — the projects (and their open tasks) this device's
+    /// user can book time to, for the tray's pickers. **Not yet in the API contract**
+    /// (proposed; see the agent README): a `404` means the server does not offer it
+    /// and the tray falls back to "No project".
+    pub fn projects(&self) -> Result<Vec<DeviceProject>, ApiError> {
+        let list: DeviceProjectList =
+            self.call(Method::Get, self.url("/device/projects"), None, true)?;
+        Ok(match list {
+            DeviceProjectList::Bare(v) | DeviceProjectList::Wrapped { projects: v } => v,
+        })
+    }
+
     /// Serializes a batch request.
     pub fn encode_batch(req: &EventBatchRequest) -> Result<Vec<u8>, ApiError> {
         Self::json(req)
@@ -686,6 +727,21 @@ mod tests {
             .unwrap_err();
         assert_eq!(e.code(), Some("screenshots_disabled"));
         assert!(!e.is_retryable());
+
+        t.push(
+            200,
+            json!({"projects": [{"id": "p1", "name": "Client A", "tasks": [{"id": "t1", "name": "QA pass"}], "extra": 1}]}),
+        );
+        let projects = api.projects().unwrap();
+        assert_eq!(projects[0].tasks[0].name, "QA pass");
+        assert!(t
+            .requests()
+            .last()
+            .unwrap()
+            .url
+            .ends_with("/v1/device/projects"));
+        t.push(200, json!([{"id": "p2", "name": "Internal"}]));
+        assert!(api.projects().unwrap()[0].tasks.is_empty());
 
         t.push_raw(200, b"not json".to_vec());
         assert!(matches!(api.policy(None), Err(ApiError::Decode(_))));

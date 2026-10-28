@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use chrono::{DateTime, TimeDelta, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeDelta, Utc};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use serde::{Deserialize, Serialize};
@@ -27,14 +27,17 @@ use crate::activity::ActivityAggregator;
 use crate::api::{ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo};
 use crate::apps::AppTracker;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
-use crate::events::{DataGap, EventBody, GapReason, PauseReason, SessionStopped, StopReason};
+use crate::events::{
+    ActivityBucket, DataGap, DataQuality, EventBody, GapReason, PauseReason, SessionStopped,
+    StopReason,
+};
 use crate::identity::DeviceIdentity;
 use crate::outbox::{lock, NewEvent, OutboxConfig, OutboxPolicyCache, SharedOutbox};
 use crate::platform::{
     secret_names, CredentialStore, ForegroundApp, ForegroundAppInfo, HttpTransport, InputCounter,
     Permissions, ScreenCapturer,
 };
-use crate::policy::{EffectivePolicy, PolicySource, PolicyStore, SignedPolicy};
+use crate::policy::{EffectivePolicy, PolicySettings, PolicySource, PolicyStore, SignedPolicy};
 use crate::screenshot::{
     run_job, GateController, ScreenshotJob, ScreenshotOutcome, ScreenshotScheduler, ScreenshotSink,
     SlotDecision,
@@ -50,6 +53,8 @@ pub const META_AGENT_STATUS: &str = "agent_status";
 pub const META_SYNC_STATUS: &str = "sync_status";
 /// Outbox metadata key holding the active [`LicenseBlock`], if any (survives restarts).
 pub const META_LICENSE_BLOCK: &str = "license_block";
+/// Outbox metadata key holding [`TodayTotals`] (tray "Today" line).
+pub const META_TODAY: &str = "today_totals";
 
 /// Runtime error.
 #[derive(Debug, Error)]
@@ -120,7 +125,8 @@ pub struct AgentDeps {
 }
 
 /// Something the employee should be told (the UI shows it; headless mode logs it).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Notice {
     /// The server rejected the session start because another session is active.
     SessionOverlap {
@@ -133,7 +139,10 @@ pub enum Notice {
     OutsideWorkHours,
     /// The server refused service (`subscription_inactive` / `seat_unavailable`); the
     /// session was stopped and collection is off until the licence is restored.
-    LicenseUnavailable(LicenseBlock),
+    LicenseUnavailable {
+        /// Why.
+        block: LicenseBlock,
+    },
     /// A heartbeat succeeded again after a licence refusal; tracking is available.
     LicenseRestored,
     /// A session left open by a previous run was resumed or closed.
@@ -195,6 +204,123 @@ pub struct SyncStatus {
     pub accepted_total: u64,
 }
 
+/// Tracked time on this device for one local calendar day, summed from the activity
+/// buckets the agent emitted (so it lags by up to a minute). Shown as the tray's
+/// "Today 6h 42m · activity 71%" line.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TodayTotals {
+    /// Local date the totals belong to.
+    pub date: Option<NaiveDate>,
+    /// Σ (active + idle) seconds of every bucket.
+    pub tracked_seconds: u64,
+    /// Active seconds in buckets with `data_quality` `ok` / `partial`.
+    pub active_seconds: u64,
+    /// Idle seconds in buckets with `data_quality` `ok` / `partial`.
+    pub idle_seconds: u64,
+}
+
+impl TodayTotals {
+    /// Adds a bucket whose start falls on local date `date`; a new date starts over.
+    pub fn add(&mut self, date: NaiveDate, b: &ActivityBucket) {
+        if self.date != Some(date) {
+            *self = Self {
+                date: Some(date),
+                ..Self::default()
+            };
+        }
+        self.tracked_seconds += u64::from(b.active_seconds + b.idle_seconds);
+        if matches!(b.data_quality, DataQuality::Ok | DataQuality::Partial) {
+            self.active_seconds += u64::from(b.active_seconds);
+            self.idle_seconds += u64::from(b.idle_seconds);
+        }
+    }
+
+    /// The totals if they belong to `date`, else zeros for that date.
+    pub fn for_date(&self, date: NaiveDate) -> Self {
+        if self.date == Some(date) {
+            self.clone()
+        } else {
+            Self {
+                date: Some(date),
+                ..Self::default()
+            }
+        }
+    }
+
+    /// Activity percentage (system design §6.3), `None` when nothing was measurable.
+    pub fn activity_percent(&self) -> Option<u8> {
+        crate::describe::activity_percent(self.active_seconds, self.idle_seconds)
+    }
+}
+
+/// The open session, for the tray UI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveSession {
+    /// Session id.
+    pub id: Uuid,
+    /// `active`, `paused` or `suspended`.
+    pub state: String,
+    /// Why it is paused (`user`, `work_hours`), when paused.
+    pub paused_reason: Option<PauseReason>,
+    /// Project.
+    pub project_id: Option<String>,
+    /// Task.
+    pub task_id: Option<String>,
+    /// Wall-clock start.
+    #[serde(with = "crate::ts")]
+    pub started_at: DateTime<Utc>,
+    /// Seconds spent `Active` in this session (paused and suspended time excluded) —
+    /// the tray's elapsed timer.
+    pub tracked_seconds: u64,
+}
+
+/// The policy that would apply to a session started now for `project_id` — what the
+/// session-start notice lists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PolicyPreview {
+    /// Project (`None` = no project).
+    pub project_id: Option<String>,
+    /// `exact`, `base_fallback` (no document for the project yet: screenshots forced
+    /// off), or `defaults`.
+    pub source: String,
+    /// Revision.
+    pub revision: i64,
+    /// Settings.
+    pub settings: PolicySettings,
+}
+
+/// Everything a UI needs, published by [`Runtime`] after every tick and command.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LiveStatus {
+    /// Agent snapshot (state, licence, camera badge, connectivity).
+    pub agent: AgentStatus,
+    /// The open session, if any.
+    pub session: Option<LiveSession>,
+    /// Settings in force (the open session's project, else the base policy).
+    pub settings: PolicySettings,
+    /// Preview for the project selected with [`Command::Preview`].
+    pub preview: Option<PolicyPreview>,
+    /// OS permission health.
+    pub permissions: Permissions,
+    /// Today's tracked time on this device.
+    pub today: TodayTotals,
+    /// Network worker status.
+    pub sync: SyncStatus,
+    /// Events waiting in the outbox (refreshed every few seconds).
+    pub outbox_depth: u64,
+    /// The device was revoked (collection stopped, local data wiped).
+    pub revoked: bool,
+}
+
+/// Receives [`LiveStatus`] snapshots and [`Notice`]s from a running [`Runtime`] (the
+/// tray app). Called on the tick thread: implementations must return quickly.
+pub trait RuntimeObserver: Send {
+    /// A new status snapshot (at least once per tick).
+    fn status(&mut self, status: &LiveStatus);
+    /// Something the employee should be told.
+    fn notice(&mut self, notice: &Notice);
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SessionSnapshot {
     session_id: Uuid,
@@ -206,6 +332,8 @@ struct SessionSnapshot {
     #[serde(with = "crate::ts")]
     last_alive: DateTime<Utc>,
     last_monotonic_ms: u64,
+    #[serde(default)]
+    tracked_ms: u64,
 }
 
 /// What a tick did (for tests and diagnostics).
@@ -244,6 +372,8 @@ pub struct Agent {
     queued: usize,
     notices: Vec<Notice>,
     policy_requests: Vec<Option<String>>,
+    today: TodayTotals,
+    session_tracked: Duration,
 }
 
 impl std::fmt::Debug for Agent {
@@ -252,6 +382,14 @@ impl std::fmt::Debug for Agent {
             .field("state", &self.machine.state())
             .field("policy_revision", &self.effective.revision)
             .finish()
+    }
+}
+
+fn source_name(s: PolicySource) -> &'static str {
+    match s {
+        PolicySource::Exact => "exact",
+        PolicySource::BaseFallback => "base_fallback",
+        PolicySource::Defaults => "defaults",
     }
 }
 
@@ -297,6 +435,8 @@ impl Agent {
             queued: 0,
             notices: Vec::new(),
             policy_requests: vec![None],
+            today: TodayTotals::default(),
+            session_tracked: Duration::ZERO,
             effective,
             policy,
             cfg,
@@ -306,13 +446,17 @@ impl Agent {
         agent.license_block = lock(&agent.outbox)
             .get_meta(META_LICENSE_BLOCK)?
             .and_then(|s| serde_json::from_str(&s).ok());
+        agent.today = lock(&agent.outbox)
+            .get_meta(META_TODAY)?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
         agent.recover()?;
         if let Some(block) = agent.license_block {
             // Still refused from a previous run: never resume capture.
             if agent.machine.is_open() {
                 let _ = agent.stop(StopReason::Policy);
             }
-            agent.notices.push(Notice::LicenseUnavailable(block));
+            agent.notices.push(Notice::LicenseUnavailable { block });
         }
         agent.write_status();
         Ok(agent)
@@ -357,6 +501,52 @@ impl Agent {
         }
     }
 
+    /// The open session for the UI (`None` when idle or stopped).
+    pub fn live_session(&self) -> Option<LiveSession> {
+        if !self.machine.is_open() {
+            return None;
+        }
+        let s = self.machine.session()?;
+        Some(LiveSession {
+            id: s.id,
+            state: self.machine.state().name().to_owned(),
+            paused_reason: match self.machine.state() {
+                SessionState::Paused(r) => Some(r),
+                _ => None,
+            },
+            project_id: s.project_id.clone(),
+            task_id: s.task_id.clone(),
+            started_at: s.started_at,
+            tracked_seconds: self.session_tracked.as_secs(),
+        })
+    }
+
+    /// Today's totals on this device (local calendar day).
+    pub fn today(&self) -> TodayTotals {
+        self.today
+            .for_date(self.clock.wall().with_timezone(&Local).date_naive())
+    }
+
+    /// The policy a session started now for `project` would run under, from the
+    /// verified cache (no network). See [`Agent::request_policy`] to refresh it first.
+    pub fn policy_preview(&mut self, project: Option<&str>) -> PolicyPreview {
+        let e = self.policy.effective(project);
+        PolicyPreview {
+            project_id: project.map(str::to_owned),
+            source: source_name(e.source).to_owned(),
+            revision: e.revision,
+            settings: e.settings,
+        }
+    }
+
+    /// Asks the network thread to fetch the base policy and `project`'s policy now.
+    pub fn request_policy(&mut self, project: Option<String>) {
+        self.policy_requests.push(None);
+        if project.is_some() {
+            self.policy_requests.push(project);
+        }
+    }
+
     /// Takes user-facing notices produced since the last call.
     pub fn take_notices(&mut self) -> Vec<Notice> {
         std::mem::take(&mut self.notices)
@@ -389,12 +579,7 @@ impl Agent {
             session_id: self.machine.session().map(|s| s.id),
             project_id: self.machine.session().and_then(|s| s.project_id.clone()),
             policy_revision: self.effective.revision,
-            policy_source: match self.effective.source {
-                PolicySource::Exact => "exact",
-                PolicySource::BaseFallback => "base_fallback",
-                PolicySource::Defaults => "defaults",
-            }
-            .to_owned(),
+            policy_source: source_name(self.effective.source).to_owned(),
             screenshots_enabled: self.effective.settings.screenshots.enabled,
             idle_threshold_seconds: self.effective.settings.idle.threshold_seconds,
             online: self.online,
@@ -430,6 +615,7 @@ impl Agent {
         self.activity = ActivityAggregator::new(self.effective.settings.idle.threshold_seconds);
         self.apps = AppTracker::new();
         self.scheduler.clear();
+        self.session_tracked = Duration::ZERO;
         self.apply_effective();
         if let Some(ev) = t.event {
             self.emit(ev, now.wall);
@@ -583,7 +769,7 @@ impl Agent {
         }
         if changed {
             log::warn!("{}", block.message());
-            self.notices.push(Notice::LicenseUnavailable(block));
+            self.notices.push(Notice::LicenseUnavailable { block });
         }
         self.write_status();
     }
@@ -753,6 +939,7 @@ impl Agent {
         let since = self.last_capture.unwrap_or(now.mono);
         self.last_capture = Some(now.mono);
         let elapsed = now.mono.saturating_sub(since);
+        self.session_tracked += elapsed;
         let sample = self.input.sample();
         let buckets = self.activity.record(now.wall, elapsed, sample);
         self.emit_buckets(buckets, now.wall);
@@ -854,10 +1041,22 @@ impl Agent {
         }
     }
 
-    fn emit_buckets(&mut self, buckets: Vec<crate::events::ActivityBucket>, now: DateTime<Utc>) {
+    fn emit_buckets(&mut self, buckets: Vec<ActivityBucket>, now: DateTime<Utc>) {
+        let any = !buckets.is_empty();
         for b in buckets {
             let end = b.bucket_start + TimeDelta::minutes(1);
+            if self.machine.session().is_some() {
+                let date = b.bucket_start.with_timezone(&Local).date_naive();
+                self.today.add(date, &b);
+            }
             self.emit(EventBody::ActivityBucket(b), end.min(now));
+        }
+        if any {
+            if let Ok(json) = serde_json::to_string(&self.today) {
+                if let Err(e) = lock(&self.outbox).set_meta(META_TODAY, &json) {
+                    log::debug!("could not persist today's totals: {e}");
+                }
+            }
         }
     }
 
@@ -926,6 +1125,7 @@ impl Agent {
             },
             last_alive: now.wall,
             last_monotonic_ms: mono_ms(now.mono, sess.mono_origin),
+            tracked_ms: u64::try_from(self.session_tracked.as_millis()).unwrap_or(u64::MAX),
         };
         if let Ok(json) = serde_json::to_string(&snap) {
             if let Err(e) = lock(&self.outbox).set_meta(META_SESSION, &json) {
@@ -983,6 +1183,7 @@ impl Agent {
             .paused
             .map_or(SessionState::Active, SessionState::Paused);
         self.machine = SessionMachine::restore(info, state);
+        self.session_tracked = Duration::from_millis(snap.tracked_ms);
         if down > self.cfg.tick * 2 && state == SessionState::Active {
             self.emit(
                 EventBody::DataGap(DataGap {
@@ -1028,6 +1229,12 @@ pub enum Command {
     Stop(StopReason),
     /// Stop the session, flush the outbox (bounded), and exit.
     Shutdown(StopReason),
+    /// Select the project the session-start notice is for: fetches its policy now and
+    /// publishes [`LiveStatus::preview`] for it from then on. Collects nothing.
+    Preview {
+        /// Project (`None` = no project).
+        project_id: Option<String>,
+    },
 }
 
 /// Messages from the network worker.
@@ -1180,6 +1387,10 @@ pub struct Runtime {
     tick: Duration,
     health: Arc<Mutex<Health>>,
     auto_start: Option<(Option<String>, Option<String>)>,
+    observer: Option<Box<dyn RuntimeObserver>>,
+    preview: Option<Option<String>>,
+    sync_status: Arc<Mutex<SyncStatus>>,
+    depth: Option<(Duration, u64)>,
 }
 
 impl Runtime {
@@ -1222,6 +1433,10 @@ impl Runtime {
                 tick,
                 health: Arc::new(Mutex::new(Health::default())),
                 auto_start: None,
+                observer: None,
+                preview: None,
+                sync_status: Arc::new(Mutex::new(SyncStatus::default())),
+                depth: None,
             },
             handle,
         ))
@@ -1230,6 +1445,54 @@ impl Runtime {
     /// Access to the agent (before `run`).
     pub fn agent_mut(&mut self) -> &mut Agent {
         &mut self.agent
+    }
+
+    /// Publishes [`LiveStatus`] snapshots and [`Notice`]s to `observer` (the tray app).
+    pub fn with_observer(mut self, observer: Box<dyn RuntimeObserver>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
+    /// Builds the current [`LiveStatus`].
+    pub fn live_status(&mut self) -> LiveStatus {
+        let now = self.clock.monotonic();
+        let depth = match self.depth {
+            Some((at, d)) if now.saturating_sub(at) < Duration::from_secs(5) => d,
+            _ => {
+                let d = lock(&self.outbox).depth().unwrap_or(0);
+                self.depth = Some((now, d));
+                d
+            }
+        };
+        let preview = self
+            .preview
+            .clone()
+            .map(|p| self.agent.policy_preview(p.as_deref()));
+        LiveStatus {
+            agent: self.agent.status(),
+            session: self.agent.live_session(),
+            settings: self.agent.effective_policy().settings.clone(),
+            preview,
+            permissions: self.agent.permissions(Some(self.capturer.as_ref())),
+            today: self.agent.today(),
+            sync: self
+                .sync_status
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone(),
+            outbox_depth: depth,
+            revoked: self.agent.is_revoked(),
+        }
+    }
+
+    fn publish(&mut self) {
+        if self.observer.is_none() {
+            return;
+        }
+        let status = self.live_status();
+        if let Some(o) = self.observer.as_mut() {
+            o.status(&status);
+        }
     }
 
     fn update_health(&mut self) {
@@ -1247,6 +1510,9 @@ impl Runtime {
             let _ = self.jobs_tx.send(NetJob::FetchPolicy(p));
         }
         for n in self.agent.take_notices() {
+            if let Some(o) = self.observer.as_mut() {
+                o.notice(&n);
+            }
             match n {
                 Notice::SessionOverlap { .. } => log::warn!(
                     "NOTICE: your session was stopped because another work session is already active"
@@ -1257,7 +1523,7 @@ impl Runtime {
                 Notice::OutsideWorkHours => {
                     log::info!("NOTICE: outside policy work hours; capture is paused")
                 }
-                Notice::LicenseUnavailable(b) => log::warn!("NOTICE: {}", b.message()),
+                Notice::LicenseUnavailable { block } => log::warn!("NOTICE: {}", block.message()),
                 Notice::LicenseRestored => {
                     log::info!("NOTICE: tracking is available again")
                 }
@@ -1276,6 +1542,7 @@ impl Runtime {
         self.maybe_auto_start();
         self.update_health();
         self.forward_agent_outputs();
+        self.publish();
 
         let started = self.clock.monotonic();
         let mut next_tick = started + self.tick;
@@ -1308,6 +1575,7 @@ impl Runtime {
             }
             if revoked {
                 self.forward_agent_outputs();
+                self.publish();
                 break;
             }
             let now = self.clock.monotonic();
@@ -1318,6 +1586,7 @@ impl Runtime {
                     next_tick = now + self.tick;
                 }
                 self.update_health();
+                self.publish();
             }
             self.forward_agent_outputs();
         }
@@ -1335,6 +1604,9 @@ impl Runtime {
                 revoked = true;
             }
         }
+        self.depth = None;
+        self.forward_agent_outputs();
+        self.publish();
         let outbox_depth = lock(&self.outbox).depth().unwrap_or(0);
         Ok(RunSummary {
             revoked,
@@ -1386,11 +1658,17 @@ impl Runtime {
             Command::Resume => self.agent.resume(),
             Command::Stop(reason) => self.agent.stop(reason),
             Command::Shutdown(_) => Ok(()),
+            Command::Preview { project_id } => {
+                self.agent.request_policy(project_id.clone());
+                self.preview = Some(project_id);
+                Ok(())
+            }
         };
         if let Err(e) = r {
             log::warn!("command refused: {e}");
         }
         self.update_health();
+        self.publish();
     }
 
     fn handle_net(&mut self, e: NetEvent) {
@@ -1409,6 +1687,7 @@ impl Runtime {
             NetEvent::Revoked => {}
         }
         self.update_health();
+        self.publish();
     }
 
     fn spawn_worker(&mut self, opts: &RunOptions) -> Option<JoinHandle<()>> {
@@ -1429,6 +1708,7 @@ impl Runtime {
             syncer: Syncer::default(),
             opts: opts.clone(),
             status: SyncStatus::default(),
+            shared_status: self.sync_status.clone(),
             online: true,
         };
         std::thread::Builder::new()
@@ -1449,6 +1729,7 @@ struct NetWorker {
     syncer: Syncer,
     opts: RunOptions,
     status: SyncStatus,
+    shared_status: Arc<Mutex<SyncStatus>>,
     online: bool,
     blocked: Option<LicenseBlock>,
     next_sync: Duration,
@@ -1569,6 +1850,7 @@ impl NetWorker {
     }
 
     fn write_status(&self) {
+        *self.shared_status.lock().unwrap_or_else(|e| e.into_inner()) = self.status.clone();
         if let Ok(json) = serde_json::to_string(&self.status) {
             let _ = lock(&self.outbox).set_meta(META_SYNC_STATUS, &json);
         }
