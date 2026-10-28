@@ -103,6 +103,7 @@
   word-break: break-all;
   padding: 14px 16px;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
   background: var(--canvas);
   color: var(--text);
   user-select: all;

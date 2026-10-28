@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Me } from '@rd/contracts';
 import { buildPath, parseErrorBody, unwrapList } from './api';
 import { stackDaily } from './charts';
-import { accessFor, activeHref, navFor } from './nav';
+import { accessFor, activeHref, groupOf, navFor } from './nav';
 
 describe('api helpers', () => {
   it('parses the error envelope', () => {
@@ -45,9 +45,17 @@ describe('navigation by role', () => {
     expect(admin).not.toContain('/admin/webhooks');
     expect(navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['webhooks'] })).flatMap((g) => g.items.map((i) => i.href))).toContain('/admin/webhooks');
   });
-  it('gives auditors the audit log only', () => {
+  it('gives auditors the audit log only, under Settings', () => {
     const groups = navFor(accessFor(me({ org_role: 'auditor' })));
-    expect(groups.map((g) => g.label)).toEqual(['Me', 'Audit']);
+    expect(groups.map((g) => g.label)).toEqual(['Me', 'Settings']);
+    expect(groups[1]!.items.map((i) => i.href)).toEqual(['/audit']);
+  });
+  it('groups an admin\u2019s pages into Me, Money, Admin and Settings', () => {
+    const groups = navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['budgets_invoicing', 'webhooks'] }));
+    expect(groups.map((g) => g.key)).toEqual(['me', 'money', 'admin', 'settings']);
+    expect(groupOf(groups, '/admin/billing')).toBe('settings');
+    expect(groupOf(groups, '/admin/invoices')).toBe('money');
+    expect(groupOf(groups, null)).toBeNull();
   });
   it('highlights the longest matching item', () => {
     const groups = navFor(accessFor(me({}, ['t1'])));

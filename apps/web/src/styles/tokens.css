@@ -12,15 +12,33 @@
   /* Text */
   --text: #0e1013;
   --text-2: #3f444b;
-  --text-3: #5e646c;
+  --text-3: #53595f; /* 4.9:1 on the bare backdrop, ≥ 6.5:1 on glass */
   --text-on-ink: #ffffff;
 
   /* Surfaces and rules */
   --surface: #ffffff;
-  --canvas: #f4f4f5;
+  --canvas: #eceef2;
   --rule: #e4e4e7;
   --rule-soft: #ecedef;
   --control-border: #c9cdd2;
+
+  /* Solid glass (Stage 4 design direction): frosted panels over a quiet backdrop with
+     two faint light fields, never more. 78% white keeps every text pair ≥ 5.3:1. */
+  --backdrop: radial-gradient(1100px 620px at 8% -8%, rgb(42 120 214 / 0.18), transparent 62%),
+    radial-gradient(900px 560px at 100% 4%, rgb(253 61 65 / 0.1), transparent 58%), var(--canvas);
+  --glass: rgb(255 255 255 / 0.78);
+  --glass-strong: rgb(255 255 255 / 0.92);
+  --glass-edge: rgb(255 255 255 / 0.9);
+  --glass-blur: blur(24px) saturate(160%);
+  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.85), 0 10px 30px rgb(14 16 19 / 0.08), 0 1px 2px rgb(14 16 19 / 0.06);
+  --ink-glass: rgb(11 12 15 / 0.86);
+  --ink-glass-edge: rgb(255 255 255 / 0.08);
+  --ink-glass-shadow: 0 12px 32px rgb(11 12 15 / 0.22);
+  --ink-hover: rgb(255 255 255 / 0.06);
+  --ink-current: rgb(255 255 255 / 0.1);
+  --radius-panel: 16px;
+  --radius-control: 10px;
+  --radius-badge: 6px;
 
   /* Brand red: chrome, eyebrow dash, active marker, tracking dot. Never a person's activity. */
   --brand-red: #fd3d41;

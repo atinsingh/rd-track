@@ -7,7 +7,7 @@
   min-height: var(--target);
   padding: 0 18px;
   border: 1px solid transparent;
-  border-radius: 0;
+  border-radius: var(--radius-control);
   font: 600 14px var(--font-ui);
   text-decoration: none;
   white-space: nowrap;
@@ -124,8 +124,12 @@
 
 /* ───── Cards ───── */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   padding: 20px 22px;
   display: flex;
   flex-direction: column;
@@ -133,8 +137,9 @@
   min-width: 0;
 }
 .cardInk {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--ink-glass);
+  border-color: var(--ink-glass-edge);
+  box-shadow: var(--ink-glass-shadow);
   color: var(--ink-text);
 }
 .cardInk h2 {
@@ -175,7 +180,7 @@
   min-height: var(--target);
   padding: 0 12px;
   border: 1px solid var(--control-border);
-  border-radius: 0;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   width: 100%;
@@ -203,6 +208,7 @@ select.input {
   min-height: var(--target);
   padding: 0 12px;
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text-2);
 }
@@ -254,8 +260,19 @@ select.input {
   display: inline-flex;
   flex-wrap: wrap;
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   width: fit-content;
   max-width: 100%;
+}
+/* Round the outer segments rather than clipping, so the focus ring stays visible. */
+.segment:first-child span {
+  border-radius: calc(var(--radius-control) - 1px) 0 0 calc(var(--radius-control) - 1px);
+}
+.segment:last-child span {
+  border-radius: 0 calc(var(--radius-control) - 1px) calc(var(--radius-control) - 1px) 0;
+}
+.segment:only-child span {
+  border-radius: calc(var(--radius-control) - 1px);
 }
 .segment {
   position: relative;
@@ -314,6 +331,7 @@ select.input {
   text-transform: uppercase;
   padding: 2px 8px;
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-badge);
   background: var(--surface);
   color: var(--text-2);
   white-space: nowrap;
@@ -341,8 +359,12 @@ select.input {
   gap: 14px;
   align-items: flex-start;
   padding: 14px 16px;
-  border: 1px solid var(--rule);
-  background: var(--surface);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   color: var(--text-2);
 }
 .bannerBody {
@@ -363,8 +385,9 @@ select.input {
   align-items: center;
 }
 .bannerInk {
-  background: var(--ink);
-  border-color: var(--ink);
+  background: var(--ink-glass);
+  border-color: var(--ink-glass-edge);
+  box-shadow: var(--ink-glass-shadow);
   color: var(--ink-text);
   padding: 16px 20px;
 }
@@ -376,6 +399,7 @@ select.input {
 }
 .bannerWarn {
   background: var(--warn-bg);
+  box-shadow: none;
   border-color: var(--warn-border);
   color: var(--warn-text-2);
 }
@@ -404,6 +428,7 @@ select.input {
   letter-spacing: 0.14em;
   color: var(--text);
   border: 1px solid var(--text);
+  border-radius: var(--radius-badge);
   padding: 1px 6px;
   margin-top: 2px;
 }
@@ -559,6 +584,7 @@ select.input {
   margin: auto;
   max-width: min(440px, calc(100vw - 32px));
   border: 1px solid var(--text);
+  border-radius: var(--radius-panel);
   background: var(--surface);
   color: var(--text);
   padding: 20px 22px;
@@ -589,6 +615,7 @@ select.input {
   font-family: var(--font-mono);
   font-size: 13px;
   background: var(--canvas);
+  border-radius: var(--radius-control);
   padding: 10px 12px;
   margin-top: 8px;
 }

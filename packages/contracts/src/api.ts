@@ -234,6 +234,18 @@ export const reviewRequest = z.strictObject({ note: z.string().max(1000).optiona
 
 // ───────────────────────── reports ─────────────────────────
 
+/** Names for the ⌘K palette: the people in teams you manage and the projects you manage. Names only, no data. */
+export interface DirectoryPerson {
+  user_id: string;
+  display_name: string;
+  team_id: string;
+  team_name: string;
+}
+export interface DirectoryResponse {
+  people: DirectoryPerson[];
+  projects: { id: string; name: string }[];
+}
+
 export interface TeamSummary {
   id: string;
   name: string;

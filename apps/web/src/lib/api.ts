@@ -1,4 +1,5 @@
 import type {
+  DirectoryResponse,
   ApprovalType,
   ApprovalsBatchResponse,
   AppCategory,
@@ -357,6 +358,7 @@ export const rd = {
     policy: (signal?: AbortSignal) => get<MyPolicyResponse>('/v1/me/policy', { signal }),
     accessLog: (signal?: AbortSignal) => list<AuditEventDTO>('/v1/me/access-log', { signal }),
     projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/me/projects', { signal }),
+    directory: (signal?: AbortSignal) => get<DirectoryResponse>('/v1/me/directory', { signal }),
     insights: (r: Range, tz: string, signal?: AbortSignal) => get<PersonalInsights>('/v1/me/insights', { query: { ...r, tz }, signal }),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),

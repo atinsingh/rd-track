@@ -81,7 +81,12 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
 
 1. F1 idle prompt (agent, API, web history)
 2. F2 batch approvals + the unified inbox
-3. IA / navigation regroup and ⌘K
+3. IA / navigation regroup and ⌘K — **done**:
+   - five collapsible groups (folded state is remembered per browser; the group holding the current page never folds);
+   - a folded Team group still shows the approvals count;
+   - ⌘K / Ctrl K palette over pages, the people in teams you manage and your projects (`GET /v1/me/directory`, names only, not audited as a data view);
+   - solid glass applied through tokens (`--glass*`, `--ink-glass*`, `--radius-*`).
+   - *Settings → Developers* is still labelled *Webhooks* until F5 adds tokens to it.
 4. F4 + F3 agent notices
 5. F5 API tokens
 6. F6 expected hours

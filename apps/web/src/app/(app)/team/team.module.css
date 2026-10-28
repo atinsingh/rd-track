@@ -40,6 +40,7 @@
   gap: 2px;
   padding: 14px;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
   color: var(--text);
   text-decoration: none;
 }

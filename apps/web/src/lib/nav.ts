@@ -84,64 +84,85 @@ export interface NavItem {
   label: string;
   capability: Capability;
   badge?: 'approvals';
+  /** Extra words the ⌘K palette matches on. */
+  keywords?: string;
 }
+export type NavGroupKey = 'me' | 'team' | 'money' | 'admin' | 'settings';
 export interface NavGroup {
+  key: NavGroupKey;
   label: string;
   items: NavItem[];
 }
 
+/** Five groups (Stage 4 IA): your own pages, the people you manage, money, organisation admin, settings. */
 const GROUPS: NavGroup[] = [
   {
+    key: 'me',
     label: 'Me',
     items: [
-      { href: '/me', label: 'My day', capability: 'me' },
-      { href: '/me/time', label: 'My time', capability: 'me' },
-      { href: '/me/insights', label: 'Insights', capability: 'me' },
-      { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule' },
+      { href: '/me', label: 'My day', capability: 'me', keywords: 'today timeline home' },
+      { href: '/me/time', label: 'My time', capability: 'me', keywords: 'timesheet week corrections manual' },
+      { href: '/me/insights', label: 'Insights', capability: 'me', keywords: 'focus apps trends' },
+      { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
-      { href: '/me/privacy', label: "What's collected", capability: 'me' },
-      { href: '/exports', label: 'Exports', capability: 'exports' },
+      { href: '/me/privacy', label: "What's collected", capability: 'me', keywords: 'privacy data deletion' },
+      { href: '/exports', label: 'Exports', capability: 'exports', keywords: 'csv download payroll' },
     ],
   },
   {
+    key: 'team',
     label: 'Team',
     items: [
-      { href: '/team', label: 'Team', capability: 'team' },
-      { href: '/team/attendance', label: 'Attendance and calendar', capability: 'teamSchedule' },
-      { href: '/approvals', label: 'Approvals', capability: 'approvals', badge: 'approvals' },
-      { href: '/projects', label: 'Projects', capability: 'projects' },
+      { href: '/team', label: 'Team', capability: 'team', keywords: 'people reports' },
+      { href: '/approvals', label: 'Approvals', capability: 'approvals', badge: 'approvals', keywords: 'inbox review corrections timesheets time off' },
+      { href: '/team/attendance', label: 'Attendance and calendar', capability: 'teamSchedule', keywords: 'leave late absent' },
+      { href: '/projects', label: 'Projects', capability: 'projects', keywords: 'budget report' },
     ],
   },
   {
+    key: 'money',
+    label: 'Money',
+    items: [
+      { href: '/admin/clients', label: 'Clients', capability: 'money' },
+      { href: '/admin/invoices', label: 'Invoices', capability: 'money', keywords: 'billing clients' },
+      { href: '/admin/rates', label: 'Rates and budgets', capability: 'money', keywords: 'pay bill rate cost' },
+    ],
+  },
+  {
+    key: 'admin',
     label: 'Admin',
     items: [
-      { href: '/admin/users', label: 'People', capability: 'admin' },
-      { href: '/admin/teams', label: 'Teams and projects', capability: 'admin' },
-      { href: '/admin/devices', label: 'Devices', capability: 'admin' },
-      { href: '/admin/policies', label: 'Policies', capability: 'admin' },
-      { href: '/admin/apps', label: 'Work apps', capability: 'admin' },
-      { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks' },
-      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits' },
-      { href: '/admin/schedules', label: 'Schedules', capability: 'adminSchedules' },
+      { href: '/admin/users', label: 'People', capability: 'admin', keywords: 'users invite deactivate' },
+      { href: '/admin/teams', label: 'Teams and projects', capability: 'admin', keywords: 'members managers tasks' },
+      { href: '/admin/devices', label: 'Devices', capability: 'admin', keywords: 'agent enrol computers' },
+      { href: '/admin/policies', label: 'Policies', capability: 'admin', keywords: 'idle screenshots tracking settings' },
+      { href: '/admin/apps', label: 'Work apps', capability: 'admin', keywords: 'categories' },
+      { href: '/admin/schedules', label: 'Schedules', capability: 'adminSchedules', keywords: 'shifts hours' },
       { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
-      { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff' },
-      { href: '/admin/requests', label: 'Deletion requests', capability: 'admin' },
-      { href: '/admin/clients', label: 'Clients', capability: 'money' },
-      { href: '/admin/rates', label: 'Rates and budgets', capability: 'money' },
-      { href: '/admin/invoices', label: 'Invoices', capability: 'money' },
-      { href: '/admin/billing', label: 'Billing', capability: 'admin' },
-      { href: '/audit', label: 'Audit log', capability: 'audit' },
+      { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff', keywords: 'leave accrual' },
+      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits', keywords: 'overtime daily weekly' },
+      { href: '/admin/requests', label: 'Deletion requests', capability: 'admin', keywords: 'privacy' },
+    ],
+  },
+  {
+    key: 'settings',
+    label: 'Settings',
+    items: [
+      { href: '/admin/billing', label: 'Plan and billing', capability: 'admin', keywords: 'seats subscription upgrade' },
+      { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks', keywords: 'developers integrations api' },
+      { href: '/audit', label: 'Audit log', capability: 'audit', keywords: 'history security' },
     ],
   },
 ];
 
 /** Navigation filtered to what the signed-in user's roles allow. */
 export function navFor(a: Access): NavGroup[] {
-  const groups = GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => can(a, i.capability)) })).filter(
-    (g) => g.items.length > 0,
-  );
-  // Auditors without admin rights see the audit log under its own heading.
-  return groups.map((g) => (g.label === 'Admin' && !a.isAdmin ? { ...g, label: 'Audit' } : g));
+  return GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => can(a, i.capability)) })).filter((g) => g.items.length > 0);
+}
+
+/** The group holding the current page, which always stays open. */
+export function groupOf(groups: NavGroup[], href: string | null): NavGroupKey | null {
+  return groups.find((g) => g.items.some((i) => i.href === href))?.key ?? null;
 }
 
 /** Longest nav href that prefixes the path, so /team/123 highlights "Team". */

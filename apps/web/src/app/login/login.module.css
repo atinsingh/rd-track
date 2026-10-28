@@ -2,7 +2,7 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  background: var(--canvas);
+  background: var(--backdrop);
 }
 .aside {
   background: var(--ink);
@@ -52,8 +52,12 @@
 }
 .card {
   width: min(420px, 100%);
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   padding: 32px;
   display: flex;
   flex-direction: column;

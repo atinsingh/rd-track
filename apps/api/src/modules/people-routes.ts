@@ -1,4 +1,12 @@
-import { deletionRequestCreate, exportCreateRequest, reviewRequest, timeCorrectionRequest, type MemberVisibility } from '@rd/contracts';
+import {
+  deletionRequestCreate,
+  exportCreateRequest,
+  reviewRequest,
+  timeCorrectionRequest,
+  type DirectoryPerson,
+  type DirectoryResponse,
+  type MemberVisibility,
+} from '@rd/contracts';
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Deps, UserActor } from '../context';
@@ -152,6 +160,25 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
       return report;
     },
   );
+  // Names for jumping to a person or project (⌘K). Not a data view, so not audited as one.
+  app.get('/v1/me/directory', user, async (req): Promise<DirectoryResponse> => {
+    const a = userOf(req);
+    const [teams, projects] = await Promise.all([managedTeamIds(pool, a.userId), managedProjectIds(pool, a.userId)]);
+    const people = await many<DirectoryPerson>(
+      pool,
+      `SELECT DISTINCT ON (u.id) u.id AS user_id, u.display_name, t.id AS team_id, t.name AS team_name
+       FROM team_memberships m JOIN teams t ON t.id = m.team_id JOIN users u ON u.id = m.user_id
+       WHERE t.organization_id = $1 AND t.id = ANY($2::uuid[]) AND m.valid_to IS NULL
+         AND u.status = 'active' AND u.id <> $3
+       ORDER BY u.id, t.name`,
+      [a.organizationId, teams, a.userId],
+    );
+    const list = projects.length ? await listProjects(pool, a.organizationId, projects) : [];
+    return {
+      people: people.sort((x, y) => x.display_name.localeCompare(y.display_name)),
+      projects: list.filter((p) => p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
+    };
+  });
   app.get('/v1/projects', user, async (req) => {
     const a = userOf(req);
     return { items: await listProjects(pool, a.organizationId, await managedProjectIds(pool, a.userId)) };

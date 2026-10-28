@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { ProjectBudgetCard } from '@/components/ProjectBudgetCard';
@@ -16,7 +17,11 @@ import { NoAccess } from '../NoAccess';
 
 export default function ProjectsPage() {
   const { access, timezone: tz } = useMe();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // ?project= (from ⌘K) picks the project; choosing in the page wins until the link changes again.
+  const requested = useSearchParams().get('project');
+  const [choice, setChoice] = useState<{ from: string | null; id: string | null }>({ from: requested, id: requested });
+  const projectId = choice.from === requested ? choice.id : requested;
+  const setProjectId = (id: string | null) => setChoice({ from: requested, id });
   const [day, setDay] = useState(() => todayInTz(tz));
   const week = startOfWeek(day);
   const range = daysRange(week, 7, tz);
