@@ -498,3 +498,40 @@ export interface Page<T> {
   items: T[];
   next_cursor: string | null;
 }
+
+// ───────────── Stage 4 F2: batch approvals ─────────────
+
+export const APPROVAL_TYPES = ['correction', 'timesheet', 'time_off'] as const;
+export type ApprovalType = (typeof APPROVAL_TYPES)[number];
+export const MAX_BATCH_APPROVALS = 100;
+
+/**
+ * Approve or send back several requests at once. Each item is checked exactly as if it
+ * were reviewed on its own (your own requests, scope, plan, state) and succeeds or
+ * fails independently. Sending back needs a note, as it does one at a time.
+ */
+export const approvalsBatchRequest = z
+  .strictObject({
+    action: z.enum(['approve', 'reject']),
+    note: z.string().trim().max(1000).optional(),
+    items: z
+      .array(z.strictObject({ type: z.enum(APPROVAL_TYPES), id: uuid }))
+      .min(1)
+      .max(MAX_BATCH_APPROVALS),
+  })
+  .refine((b) => b.action === 'approve' || (b.note ?? '').length >= 3, { message: 'A note of at least 3 characters is required to send back', path: ['note'] });
+
+export interface ApprovalsBatchResult {
+  type: ApprovalType;
+  id: string;
+  ok: boolean;
+  /** On failure: the same error code a single review would return. */
+  code?: string;
+  message?: string;
+}
+export interface ApprovalsBatchResponse {
+  approved: number;
+  rejected: number;
+  failed: number;
+  results: ApprovalsBatchResult[];
+}

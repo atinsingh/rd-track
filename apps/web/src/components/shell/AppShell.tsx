@@ -3,12 +3,14 @@
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
+import { onApprovalsChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { activeHref, can, navFor, roleLabel } from '@/lib/nav';
+import { sched } from '@/lib/scheduling';
 import { timesheetsApi } from '@/lib/timesheets';
 import { useApi } from '@/lib/useApi';
 import { LicenceBanner } from './LicenceBanner';
@@ -25,7 +27,21 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pending = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
   const reviewsTimesheets = can(access, 'approvals') && access.entitlements.includes('timesheets');
   const pendingSheets = useApi(reviewsTimesheets ? 'nav:timesheets-pending' : null, (signal) => timesheetsApi.pending(signal));
-  const pendingCount = (pending.data?.length ?? 0) + (pendingSheets.data?.length ?? 0);
+  const reviewsTimeOff = can(access, 'approvals') && access.entitlements.includes('time_off');
+  const pendingLeave = useApi(reviewsTimeOff ? 'nav:timeoff-pending' : null, (signal) => sched.review.pending(signal));
+  const pendingCount = (pending.data?.length ?? 0) + (pendingSheets.data?.length ?? 0) + (pendingLeave.data?.length ?? 0);
+  const { reload: reloadCorrections } = pending;
+  const { reload: reloadSheets } = pendingSheets;
+  const { reload: reloadLeave } = pendingLeave;
+  useEffect(
+    () =>
+      onApprovalsChanged(() => {
+        reloadCorrections();
+        reloadSheets();
+        reloadLeave();
+      }),
+    [reloadCorrections, reloadSheets, reloadLeave],
+  );
 
   const signOut = async () => {
     try {

@@ -1,4 +1,6 @@
 import type {
+  ApprovalType,
+  ApprovalsBatchResponse,
   AppCategory,
   AppCategoryDTO,
   PersonalInsights,
@@ -440,6 +442,10 @@ export const rd = {
     subscription: (signal?: AbortSignal) => get<SubscriptionDTO>('/v1/billing/subscription', { signal }),
     changePlan: (plan: PlanId, seats: number) => post<ChangePlanResponse>('/v1/billing/plan', { plan, seats }),
     portal: () => post<{ url: string }>('/v1/billing/portal', {}),
+  },
+  approvals: {
+    batch: (body: { action: 'approve' | 'reject'; note?: string; items: { type: ApprovalType; id: string }[] }) =>
+      post<ApprovalsBatchResponse>('/v1/approvals/batch', body),
   },
   audit: (q: AuditQuery, signal?: AbortSignal) =>
     get<Page<AuditEventDTO>>('/v1/audit-events', { query: { ...q }, signal }),
