@@ -3,6 +3,9 @@
 **Status:** Draft for review · **Date:** 2026-10-28
 **Inputs:** `RoundDigital Workforce Activity & Time Platform` requirements (2026-10-28) and the architecture diagram.
 **Requirement IDs** (`TIME-04`, `SCR-07`, …) refer to that document.
+**Commercial model:** Track is sold as multi-tenant SaaS (Free up to 2 users, Standard
+$2.50, Pro $5 per user per month) — see [03-commercial-model.md](03-commercial-model.md)
+and [ADR-0004](../adr/0004-multi-tenant-saas.md). RoundDigital is the first tenant.
 
 This document turns the requirements into a buildable design: module boundaries, data
 model, wire contracts, the key flows, and the rules that keep time and activity numbers
@@ -83,6 +86,8 @@ never through another module's SQL.
 | `exports` | `export_jobs` | Async CSV generation, expiring download (`RPT-04`). |
 | `privacy` | `deletion_requests`, `legal_holds`, `notifications` | Deletion workflow, legal hold, employee notices (`AUD-04/05`, `POL-05`). |
 | `audit` | `audit_logs` | Append-only writer and reader (`AUD-01/02`). |
+| `billing` | `subscriptions`, `seat_usage_daily` | Plan entitlements, seat counting and enforcement, licence status for agents, `BillingProvider` (Stripe / manual). |
+| `platform` | `platform_admins`, `platform_sessions`, `support_access_grants` | Vendor operator realm: create tenants, set plan and seats. No access to tenant activity data. |
 
 ## 3. Roles and authorization
 
@@ -97,6 +102,7 @@ memberships.
 | Org admin | `users.org_role = 'org_admin'` | Users, teams, projects, devices, policies, deletion requests, exports. **No screenshot access by default** — an admin who also manages a team gets that team's manager access, nothing more. |
 | Auditor | `users.org_role = 'auditor'` | Audit log and access records. No activity detail, no screenshots. |
 | Super admin | `users.org_role = 'super_admin'` | Break-glass org administration; MFA mandatory; every action audited with `actor_role = 'super_admin'`. |
+| Platform operator | `platform_admins` (separate realm and login) | RoundDigital staff running the SaaS: tenants, plans, seats, billing health. **No** tenant activity, apps or screenshots; support access needs a time-boxed grant approved by the tenant's org admin. |
 
 **Rule enforced in code:** every query receives an `Actor` (`organization_id`, `user_id`,
 roles) and filters by `organization_id` first. Access to another user's data goes through
@@ -196,7 +202,9 @@ Every response carries `x-request-id`.
 
 Ingestion processing (in one transaction):
 
-1. Authenticate device; reject the whole batch if the device is revoked or the user is deactivated.
+1. Authenticate device; reject the whole batch if the device is revoked or the user is
+   deactivated, and with `403 subscription_inactive` / `seat_unavailable` when the
+   organization's licence doesn't cover this user (commercial model §4).
 2. Validate each envelope; invalid ones are `rejected` with a reason (no payload is logged).
 3. `INSERT … ON CONFLICT DO NOTHING` into `ingest_events`; conflicts are `duplicate`.
 4. Lifecycle events (`session.*`) are applied **inline**, in `sequence` order, through the

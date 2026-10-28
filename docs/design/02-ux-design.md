@@ -170,7 +170,7 @@ display type, mono uppercase eyebrow labels, square-cornered controls and 1px ru
 | `--text-2` / `--text-3` | `#3F444B` / `#5E646C` | Secondary text and labels (≥ 5.5:1 on the light surfaces) |
 | `--surface` / `--canvas` | `#FFFFFF` / `#F4F4F5` | Cards / page background |
 | `--rule` | `#E4E4E7` | Card borders and table rows; table headers get a 1px `--text` rule |
-| `--brand-red` | `#F03E3E` | Brand mark, eyebrow dash, active-nav marker, the live "tracking" dot |
+| `--brand-red` | `#FD3D41` (sampled from the logo) | Brand mark, eyebrow dash, active-nav marker, the live "tracking" dot |
 | `--action-red` | `#D42B2B` | Primary buttons with white text (5:1); links use `#C42424` |
 | `--data` | `#23272E`, `#7C838C`, `#C9CDD2` | Charts: three steps of lightness, never hue alone |
 | `--warn` | `#6E4105` on `#FFF8E8` | Permission missing, device behind on policy |
@@ -182,7 +182,10 @@ display type, mono uppercase eyebrow labels, square-cornered controls and 1px ru
 * **Red never describes a person.** Brand red is for chrome, primary actions and the
   "tracking" indicator. Activity and time are drawn in neutral ink; there is no
   red/green scoring anywhere.
-* Logo: use RoundDigital's official logo file in the navigation rail and agent
-  (`apps/web/public/brand/`); the mockups show a stand-in mark until it's supplied.
+* Logo (`apps/web/public/brand/`): `rd-logo-source.svg` is the supplied original;
+  `rd-logo-color.png` (grey wordmark) is for light surfaces, `rd-logo-reversed.png`
+  (white wordmark) for the dark rail and agent, `rd-mark.png` for small spaces. Ask the
+  brand owner for a vector reversed logo before launch — these are trimmed from the
+  supplied raster.
 * Accessibility: WCAG 2.2 AA contrast; the timeline has a table alternative; every chart
   has a text summary; all actions keyboard-reachable.
