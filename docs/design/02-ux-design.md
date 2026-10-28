@@ -2,8 +2,8 @@
 
 **Status:** Draft for review · **Date:** 2026-10-28
 **Visual mockups:** [RoundDigital Track UI canvas](https://claude.ai/artifact/FyvyFXt9rY4rjiusnKxnAM) —
-My day, Team week, Policies, What's collected, Devices, desktop agent. Visual style is
-provisional until RoundDigital brand colors, type and logo are applied.
+My day, Team week, Policies, What's collected, Devices, desktop agent, in the RoundDigital
+visual style (§5).
 
 ## 1. Principles that shape every screen
 
@@ -158,11 +158,31 @@ Popover:           [Project ▾] [Task ▾]
 * Permission problems show a single, dismissible banner with a "Fix in System Settings"
   link — never a loop of prompts.
 
-## 5. Visual system
+## 5. Visual system (RoundDigital brand)
 
-* Type: Inter (UI), JetBrains Mono for numbers in tables.
-* Color tokens: neutral surfaces; a single accent (`--accent`, teal) for active time;
-  hatched neutral for gaps; amber only for warnings (device behind on policy, permission
-  missing). Red is reserved for destructive actions — never for a person's activity.
+Taken from round.digital: a near-black base, a single signal red, tightly tracked bold
+display type, mono uppercase eyebrow labels, square-cornered controls and 1px rules.
+
+| Token | Value | Use |
+|---|---|---|
+| `--ink` | `#0B0C0F` | Navigation rail, dark panels, agent popover |
+| `--text` | `#0E1013` | Body text; secondary buttons are outlined in it |
+| `--text-2` / `--text-3` | `#3F444B` / `#5E646C` | Secondary text and labels (≥ 5.5:1 on the light surfaces) |
+| `--surface` / `--canvas` | `#FFFFFF` / `#F4F4F5` | Cards / page background |
+| `--rule` | `#E4E4E7` | Card borders and table rows; table headers get a 1px `--text` rule |
+| `--brand-red` | `#F03E3E` | Brand mark, eyebrow dash, active-nav marker, the live "tracking" dot |
+| `--action-red` | `#D42B2B` | Primary buttons with white text (5:1); links use `#C42424` |
+| `--data` | `#23272E`, `#7C838C`, `#C9CDD2` | Charts: three steps of lightness, never hue alone |
+| `--warn` | `#6E4105` on `#FFF8E8` | Permission missing, device behind on policy |
+
+* Type: **Inter Tight** 700 for headings (letter-spacing −0.03em), **Inter** for UI text,
+  **JetBrains Mono** for eyebrows (uppercase, +0.14em, with a 16×2 px red dash) and for
+  every number.
+* Shape: square corners on buttons, inputs and cards; 44 px minimum touch targets.
+* **Red never describes a person.** Brand red is for chrome, primary actions and the
+  "tracking" indicator. Activity and time are drawn in neutral ink; there is no
+  red/green scoring anywhere.
+* Logo: use RoundDigital's official logo file in the navigation rail and agent
+  (`apps/web/public/brand/`); the mockups show a stand-in mark until it's supplied.
 * Accessibility: WCAG 2.2 AA contrast; the timeline has a table alternative; every chart
   has a text summary; all actions keyboard-reachable.
