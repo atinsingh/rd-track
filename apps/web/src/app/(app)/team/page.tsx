@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import type { CorrectionDTO, MemberReportRow, TeamReport } from '@rd/contracts';
+import type { CorrectionDTO, MemberReportRow, TeamOvertimeReport, TeamReport } from '@rd/contracts';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
+import { StatusBadge, memberTimesheetHref } from '@/components/timesheet/TimesheetView';
 import { ActivityInfo } from '@/components/ui/ActivityInfo';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataState';
@@ -14,6 +15,7 @@ import { rd } from '@/lib/api';
 import { byName, durationOrDash, formatDuration, plural } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
+import { limitsSummary, overtimeText, timesheetsApi } from '@/lib/timesheets';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../NoAccess';
 import s from './team.module.css';
@@ -69,7 +71,7 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
   );
 }
 
-function MembersTable({ report, week }: { report: TeamReport; week: string }) {
+function MembersTable({ report, week, overtime }: { report: TeamReport; week: string; overtime?: TeamOvertimeReport }) {
   const rows = [...report.members].sort(byName);
   const showActivity = report.visibility.activity;
   if (rows.length === 0) return <Empty title="No members in this team yet" />;
@@ -101,6 +103,14 @@ function MembersTable({ report, week }: { report: TeamReport; week: string }) {
             <th scope="col" className={numClass}>
               Days
             </th>
+            {overtime ? (
+              <>
+                <th scope="col" className={numClass}>
+                  Over limit
+                </th>
+                <th scope="col">Timesheet</th>
+              </>
+            ) : null}
             <th scope="col">Data notes</th>
           </tr>
         </thead>
@@ -130,12 +140,34 @@ function MembersTable({ report, week }: { report: TeamReport; week: string }) {
               <td className={numClass}>{durationOrDash(m.gap_seconds + m.paused_seconds)}</td>
               <td className={numClass}>{durationOrDash(m.manual_seconds)}</td>
               <td className={numClass}>{m.days_active}</td>
+              {overtime ? <OvertimeCells row={overtime.members.find((o) => o.user_id === m.user_id)} member={m} teamId={report.team.id} week={week} /> : null}
               <td className="small secondary">{m.notes.length ? m.notes.join('; ') : '—'}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </TableBox>
+  );
+}
+
+/** Overtime and timesheet status for one member: neutral ink, never a score. */
+function OvertimeCells({ row, member, teamId, week }: { row: TeamOvertimeReport['members'][number] | undefined; member: MemberReportRow; teamId: string; week: string }) {
+  const w = row?.weeks[0];
+  return (
+    <>
+      <td className={numClass} title={row ? limitsSummary(row.limits) : undefined}>
+        {row ? overtimeText(row.overtime_seconds) : '—'}
+      </td>
+      <td>
+        {w ? (
+          <Link href={memberTimesheetHref(member.user_id, week, { team: teamId, name: member.display_name })} className={s.memberLink}>
+            <StatusBadge status={w.status} />
+          </Link>
+        ) : (
+          '—'
+        )}
+      </td>
+    </>
   );
 }
 
@@ -154,6 +186,11 @@ export default function TeamPage() {
   const current = sortedTeams.find((t) => t.id === teamId) ?? sortedTeams[0];
   const report = useApi(current ? `team|${current.id}|${range.from}|${tz}|${projectId ?? ''}` : null, (signal) =>
     rd.teams.report(current!.id, { from: range.from, to: range.to }, tz, signal, projectId),
+  );
+
+  const overtime = useApi(
+    current && access.entitlements.includes('timesheets') ? `team:overtime|${current.id}|${week}` : null,
+    (signal) => timesheetsApi.teamOvertime(current!.id, week, addDays(week, 6), signal),
   );
 
   if (!access.managesTeams) return <NoAccess what="Team reports are for team managers." />;
@@ -227,7 +264,7 @@ export default function TeamPage() {
         <>
           <div className="row">
             <Card title="Members" className={s.members}>
-              <MembersTable report={report.data} week={week} />
+              <MembersTable report={report.data} week={week} overtime={overtime.data} />
             </Card>
             <Attention report={report.data} pending={pending.data ?? []} />
           </div>

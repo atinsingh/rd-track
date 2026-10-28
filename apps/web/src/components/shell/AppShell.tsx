@@ -8,7 +8,8 @@ import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { activeHref, navFor, roleLabel } from '@/lib/nav';
+import { activeHref, can, navFor, roleLabel } from '@/lib/nav';
+import { timesheetsApi } from '@/lib/timesheets';
 import { useApi } from '@/lib/useApi';
 import { LicenceBanner } from './LicenceBanner';
 import s from './shell.module.css';
@@ -22,7 +23,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const current = activeHref(groups, pathname);
 
   const pending = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
-  const pendingCount = pending.data?.length ?? 0;
+  const reviewsTimesheets = can(access, 'approvals') && access.entitlements.includes('timesheets');
+  const pendingSheets = useApi(reviewsTimesheets ? 'nav:timesheets-pending' : null, (signal) => timesheetsApi.pending(signal));
+  const pendingCount = (pending.data?.length ?? 0) + (pendingSheets.data?.length ?? 0);
 
   const signOut = async () => {
     try {
