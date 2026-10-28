@@ -13,7 +13,8 @@
     "db:seed": "tsx src/seed.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start:migrate": "node dist/db/migrate-cli.js"
+    "start:migrate": "node dist/db/migrate-cli.js",
+    "platform:create-admin": "tsx src/cli/create-platform-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1158.0",
