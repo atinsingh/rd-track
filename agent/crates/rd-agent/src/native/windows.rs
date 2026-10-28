@@ -48,8 +48,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPU
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetForegroundWindow, GetMessageW, GetSystemMetrics,
     GetWindowThreadProcessId, PeekMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, MSG, PM_NOREMOVE, SM_CXSCREEN,
-    SM_CYSCREEN, WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN, WM_USER,
+    TranslateMessage, UnhookWindowsHookEx, HC_ACTION, MSG, PM_NOREMOVE, SM_CXSCREEN, SM_CYSCREEN,
+    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_QUIT, WM_SYSKEYDOWN, WM_USER,
 };
 
 use super::logic::{bgra_to_rgba, file_name, file_stem, idle_millis, utf16_until_nul};
@@ -65,7 +65,8 @@ static MOUSE_EVENTS: AtomicU32 = AtomicU32::new(0);
 /// `WH_KEYBOARD_LL` procedure: counts key-down messages. Reads only `wparam` (the
 /// message kind); `lparam` is passed on untouched and never dereferenced.
 unsafe extern "system" fn keyboard_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code == HC_ACTION as i32 && (wparam == WM_KEYDOWN as WPARAM || wparam == WM_SYSKEYDOWN as WPARAM)
+    if code == HC_ACTION as i32
+        && (wparam == WM_KEYDOWN as WPARAM || wparam == WM_SYSKEYDOWN as WPARAM)
     {
         KEY_DOWNS.fetch_add(1, Ordering::Relaxed);
     }
@@ -240,7 +241,8 @@ fn foreground_image_path() -> Option<String> {
     // SAFETY: `buf` holds `len` u16s; the call writes at most that many and updates
     // `len` to the characters written. The handle is closed right after.
     let ok = unsafe {
-        let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
+        let ok =
+            QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, buf.as_mut_ptr(), &mut len);
         CloseHandle(process);
         ok
     };
@@ -327,7 +329,9 @@ impl ForegroundApp for WinForeground {
         let name = self
             .names
             .entry(path.clone())
-            .or_insert_with(|| file_description(&path).unwrap_or_else(|| file_stem(&path).to_owned()))
+            .or_insert_with(|| {
+                file_description(&path).unwrap_or_else(|| file_stem(&path).to_owned())
+            })
             .clone();
         Some(ForegroundAppInfo {
             app_identifier: identifier,
@@ -466,7 +470,11 @@ impl ScreenCapturer for GdiCapturer {
 
     /// Always the primary monitor (`primary_monitor_only = false` is not implemented
     /// yet and falls back to it).
-    fn capture_scaled(&self, _primary_monitor_only: bool, max_width: u32) -> Result<RawFrame, CaptureError> {
+    fn capture_scaled(
+        &self,
+        _primary_monitor_only: bool,
+        max_width: u32,
+    ) -> Result<RawFrame, CaptureError> {
         Self::grab(max_width)
     }
 }

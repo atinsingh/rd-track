@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reenroll"
+description = "Enables the reenroll command without any pre-configured scope."
+commands.allow = ["reenroll"]
+
+[[permission]]
+identifier = "deny-reenroll"
+description = "Denies the reenroll command without any pre-configured scope."
+commands.deny = ["reenroll"]

@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main",
+  "description": "The tray popover may call only the agent's own commands and listen to its events. No filesystem, shell, HTTP or opener access is exposed to the web view; URLs are opened by Rust from a fixed allowlist.",
+  "windows": ["main"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-get-view",
+    "allow-enroll",
+    "allow-list-projects",
+    "allow-prepare-session",
+    "allow-start-session",
+    "allow-review-collection",
+    "allow-pause-session",
+    "allow-resume-session",
+    "allow-stop-session",
+    "allow-dismiss-banner",
+    "allow-open-dashboard",
+    "allow-open-permission-settings",
+    "allow-request-permission",
+    "allow-hide-window",
+    "allow-quit-app",
+    "allow-reenroll",
+    "allow-install-update"
+  ]
+}

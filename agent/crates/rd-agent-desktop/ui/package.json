@@ -1,0 +1,9 @@
+{
+  "name": "rd-agent-desktop-ui",
+  "private": true,
+  "description": "Popover UI of the RoundDigital Track tray app. No runtime dependencies; TypeScript is only used to type-check and emit public/app.js (committed so `cargo build` needs no Node).",
+  "scripts": {
+    "build": "npx --yes -p typescript@5.9.3 tsc -p .",
+    "check": "npx --yes -p typescript@5.9.3 tsc -p . && git diff --exit-code -- public/app.js"
+  }
+}

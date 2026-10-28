@@ -166,7 +166,10 @@ mod tests {
         // Counter reset (now < previous by a lot): count since the reset.
         assert_eq!(counter_delta(50_000, 3), 3);
         assert_eq!(counter_delta(0, MAX_PLAUSIBLE_DELTA), MAX_PLAUSIBLE_DELTA);
-        assert_eq!(counter_delta(0, MAX_PLAUSIBLE_DELTA + 1), MAX_PLAUSIBLE_DELTA + 1);
+        assert_eq!(
+            counter_delta(0, MAX_PLAUSIBLE_DELTA + 1),
+            MAX_PLAUSIBLE_DELTA + 1
+        );
     }
 
     #[test]

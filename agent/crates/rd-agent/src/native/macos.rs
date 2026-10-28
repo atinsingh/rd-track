@@ -93,14 +93,14 @@ impl InputCounter for CounterInput {
         let now = read_counters();
         let prev = self.last.replace(now).unwrap_or(now);
         let keyboard_count = counter_delta(prev[0], now[0]);
-        let mouse_count = prev[1..]
-            .iter()
-            .zip(&now[1..])
-            .fold(0u32, |acc, (p, n)| acc.saturating_add(counter_delta(*p, *n)));
+        let mouse_count = prev[1..].iter().zip(&now[1..]).fold(0u32, |acc, (p, n)| {
+            acc.saturating_add(counter_delta(*p, *n))
+        });
         let input_seen = since.is_some_and(|s| s < 1.0);
-        let available = self
-            .health
-            .observe(input_seen, u64::from(keyboard_count) + u64::from(mouse_count));
+        let available = self.health.observe(
+            input_seen,
+            u64::from(keyboard_count) + u64::from(mouse_count),
+        );
         InputSample {
             keyboard_count: if available { keyboard_count } else { 0 },
             mouse_count: if available { mouse_count } else { 0 },
@@ -209,7 +209,10 @@ impl ScreenCapturer for DisplayCapturer {
             }
             .ok_or_else(|| CaptureError::Failed("CGBitmapContextCreate failed".into()))?;
             CGContext::set_interpolation_quality(Some(&ctx), CGInterpolationQuality::High);
-            let rect = CGRect::new(CGPoint::new(0.0, 0.0), CGSize::new(f64::from(dw), f64::from(dh)));
+            let rect = CGRect::new(
+                CGPoint::new(0.0, 0.0),
+                CGSize::new(f64::from(dw), f64::from(dh)),
+            );
             CGContext::draw_image(Some(&ctx), rect, Some(&image));
             drop(ctx);
             force_opaque(&mut buf);

@@ -1,0 +1,85 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RoundDigital Track",
+  "mainBinaryName": "rd-agent-desktop",
+  "version": "0.1.0",
+  "identifier": "digital.round.track",
+  "build": {
+    "frontendDist": "ui/public"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "RoundDigital Track",
+        "url": "index.html",
+        "width": 360,
+        "height": 520,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "focus": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "freezePrototype": true
+    },
+    "macOSPrivateApi": false
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "dmg", "app", "deb", "appimage"],
+    "publisher": "RoundDigital",
+    "copyright": "© RoundDigital",
+    "category": "Productivity",
+    "shortDescription": "Transparent work-session tracking",
+    "longDescription": "RoundDigital Track records work sessions you start yourself — activity counts, the app in front and (only where your organization enabled them) periodic screenshots — and shows you exactly what is collected.",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "createUpdaterArtifacts": false,
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "http://timestamp.digicert.com",
+      "wix": {
+        "language": "en-US",
+        "upgradeCode": "5f0f2a39-8c1b-4d6e-9f43-2d7c1a6b8e10"
+      },
+      "nsis": {
+        "installMode": "perMachine"
+      }
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "hardenedRuntime": true,
+      "entitlements": "macos/entitlements.plist",
+      "infoPlist": "macos/Info.plist",
+      "signingIdentity": null,
+      "providerShortName": null
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY (see agent/README.md, Desktop app: signing and updates)",
+      "endpoints": [
+        "https://updates.example.invalid/{{target}}/{{arch}}/{{current_version}}"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}
