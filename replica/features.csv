@@ -1,0 +1,59 @@
+feature,area,priority,original,clone,notes
+Desktop timer for Mac and Windows with offline buffer,tracking,must,yes,yes,rd-agent tray app + offline outbox
+Idle detection with configurable timeout,tracking,must,yes,yes,policy idle.threshold_seconds; org/team/project/device scopes
+Keep / discard idle time prompt on return (prompt / always / never),tracking,must,yes,no,adopted in gap analysis; employee decides on return; agent prompt + API
+Assign returning idle time to another project/task,tracking,could,yes,no,part of the idle prompt
+Reminders to start / stop tracking,tracking,should,yes,no,agent notifications; employee-controlled
+Daily / weekly limit warnings in the agent,tracking,should,yes,no,server data exists (GET /v1/me/work-limits); needs a device-auth endpoint + agent banner
+Auto-discard manual time that exceeds limits,tracking,could,yes,no,Hubstaff 2025; we refuse with a reason instead of silently discarding
+Activity percentage per minute,activity,must,yes,yes,
+Apps used,activity,must,yes,yes,
+URLs visited,activity,should,yes,partial,domains only and opt-in by design
+Screenshots,activity,should,yes,yes,policy-governed; off by default
+Screenshot blur / redaction,activity,should,yes,no,SCR-12
+Work-app categories (productivity ratings),activity,should,yes,yes,shown as context never as a score
+AI tools app category preset,activity,could,yes,no,Hubstaff 2025; easy preset list for work-app categories
+Manual time with reason,timesheets,must,yes,yes,
+Manual time approval,timesheets,must,yes,yes,correction approvals (Standard+)
+Batch approve / deny manual time and corrections,timesheets,should,yes,no,Hubstaff Q1 2026; one at a time today
+Weekly timesheet submit / approve / lock,timesheets,must,yes,yes,
+Batch timesheet approvals with filters,timesheets,should,yes,no,Hubstaff 2025 timesheet approvals redesign
+Daily / weekly limits and overtime,timesheets,must,yes,yes,
+Pay rates and bill rates,money,must,yes,yes,effective-dated
+Amounts owed report,money,should,yes,partial,payroll CSV export; no on-screen report
+Payroll payouts (Wise / PayPal / Payoneer / Deel / Gusto),money,could,yes,no,integration work; payout providers hold the money not us
+Payroll adjustments (bonuses / deductions / reimbursements),money,should,yes,no,one-time and recurring additions on the payroll export
+Payslips / proof of payment,money,could,yes,no,
+Expense tracking linked to projects,money,should,yes,no,also feeds invoices
+Invoices include expenses,money,could,yes,no,depends on expense tracking
+Clients and client invoices,money,must,yes,yes,
+Project budgets with alerts and stop at budget,money,must,yes,yes,
+Schedules / shifts and attendance,workforce,must,yes,yes,
+Time off policies / accrual / requests / approvals,workforce,must,yes,yes,
+PTO accrual timing (1st / anniversary / last day of month),workforce,could,yes,no,Hubstaff Q1 2026; we accrue on a fixed period
+Holidays,workforce,must,yes,yes,
+Who's off team calendar,workforce,should,yes,yes,
+Focus time insight,insights,should,yes,yes,employee first
+Work-life balance insight (after hours / long days / no breaks),insights,should,yes,yes,team view aggregate-only (5+)
+Utilization targets (expected hours; under / over-worked),insights,should,yes,no,expected hours per person; show to the person first; team aggregate only
+Average start / stop time and average idle,insights,could,yes,no,Hubstaff Q1 2026 performance widgets; personal view first
+Insights timeline (activity + idle + manual + time off in one day view),insights,could,yes,partial,My day shows sessions and activity; not time off
+Meetings insight from Google / Microsoft calendar,insights,could,yes,no,Stage 4 calendar integration
+Performance export as PDF,insights,could,yes,no,
+Customisable dashboard widgets,insights,could,yes,no,
+Unusual activity / suspicious app / AI unusual activity detection,insights,could,yes,skip,declined: surveillance-first; we show data-quality gaps instead
+Remote vs office location analytics,insights,could,yes,skip,needs location tracking; non-goal
+Time & activity / weekly / work session / apps reports,reports,must,yes,yes,
+Manual time edit report,reports,should,yes,partial,corrections list + audit log; no dedicated report
+Audit log,reports,must,yes,yes,plus employee-facing 'who viewed my data'
+CSV exports,reports,must,yes,yes,
+Roles: owner / manager / project manager / viewer / team lead,admin,must,yes,yes,org admin / team + project managers / auditor
+Client view limited to assigned projects,admin,could,yes,no,read-only client role for agencies
+Public REST API with personal / org access tokens,integrations,should,yes,no,our Pro plan lists REST API but there are no API tokens yet
+Outbound webhooks,integrations,should,yes,yes,
+CLI / MCP server for AI agents,integrations,could,yes,no,Hubstaff Sept 2026
+Jira / Asana / ClickUp / Trello integrations,integrations,should,yes,no,Stage 4 INT-02
+SSO / SCIM,admin,should,yes,no,Stage 4 IAM-06
+Mobile apps with GPS and geofenced job sites,mobile,could,yes,skip,non-goal in requirements; revisit for field teams
+Kanban task tool (Hubstaff Tasks),tasks,could,yes,skip,declined: integrate with existing tools
+Screenshot quotas per plan,plans,could,yes,skip,we don't meter screenshots

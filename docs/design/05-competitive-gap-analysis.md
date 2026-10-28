@@ -68,3 +68,20 @@ personal insights are on every plan (privacy and wellbeing are never an upsell).
 Implementation streams use separate migrations to avoid collisions: 004 timesheets & limits,
 005 rates/budgets/clients/invoices, 006 schedules/attendance/time off, 007 insights,
 app categories and webhooks.
+
+## Recon update (2026-10-28)
+
+A `/replica-recon` pass over Hubstaff's 2025–2026 changelog, help center and API docs is in
+[`replica/recon.md`](../../replica/recon.md), with the scored matrix in
+[`replica/features.csv`](../../replica/features.csv). Track's parity is 62.6/100, with 18 of 19
+must-haves done. New since this analysis:
+
+- **Batch approvals** for timesheets, manual time and corrections (Hubstaff 2025 and Q1 2026). Adopt.
+- **Utilization targets**: expected hours per person, under- and over-worked. Adapt: show it to the person first, with team views aggregate-only.
+- **Average start/stop time and average idle** widgets. Adapt: personal view.
+- **Expenses** per project, feeding invoices, and **payroll adjustments** (bonuses, deductions, reimbursements). Adopt.
+- **Public API tokens** (personal and organization). Adopt: the Pro plan already lists a REST API.
+- **PTO accrual timing** (1st of the month, anniversary, or last day of the month). Could.
+- **CLI or MCP server for AI agents** (Hubstaff Sept 2026). Could.
+- **AI unusual activity detection**. Decline, as for unusual activity.
+- **Remote-vs-office analytics**. Decline: it needs location tracking.
