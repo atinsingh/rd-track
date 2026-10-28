@@ -49,6 +49,7 @@ export async function createOrganization(
   q: Queryable,
   input: z.infer<typeof createOrgRequest>,
   actor: PlatformActor | { kind: 'system' },
+  opts: { adminPasswordHash?: string; adminTracking?: boolean } = {},
 ): Promise<{ organization_id: string; admin_user_id: string; admin_initial_password: string }> {
   const exists = await one(q, 'SELECT 1 FROM organizations WHERE slug = $1', [input.slug]);
   if (exists) throw errors.conflict('slug_taken', 'An organization with this slug already exists');
@@ -76,8 +77,8 @@ export async function createOrganization(
   const u = await one<{ id: string }>(
     q,
     `INSERT INTO users (organization_id, email, display_name, password_hash, org_role, tracking_enabled)
-     VALUES ($1, $2, $3, $4, 'org_admin', false) RETURNING id`,
-    [o!.id, input.admin_email, input.admin_name, await hashPassword(password)],
+     VALUES ($1, $2, $3, $4, 'org_admin', $5) RETURNING id`,
+    [o!.id, input.admin_email, input.admin_name, opts.adminPasswordHash ?? (await hashPassword(password)), opts.adminTracking ?? false],
   );
   await audit(q, {
     organizationId: o!.id,

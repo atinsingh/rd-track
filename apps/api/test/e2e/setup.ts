@@ -9,11 +9,12 @@ import { migrate } from '../../src/db/migrate';
 import { enrollmentCode, normalizeEnrollmentCode, sha256Hex } from '../../src/lib/crypto';
 import { createOrganization } from '../../src/modules/platform/routes';
 import { MemoryObjectStore } from '../../src/storage/object-store';
+import { ConsoleEmailSender } from '../../src/email/sender';
 
 const config = loadConfig();
 await migrate(config.databaseUrl, () => undefined);
 const pool = createPool(config.databaseUrl);
-const deps: Deps = { pool, config, store: new MemoryObjectStore(), now: () => new Date() };
+const deps: Deps = { pool, config, store: new MemoryObjectStore(), email: new ConsoleEmailSender(), now: () => new Date() };
 
 const org = await createOrganization(
   deps,

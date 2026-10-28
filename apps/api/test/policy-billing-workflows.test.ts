@@ -87,7 +87,8 @@ describe('licensing and plans', () => {
     expect(r.body.error.code).toBe('seat_limit_reached');
     const up = await org.admin.post('/v1/billing/plan', { plan: 'standard', seats: 5 });
     expect(up.status).toBe(200);
-    expect(up.body.estimated_monthly_cents).toBe(5 * 250);
+    expect(up.body.subscription.estimated_monthly_cents).toBe(5 * 250);
+    expect(up.body.checkout_url).toBeNull();
     expect((await org.admin.post('/v1/admin/users', { email: 'x@std.test', display_name: 'X', password: 'correct-horse-battery' })).status).toBe(201);
   });
 

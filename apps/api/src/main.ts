@@ -2,6 +2,7 @@ import { buildApp } from './app';
 import { loadConfig } from './config';
 import { createPool } from './db/pool';
 import { migrate } from './db/migrate';
+import { createEmailSender } from './email/sender';
 import { createObjectStore } from './storage/factory';
 
 const config = loadConfig();
@@ -13,6 +14,7 @@ const app = await buildApp(
     pool,
     config,
     store: createObjectStore(config),
+    email: createEmailSender(config),
     now: () => new Date(),
   },
   { logger: true },

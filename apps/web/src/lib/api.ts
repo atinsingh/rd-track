@@ -1,4 +1,5 @@
 import type {
+  ChangePlanResponse,
   ActivityResponse,
   ApiErrorBody,
   AppUsageResponse,
@@ -232,6 +233,9 @@ export const rd = {
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
+    signup: (body: { org_name: string; display_name: string; email: string; password: string }) =>
+      post<{ ok: true }>('/v1/signup', body, { redirectOnAuth: false }),
+    verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
     mfaEnroll: () => post<MfaEnrollResponse>('/v1/auth/mfa/enroll', {}, { redirectOnAuth: false }),
     mfaEnrollConfirm: (code: string) => ok(post('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false })),
@@ -331,7 +335,8 @@ export const rd = {
   },
   billing: {
     subscription: (signal?: AbortSignal) => get<SubscriptionDTO>('/v1/billing/subscription', { signal }),
-    changePlan: (plan: PlanId, seats: number) => post<SubscriptionDTO>('/v1/billing/plan', { plan, seats }),
+    changePlan: (plan: PlanId, seats: number) => post<ChangePlanResponse>('/v1/billing/plan', { plan, seats }),
+    portal: () => post<{ url: string }>('/v1/billing/portal', {}),
   },
   audit: (q: AuditQuery, signal?: AbortSignal) =>
     get<Page<AuditEventDTO>>('/v1/audit-events', { query: { ...q }, signal }),

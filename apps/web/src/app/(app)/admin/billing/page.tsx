@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
+
+const noopSubscribe = () => () => {};
 import { PLANS, PLAN_IDS, type PlanId, type SubscriptionDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
@@ -124,6 +126,13 @@ export default function BillingPage() {
   const [saved, setSaved] = useState<string | null>(null);
   const seatAction = useAction();
   const planAction = useAction();
+  const portalAction = useAction();
+  // Back from the provider's hosted Checkout page (?checkout=success|cancelled); null while server-rendering.
+  const checkout = useSyncExternalStore(
+    noopSubscribe,
+    () => new URLSearchParams(window.location.search).get('checkout'),
+    () => null,
+  );
   if (!access.isAdmin) return <NoAccess what="Billing is managed by org admins." />;
   if (sub.error) return <ErrorState error={sub.error} onRetry={sub.reload} />;
   if (!sub.data) return <Loading label="Loading your subscription" />;
@@ -138,7 +147,13 @@ export default function BillingPage() {
   const pricePerSeat = d.price_per_seat_cents;
 
   const apply = async (target: PlanId, n: number, action: typeof seatAction) => {
-    const r = await action.run(() => rd.billing.changePlan(target, n));
+    const res = await action.run(() => rd.billing.changePlan(target, n));
+    if (res?.checkout_url) {
+      // New paid subscriptions are paid for on the provider's hosted page; the webhook applies them.
+      window.location.assign(res.checkout_url);
+      return true;
+    }
+    const r = res?.subscription;
     if (r) {
       sub.mutate(() => r);
       setSeatsDraft(null);
@@ -163,6 +178,13 @@ export default function BillingPage() {
         description="You pay for people who track time. Admins, auditors and managers who don't track are free."
       />
       <StatusBanner sub={d} tz={tz} />
+      {checkout === 'success' ? (
+        <Banner role="status" title="Payment received">
+          Your new plan is applied as soon as the payment provider confirms it — usually within a few seconds. Refresh if it hasn&apos;t changed yet.
+        </Banner>
+      ) : checkout === 'cancelled' ? (
+        <Banner role="status" title="Checkout cancelled">Nothing was charged and your plan hasn&apos;t changed.</Banner>
+      ) : null}
       {saved ? (
         <Banner role="status" title={saved} actions={<Button size="sm" variant="quiet" onClick={() => setSaved(null)}>Dismiss</Button>}>
           What&apos;s collected follows the plan at the agents&apos; next policy check; employees are told when anything turns off.
@@ -191,6 +213,21 @@ export default function BillingPage() {
               ? 'No charge on Free.'
               : `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${formatMoney(pricePerSeat)}. Seats added mid-month are prorated by day.`}
           </span>
+          {d.billing_provider === 'stripe' ? (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={portalAction.busy}
+              onClick={async () => {
+                const r = await portalAction.run(() => rd.billing.portal());
+                if (r) window.location.assign(r.url);
+              }}
+            >
+              {portalAction.busy ? 'Opening…' : 'Invoices and payment method →'}
+            </Button>
+          ) : null}
+          {d.cancel_at_period_end ? <span className={s.fine}>Cancels at the end of this period; you&apos;ll move to Free.</span> : null}
+          <ActionError error={portalAction.error} />
         </section>
 
         <section className={s.seats} aria-labelledby="seats-h">

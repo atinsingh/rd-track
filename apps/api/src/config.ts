@@ -14,6 +14,13 @@ export interface Config {
   cookieSecure: boolean;
   /** Login / MFA attempts per IP per minute. */
   authRateLimitPerMinute: number;
+  /** Public URL of the web app, used in emails and billing redirects. */
+  webUrl: string;
+  email: { provider: 'console' | 'ses' | 'memory'; from: string; region: string };
+  billing: {
+    provider: 'manual' | 'stripe';
+    stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: { standard: string; pro: string } };
+  };
   storage: {
     bucket: string;
     region: string;
@@ -68,6 +75,21 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     sessionTtlHours: Number(process.env.SESSION_TTL_HOURS ?? 12),
     cookieSecure: env === 'production',
     authRateLimitPerMinute: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE ?? 10),
+    webUrl: (process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    email: {
+      provider: (process.env.EMAIL_PROVIDER as Config['email']['provider']) ?? (env === 'production' ? 'ses' : 'console'),
+      from: process.env.EMAIL_FROM ?? 'RoundDigital Track <no-reply@track.example>',
+      region: process.env.SES_REGION ?? process.env.AWS_REGION ?? 'ca-central-1',
+    },
+    billing: {
+      provider: (process.env.BILLING_PROVIDER as Config['billing']['provider']) ?? 'manual',
+      stripe: {
+        secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+        webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+        apiBase: process.env.STRIPE_API_BASE ?? 'https://api.stripe.com',
+        prices: { standard: process.env.STRIPE_PRICE_STANDARD ?? '', pro: process.env.STRIPE_PRICE_PRO ?? '' },
+      },
+    },
     storage: {
       bucket: process.env.S3_BUCKET ?? 'rd-track-dev',
       region: process.env.S3_REGION ?? 'us-east-1',

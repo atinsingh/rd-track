@@ -4,6 +4,7 @@ import type { Deps } from './context';
 import { createPool } from './db/pool';
 import { claim, complete, fail } from './jobs/queue';
 import { handleJob, scheduleRecurring } from './jobs/runner';
+import { createEmailSender } from './email/sender';
 import { createObjectStore } from './storage/factory';
 
 const config = loadConfig();
@@ -11,6 +12,7 @@ const deps: Deps = {
   pool: createPool(config.databaseUrl),
   config,
   store: createObjectStore(config),
+    email: createEmailSender(config),
   now: () => new Date(),
 };
 const workerId = `${hostname()}:${process.pid}`;

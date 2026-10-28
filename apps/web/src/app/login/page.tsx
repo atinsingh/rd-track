@@ -58,6 +58,9 @@ function LoginForm() {
         {action.busy ? 'Signing in…' : 'Sign in →'}
       </Button>
       <p className={s.fine}>Admins and super admins confirm a 6-digit code from an authenticator app next.</p>
+      <p className={s.fine}>
+        New to Track? <a href="/signup">Create an organization</a> — free for up to 2 people, 14-day Pro trial.
+      </p>
     </form>
   );
 }

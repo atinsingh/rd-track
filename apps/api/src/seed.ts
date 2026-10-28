@@ -11,6 +11,7 @@ import { migrate } from './db/migrate';
 import { hashPassword, randomToken, sha256Hex } from './lib/crypto';
 import { createOrganization } from './modules/platform/routes';
 import { MemoryObjectStore } from './storage/object-store';
+import { ConsoleEmailSender } from './email/sender';
 
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'track-demo-2026';
 
@@ -119,7 +120,7 @@ async function main() {
   const config = loadConfig();
   await migrate(config.databaseUrl, () => undefined);
   const pool = createPool(config.databaseUrl);
-  const deps: Deps = { pool, config, store: new MemoryObjectStore(), now: () => new Date() };
+  const deps: Deps = { pool, config, store: new MemoryObjectStore(), email: new ConsoleEmailSender(), now: () => new Date() };
 
   const existing = await one(pool, `SELECT 1 FROM organizations WHERE slug = 'rounddigital'`);
   if (existing) {

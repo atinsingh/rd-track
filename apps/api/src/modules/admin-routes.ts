@@ -1,6 +1,5 @@
 import {
   SCOPE_TYPES,
-  changePlanRequest,
   createProjectRequest,
   createTaskRequest,
   createTeamRequest,
@@ -20,7 +19,6 @@ import { ADMIN_ROLES, AUDIT_ROLES, requireRole } from '../http';
 import { errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { listAudit } from './audit/service';
-import { changePlan, subscriptionDTO } from './billing/service';
 import { createEnrollmentCode, listDevices, revokeDevice } from './devices/service';
 import * as org from './org/service';
 import { listPolicies, publishPolicy, scopeDetail } from './policy/service';
@@ -121,13 +119,6 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
     const body = parse(legalHoldRequest, req.body);
     if (new Date(body.to) <= new Date(body.from)) throw errors.validation('to must be after from');
     return reply.code(201).send(await withTx(pool, (tx) => createLegalHold(deps, tx, admin(req), body, req.id)));
-  });
-
-  // ───────── billing ─────────
-  app.get('/v1/billing/subscription', user, async (req) => subscriptionDTO(pool, admin(req).organizationId, deps.now()));
-  app.post('/v1/billing/plan', user, async (req) => {
-    const body = parse(changePlanRequest, req.body);
-    return withTx(pool, (tx) => changePlan(tx, admin(req), body, deps.now(), req.id));
   });
 
   // ───────── audit ─────────

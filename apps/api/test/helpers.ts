@@ -10,6 +10,7 @@ import { drainJobs } from '../src/jobs/runner';
 import { hashPassword } from '../src/lib/crypto';
 import { createOrganization } from '../src/modules/platform/routes';
 import { MemoryObjectStore } from '../src/storage/object-store';
+import { MemoryEmailSender } from '../src/email/sender';
 
 export const TEST_DB = process.env.TEST_DATABASE_URL ?? 'postgres://rd:rd@localhost:5432/rd_track_test';
 export const PASSWORD = 'correct-horse-battery';
@@ -38,6 +39,7 @@ export interface TestEnv {
   app: FastifyInstance;
   deps: Deps;
   store: MemoryObjectStore;
+  email: MemoryEmailSender;
   clock: TestClock;
   close(): Promise<void>;
   drain(): Promise<number>;
@@ -48,12 +50,14 @@ export async function testEnv(overrides: Partial<Config> = {}): Promise<TestEnv>
   const clock = new TestClock();
   const store = new MemoryObjectStore();
   const config = loadConfig({ databaseUrl: TEST_DB, mfaRequiredForAdmins: false, authRateLimitPerMinute: 10_000, ...overrides });
-  const deps: Deps = { pool: createPool(TEST_DB), config, store, now: clock.now };
+  const email = new MemoryEmailSender();
+  const deps: Deps = { pool: createPool(TEST_DB), config, store, email, now: clock.now };
   const app = await buildApp(deps, { logger: Boolean(process.env.DEBUG_API) });
   return {
     app,
     deps,
     store,
+    email,
     clock,
     drain: () => drainJobs(deps),
     async close() {

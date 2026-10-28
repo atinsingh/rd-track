@@ -437,8 +437,25 @@ export interface SubscriptionDTO {
   trial_ends_at: string | null;
   grace_ends_at: string | null;
   current_period_end: string | null;
+  billing_provider: 'manual' | 'stripe';
+  cancel_at_period_end: boolean;
   entitlements: Entitlement[];
 }
+/** POST /v1/billing/plan: with Stripe, a new paid subscription returns a hosted Checkout URL. */
+export interface ChangePlanResponse {
+  subscription: SubscriptionDTO;
+  checkout_url: string | null;
+}
+
+// ───────────────────────── signup ─────────────────────────
+
+export const signupRequest = z.strictObject({
+  org_name: z.string().trim().min(2).max(200),
+  display_name: z.string().trim().min(1).max(200),
+  email: z.email().max(320),
+  password: z.string().min(12).max(200),
+});
+export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).max(200) });
 export const changePlanRequest = z.strictObject({
   plan: z.enum(['free', 'standard', 'pro']),
   seats: z.number().int().min(0).max(100_000),

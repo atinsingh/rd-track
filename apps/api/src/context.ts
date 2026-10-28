@@ -1,6 +1,7 @@
 import type { OrgRole } from '@rd/contracts';
 import type { Config } from './config';
 import type { Pool } from './db/pool';
+import type { EmailSender } from './email/sender';
 import type { ObjectStore } from './storage/object-store';
 
 /** Everything a module needs; built once in `app.ts` / `worker.ts`. */
@@ -8,6 +9,7 @@ export interface Deps {
   pool: Pool;
   config: Config;
   store: ObjectStore;
+  email: EmailSender;
   now: () => Date;
 }
 
