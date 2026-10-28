@@ -9,8 +9,9 @@ output "bucket_arn" {
 }
 
 output "logs_bucket_name" {
-  description = "Access-log bucket name."
+  description = "Access-log bucket name (available once its policy lets ELB and S3 write)."
   value       = aws_s3_bucket.logs.id
+  depends_on  = [aws_s3_bucket_policy.logs]
 }
 
 output "alb_log_prefix" {

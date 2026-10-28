@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "dev:worker": "tsx watch src/worker.ts",
-    "build": "esbuild src/main.ts src/worker.ts src/db/migrate-cli.ts --bundle --platform=node --target=node22 --format=esm --outdir=dist --external:fastify --external:@fastify/* --external:pg --external:@aws-sdk/* --external:zod && rm -rf dist/migrations dist/db/migrations && cp -r src/db/migrations dist/migrations && cp -r src/db/migrations dist/db/migrations",
+    "build": "esbuild src/main.ts src/worker.ts src/db/migrate-cli.ts src/cli/create-platform-admin.ts --bundle --platform=node --target=node22 --format=esm --outdir=dist --external:fastify --external:@fastify/* --external:pg --external:@aws-sdk/* --external:zod && rm -rf dist/migrations dist/db/migrations && cp -r src/db/migrations dist/migrations && cp -r src/db/migrations dist/db/migrations",
     "start": "node dist/main.js",
     "start:worker": "node dist/worker.js",
     "db:migrate": "tsx src/db/migrate-cli.ts",

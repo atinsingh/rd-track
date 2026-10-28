@@ -21,7 +21,18 @@ try {
   const r = c.escapeIdentifier(role);
   const exists = await c.query('SELECT 1 FROM pg_roles WHERE rolname = $1', [role]);
   if (exists.rowCount === 0) await c.query(`CREATE ROLE ${r} LOGIN`);
-  await c.query(`ALTER ROLE ${r} WITH LOGIN PASSWORD ${c.escapeLiteral(password)}`);
+  try {
+    await c.query(`ALTER ROLE ${r} WITH LOGIN PASSWORD ${c.escapeLiteral(password)}`);
+  } catch (err) {
+    if (err.code === '42501') {
+      throw new Error(
+        `${role} exists but this user may not alter it (it was created by another role). ` +
+          `As its creator run: GRANT ${role} TO <migration user> WITH ADMIN OPTION, or drop it.`,
+        { cause: err },
+      );
+    }
+    throw err;
+  }
 
   const db = (await c.query('SELECT current_database() AS d')).rows[0].d;
   const statements = [

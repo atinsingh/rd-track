@@ -1,0 +1,24 @@
+# Copy to terraform.tfvars (git-ignored by infra/terraform/.gitignore). Nothing here is
+# secret, but it names your account and domain.
+
+aws_account_id = "111111111111"
+region         = "ca-central-1"
+
+app_domain = "staging.track.rounddigital.example"
+# Hosted zone in THIS account containing app_domain/ses_domain; omit to do DNS by hand.
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+ses_domain = "staging.track.rounddigital.example"
+email_from = "RoundDigital Track (staging) <no-reply@staging.track.rounddigital.example>"
+
+policy_signing_key_id = "staging-1"
+billing_provider      = "manual"
+# stripe_price_standard = "price_..."
+# stripe_price_pro      = "price_..."
+
+alarm_emails = ["ops@rounddigital.example"]
+# alarm_topic_arn = "arn:aws:sns:ca-central-1:111111111111:existing-topic"
+
+# create_github_oidc_provider = false   # if the account already has GitHub's OIDC provider
+
+# extra_app_environment = { LOG_LEVEL = "debug" }

@@ -19,8 +19,9 @@ output "alb_zone_id" {
 }
 
 output "api_target_group_arn" {
-  description = "API target group."
+  description = "API target group (available once attached to the HTTPS listener, so ECS services can use it)."
   value       = aws_lb_target_group.api.arn
+  depends_on  = [aws_lb_listener_rule.api]
 }
 
 output "api_target_group_arn_suffix" {
@@ -29,8 +30,9 @@ output "api_target_group_arn_suffix" {
 }
 
 output "web_target_group_arn" {
-  description = "Web target group."
+  description = "Web target group (available once attached to the HTTPS listener)."
   value       = aws_lb_target_group.web.arn
+  depends_on  = [aws_lb_listener.https]
 }
 
 output "https_listener_arn" {

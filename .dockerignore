@@ -1,0 +1,19 @@
+# Build context for apps/api/Dockerfile and apps/web/Dockerfile is the repo root.
+# Keep it small and free of secrets and host build output.
+.git
+.github
+**/node_modules
+**/.next
+**/dist
+**/coverage
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+.local-storage
+agent
+docs
+infra
+scripts
+**/.DS_Store

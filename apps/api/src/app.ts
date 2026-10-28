@@ -16,6 +16,7 @@ import { authenticatePlatform, platformRoutes } from './modules/platform/routes'
 import { localStorageRoutes } from './storage/local-routes';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const TRUST_PROXY_HOPS = Number(process.env.TRUST_PROXY_HOPS ?? 1);
 
 /** From here on, row-level security limits this request to one organization. */
 function narrowScope(organizationId: string) {
@@ -38,7 +39,9 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       return typeof given === 'string' && /^[A-Za-z0-9-]{8,64}$/.test(given) ? given : randomUUID();
     },
     bodyLimit: 256 * 1024,
-    trustProxy: true,
+    // Only the load balancer in front of us is trusted, so X-Forwarded-For can't be spoofed
+    // to dodge per-IP rate limits (TRUST_PROXY_HOPS=0 when exposed directly).
+    trustProxy: (_address: string, hop: number) => hop < TRUST_PROXY_HOPS,
   });
 
   await app.register(cookie);

@@ -1,0 +1,272 @@
+name: Deploy
+
+# staging    ← every push to main, once CI has passed on that commit
+# production ← tags v* (GitHub environment "production" requires reviewers and should
+#              only allow v* tags; the tagged commit must be on main)
+# manual     ← "Run workflow" (staging from any ref; production only from a v* tag)
+#
+# Per GitHub environment, set these variables (terraform output github_environment_variables):
+#   AWS_DEPLOY_ROLE_ARN  AWS_REGION  NAME_PREFIX (= ECS cluster, e.g. rd-track-staging)  APP_HOST
+# No secrets: AWS access is OIDC, scoped by the role's trust policy to this repo + environment.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Target environment
+        type: choice
+        options: [staging, production]
+        default: staging
+
+permissions:
+  contents: read
+
+jobs:
+  target:
+    name: Resolve target
+    runs-on: ubuntu-24.04
+    # workflow_run fires for every CI completion on a "main" head branch, including
+    # pull requests from forks whose branch is called main: only accept successful
+    # CI runs for pushes to this repository.
+    if: >-
+      github.event_name != 'workflow_run' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          INPUT_ENV: ${{ inputs.environment }}
+        run: |
+          case "$EVENT" in
+            workflow_run)      env=staging;      sha="$CI_SHA" ;;
+            push)              env=production;   sha="$GITHUB_SHA" ;;
+            workflow_dispatch) env="$INPUT_ENV"; sha="$GITHUB_SHA" ;;
+            *) echo "::error::unexpected event $EVENT"; exit 1 ;;
+          esac
+          if [ "$env" = production ] && [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "::error::production deploys only from v* tags (got $GITHUB_REF)"; exit 1
+          fi
+          echo "environment=$env" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Deploying \`$sha\` to **$env**" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: Deploy to ${{ needs.target.outputs.environment }}
+    needs: target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment:
+      name: ${{ needs.target.outputs.environment }}
+      url: https://${{ vars.APP_HOST }}
+    concurrency:
+      group: deploy-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      ENVIRONMENT: ${{ needs.target.outputs.environment }}
+      SHA: ${{ needs.target.outputs.sha }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      CLUSTER: ${{ vars.NAME_PREFIX }}
+      APP_HOST: ${{ vars.APP_HOST }}
+    steps:
+      - name: Check environment variables
+        run: |
+          for v in AWS_REGION CLUSTER APP_HOST; do
+            [ -n "${!v}" ] || { echo "::error::GitHub environment $ENVIRONMENT is missing variable for $v"; exit 1; }
+          done
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+          fetch-depth: 0
+
+      - name: Production tag must point at a commit on main
+        if: env.ENVIRONMENT == 'production'
+        run: |
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$SHA" origin/main \
+            || { echo "::error::$SHA is not on main"; exit 1; }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: gh-${{ github.run_id }}-${{ github.run_attempt }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Image names
+        id: images
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          echo "api=$REGISTRY/rd-track-api:$SHA" >> "$GITHUB_OUTPUT"
+          echo "web=$REGISTRY/rd-track-web:$SHA" >> "$GITHUB_OUTPUT"
+          # Tags are immutable: a re-run or redeploy of the same SHA reuses the image.
+          for repo in rd-track-api rd-track-web; do
+            key=${repo#rd-track-}
+            if aws ecr describe-images --repository-name "$repo" --image-ids imageTag="$SHA" >/dev/null 2>&1; then
+              echo "build_$key=false" >> "$GITHUB_OUTPUT"; echo "$repo:$SHA exists, not rebuilding"
+            else
+              echo "build_$key=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        if: steps.images.outputs.build_api == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.images.outputs.api }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build and push web image
+        if: steps.images.outputs.build_web == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: ${{ steps.images.outputs.web }}
+          # Rewrites are baked at build time, hence one web image per environment host.
+          build-args: |
+            API_URL=https://${{ vars.APP_HOST }}
+          cache-from: type=gha,scope=web-${{ env.ENVIRONMENT }}
+          cache-to: type=gha,scope=web-${{ env.ENVIRONMENT }},mode=max
+
+      - name: Register task definitions
+        id: taskdefs
+        env:
+          API_IMAGE: ${{ steps.images.outputs.api }}
+          WEB_IMAGE: ${{ steps.images.outputs.web }}
+        run: |
+          # Copy the latest revision of each family (Terraform owns everything but the
+          # image), swap the image, register. Prints the new revision ARN.
+          register() { # family container image
+            aws ecs describe-task-definition --task-definition "$1" --query taskDefinition --output json \
+              | jq --arg c "$2" --arg img "$3" '
+                  .containerDefinitions |= map(if .name == $c then .image = $img else . end)
+                  | {family, taskRoleArn, executionRoleArn, networkMode, containerDefinitions, volumes,
+                     placementConstraints, requiresCompatibilities, cpu, memory, runtimePlatform,
+                     ephemeralStorage, pidMode, ipcMode, proxyConfiguration}
+                  | with_entries(select(.value != null))' > "td-$2.json"
+            aws ecs register-task-definition --cli-input-json "file://td-$2.json" \
+              --query taskDefinition.taskDefinitionArn --output text
+          }
+          # Plain assignments, so a failed registration fails the step (set -e).
+          api=$(register "$CLUSTER-api" api "$API_IMAGE")
+          worker=$(register "$CLUSTER-worker" worker "$API_IMAGE")
+          web=$(register "$CLUSTER-web" web "$WEB_IMAGE")
+          migrate=$(register "$CLUSTER-migrate" migrate "$API_IMAGE")
+          printf 'api=%s\nworker=%s\nweb=%s\nmigrate=%s\n' "$api" "$worker" "$web" "$migrate" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Run database migrations
+        env:
+          MIGRATE_TD: ${{ steps.taskdefs.outputs.migrate }}
+        run: |
+          # Same subnets and security group as the worker (the one that may reach RDS).
+          netcfg=$(aws ecs describe-services --cluster "$CLUSTER" --services worker \
+            --query 'services[0].networkConfiguration' --output json)
+          out=$(aws ecs run-task --cluster "$CLUSTER" --launch-type FARGATE \
+            --task-definition "$MIGRATE_TD" --network-configuration "$netcfg" \
+            --started-by "gh-${GITHUB_RUN_ID}" --output json)
+          task=$(jq -r '.tasks[0].taskArn // empty' <<<"$out")
+          [ -n "$task" ] || { echo "::error::run-task failed: $(jq -c .failures <<<"$out")"; exit 1; }
+          echo "migrate task: $task"
+
+          # tasks-stopped waits up to 10 minutes per call.
+          for _ in 1 2 3; do
+            aws ecs wait tasks-stopped --cluster "$CLUSTER" --tasks "$task" && break
+          done
+          desc=$(aws ecs describe-tasks --cluster "$CLUSTER" --tasks "$task" --output json)
+          status=$(jq -r '.tasks[0].lastStatus' <<<"$desc")
+          code=$(jq -r '.tasks[0].containers[] | select(.name == "migrate") | .exitCode // "none"' <<<"$desc")
+          reason=$(jq -r '.tasks[0].stoppedReason // ""' <<<"$desc")
+
+          echo "::group::migrate output"
+          aws logs get-log-events --log-group-name "/ecs/$CLUSTER/migrate" \
+            --log-stream-name "migrate/migrate/${task##*/}" --start-from-head \
+            --query 'events[].message' --output text | tr '\t' '\n' || true
+          echo "::endgroup::"
+
+          if [ "$status" != STOPPED ]; then
+            aws ecs stop-task --cluster "$CLUSTER" --task "$task" --reason "deploy timeout" >/dev/null || true
+            echo "::error::migration did not finish in time"; exit 1
+          fi
+          [ "$code" = 0 ] || { echo "::error::migration failed (exit $code) $reason"; exit 1; }
+          echo "Migrations applied" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Roll out services
+        env:
+          TD_API: ${{ steps.taskdefs.outputs.api }}
+          TD_WORKER: ${{ steps.taskdefs.outputs.worker }}
+          TD_WEB: ${{ steps.taskdefs.outputs.web }}
+        run: |
+          declare -A td=([api]="$TD_API" [worker]="$TD_WORKER" [web]="$TD_WEB")
+          for svc in api worker web; do
+            aws ecs update-service --cluster "$CLUSTER" --service "$svc" \
+              --task-definition "${td[$svc]}" --query 'service.serviceName' --output text
+          done
+
+          # Poll the PRIMARY deployment instead of `wait services-stable`: a circuit-
+          # breaker rollback also ends "stable", but on the old task definition.
+          pending=(api worker web); deadline=$((SECONDS + 1800))
+          while [ ${#pending[@]} -gt 0 ]; do
+            [ $SECONDS -lt $deadline ] || { echo "::error::timed out waiting for: ${pending[*]}"; exit 1; }
+            sleep 15
+            still=()
+            for svc in "${pending[@]}"; do
+              read -r cur state reason < <(aws ecs describe-services --cluster "$CLUSTER" --services "$svc" \
+                --query 'services[0].deployments[?status==`PRIMARY`] | [0].[taskDefinition, rolloutState, rolloutStateReason]' \
+                --output text)
+              if [ "$cur" != "${td[$svc]}" ]; then
+                echo "::error::$svc rolled back (primary is $cur): $reason"; exit 1
+              fi
+              case "$state" in
+                COMPLETED) echo "$svc: rolled out" ;;
+                FAILED)    echo "::error::$svc deployment failed: $reason"; exit 1 ;;
+                *)         still+=("$svc") ;;
+              esac
+            done
+            pending=("${still[@]}")
+          done
+          echo "Services rolled out: api, worker, web" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke check
+        run: |
+          for i in $(seq 1 12); do
+            body=$(curl -fsS --max-time 10 "https://$APP_HOST/healthz" || true)
+            if grep -q '"ok":true' <<<"$body"; then echo "healthz: $body"; break; fi
+            [ "$i" = 12 ] && { echo "::error::https://$APP_HOST/healthz not healthy: $body"; exit 1; }
+            sleep 10
+          done
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 "https://$APP_HOST/login")
+          [ "$code" = 200 ] || { echo "::error::https://$APP_HOST/login returned $code"; exit 1; }
+          curl -sSI --max-time 10 "https://$APP_HOST/login" | grep -qi '^strict-transport-security:' \
+            || echo "::warning::no Strict-Transport-Security header on https://$APP_HOST/login"
+          echo "Smoke check passed: https://$APP_HOST" >> "$GITHUB_STEP_SUMMARY"

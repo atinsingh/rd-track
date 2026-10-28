@@ -8,6 +8,7 @@
 
 locals {
   manage_dns = var.route53_zone_id != null
+  validation = { for o in aws_acm_certificate.this.domain_validation_options : o.domain_name => o }
 }
 
 # --- Certificate ------------------------------------------------------------
@@ -21,15 +22,14 @@ resource "aws_acm_certificate" "this" {
   }
 }
 
+# Keyed by the (static) domain so the plan never depends on apply-time values.
 resource "aws_route53_record" "validation" {
-  for_each = local.manage_dns ? {
-    for o in aws_acm_certificate.this.domain_validation_options : o.domain_name => o
-  } : {}
+  for_each = local.manage_dns ? toset([var.domain_name]) : toset([])
 
   zone_id         = var.route53_zone_id
-  name            = each.value.resource_record_name
-  type            = each.value.resource_record_type
-  records         = [each.value.resource_record_value]
+  name            = local.validation[each.key].resource_record_name
+  type            = local.validation[each.key].resource_record_type
+  records         = [local.validation[each.key].resource_record_value]
   ttl             = 300
   allow_overwrite = true
 }

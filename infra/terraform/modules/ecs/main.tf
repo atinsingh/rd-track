@@ -196,15 +196,15 @@ resource "aws_ecs_task_definition" "api" {
   }
 
   container_definitions = jsonencode([{
-    name              = "api"
-    image             = local.api_image
-    essential         = true
-    portMappings      = [{ name = "http", containerPort = var.api_port, protocol = "tcp" }]
-    environment       = local.app_environment
-    secrets           = local.app_secret_refs
-    logConfiguration  = local.log_config["api"]
-    linuxParameters   = { initProcessEnabled = true }
-    stopTimeout       = 30
+    name             = "api"
+    image            = local.api_image
+    essential        = true
+    portMappings     = [{ name = "http", containerPort = var.api_port, protocol = "tcp" }]
+    environment      = local.app_environment
+    secrets          = local.app_secret_refs
+    logConfiguration = local.log_config["api"]
+    linuxParameters  = { initProcessEnabled = true }
+    stopTimeout      = 30
   }])
 }
 
@@ -301,17 +301,17 @@ resource "aws_ecs_task_definition" "migrate" {
 # =============================================================================
 
 resource "aws_ecs_service" "api" {
-  name                              = "api"
-  cluster                           = aws_ecs_cluster.this.id
-  task_definition                   = aws_ecs_task_definition.api.arn
-  desired_count                     = var.api_min_count
-  launch_type                       = "FARGATE"
-  platform_version                  = "LATEST"
-  health_check_grace_period_seconds = var.health_check_grace_period
+  name                               = "api"
+  cluster                            = aws_ecs_cluster.this.id
+  task_definition                    = aws_ecs_task_definition.api.arn
+  desired_count                      = var.api_min_count
+  launch_type                        = "FARGATE"
+  platform_version                   = "LATEST"
+  health_check_grace_period_seconds  = var.health_check_grace_period
   deployment_minimum_healthy_percent = 100
-  deployment_maximum_percent        = 200
-  enable_ecs_managed_tags           = true
-  propagate_tags                    = "SERVICE"
+  deployment_maximum_percent         = 200
+  enable_ecs_managed_tags            = true
+  propagate_tags                     = "SERVICE"
 
   network_configuration {
     subnets          = var.private_subnet_ids

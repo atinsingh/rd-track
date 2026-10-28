@@ -1,0 +1,19 @@
+# Copy to terraform.tfvars. Nothing here is secret, but it names your account and domain.
+
+aws_account_id = "222222222222"
+region         = "ca-central-1"
+
+app_domain = "track.rounddigital.example"
+# route53_zone_id = "Z0123456789ABCDEFGHIJ"
+
+ses_domain = "track.rounddigital.example"
+email_from = "RoundDigital Track <no-reply@track.rounddigital.example>"
+
+policy_signing_key_id = "production-1"
+billing_provider      = "manual" # switch to "stripe" after filling the Stripe secrets
+# stripe_price_standard = "price_..."
+# stripe_price_pro      = "price_..."
+
+# Prefer an existing topic wired to the on-call tool:
+# alarm_topic_arn = "arn:aws:sns:ca-central-1:222222222222:oncall"
+alarm_emails = ["oncall@rounddigital.example"]

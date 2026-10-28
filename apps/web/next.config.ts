@@ -4,6 +4,8 @@ const apiUrl = (process.env.API_URL ?? 'http://localhost:4000').replace(/\/$/, '
 
 const nextConfig: NextConfig = {
   // @rd/contracts ships TypeScript source.
+  // Self-contained server bundle for the production Docker image (apps/web/Dockerfile).
+  output: 'standalone',
   transpilePackages: ['@rd/contracts'],
   poweredByHeader: false,
   // Proxy the API through this origin so the HttpOnly session cookie stays first-party
