@@ -20,7 +20,7 @@ export function LicenceBanner() {
         Everything keeps working for now.{' '}
         {access.isAdmin
           ? 'Update payment before the grace period ends, or tracking stops for everyone.'
-          : 'Your org admin has been notified.'}
+          : 'Your org admin can settle this from the billing page.'}
       </Banner>
     );
   }

@@ -68,7 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const pending = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
+  const pending = useApi(access.managesTeams || access.isAdmin ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
   const reviewsTimesheets = can(access, 'approvals') && access.entitlements.includes('timesheets');
   const pendingSheets = useApi(reviewsTimesheets ? 'nav:timesheets-pending' : null, (signal) => timesheetsApi.pending(signal));
   const reviewsTimeOff = can(access, 'approvals') && access.entitlements.includes('time_off');

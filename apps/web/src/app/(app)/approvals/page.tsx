@@ -90,7 +90,8 @@ export default function ApprovalsPage() {
   const { access, timezone: tz, me } = useMe();
   const timesheets = access.entitlements.includes('timesheets');
   const timeOffReview = access.entitlements.includes('time_off');
-  const corrections = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
+  // Org admins review corrections from people with no team manager, so they load them too.
+  const corrections = useApi(access.managesTeams || access.isAdmin ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
   const sheets = useApi(timesheets ? 'timesheets:pending' : null, (signal) => timesheetsApi.pending(signal));
   const leave = useApi(timeOffReview ? 'timeoff:pending' : null, (signal) => sched.review.pending(signal));
   const projects = useApi(access.managesTeams ? 'projects:managed' : null, (signal) => rd.projects.list(signal).catch(() => []));

@@ -93,4 +93,7 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
 7. F7 expenses → F8 payroll adjustments
 8. F9 polish items
 
+After step 4, the build order continues with the engine and role workspaces in
+[`07-product-review.md`](07-product-review.md); F5–F9 slot in after its slice 3.
+
 Each step is one PR into `main`. It must pass CI and a browser check of its screens on the demo data before it merges.

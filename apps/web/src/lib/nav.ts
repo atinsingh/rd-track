@@ -51,8 +51,8 @@ export function can(a: Access, c: Capability): boolean {
     case 'team':
       return a.managesTeams;
     case 'approvals':
-      // Org admins review timesheets and time off for people without a team manager.
-      return a.managesTeams || (a.isAdmin && (a.entitlements.includes('timesheets') || timeOff));
+      // Org admins review corrections, timesheets and time off for people without a team manager.
+      return a.managesTeams || (a.isAdmin && (a.entitlements.includes('correction_approvals') || a.entitlements.includes('timesheets') || timeOff));
     case 'projects':
       return a.managesProjects;
     case 'admin':
