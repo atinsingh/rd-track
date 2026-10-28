@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Contracts, API, web
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rd
+          POSTGRES_PASSWORD: rd
+          POSTGRES_DB: rd_track_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rd" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://rd:rd@localhost:5432/rd_track_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm --filter @rd/contracts test
+      - run: pnpm --filter @rd/api test
+      - run: pnpm --filter @rd/api build
+      - run: pnpm --filter @rd/web lint
+      - run: pnpm --filter @rd/web test
+      - run: pnpm --filter @rd/web build
+
+  agent:
+    name: Desktop agent (Rust)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+      - run: cargo fmt --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+
+  e2e:
+    name: Agent ↔ API end to end
+    runs-on: ubuntu-24.04
+    needs: [node, agent]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rd
+          POSTGRES_PASSWORD: rd
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U rd" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      E2E_DATABASE_URL: postgres://rd:rd@localhost:5432/rd_track_e2e
+      PGPASSWORD: rd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agent
+      - run: pnpm install --frozen-lockfile
+      - run: ./scripts/e2e-agent.sh
+        env:
+          E2E_DURATION: "130"

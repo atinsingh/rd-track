@@ -35,14 +35,3 @@ export async function migrate(databaseUrl: string, log: (m: string) => void = co
     await client.end();
   }
 }
-
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  const url = process.env.DATABASE_URL ?? 'postgres://rd:rd@localhost:5432/rd_track';
-  migrate(url).then(
-    () => process.exit(0),
-    (err) => {
-      console.error(err);
-      process.exit(1);
-    },
-  );
-}
