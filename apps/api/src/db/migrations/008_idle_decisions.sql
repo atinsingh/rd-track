@@ -1,11 +1,12 @@
 -- Stage 4 F1: what the person chose when they came back from an idle run.
 --
 -- keep     recorded for the person's history; the time stays as measured.
--- discard  the idle seconds of activity buckets overlapping the span are zeroed —
---          now, and for any bucket of that span that arrives later (the minute of
---          the return is only sent when it closes, which can be after the answer).
+-- discard  each bucket overlapping the span loses the smaller of its idle seconds and
+--          the span's seconds inside that minute — now, and again for any bucket of
+--          the span that arrives later (the minute of the return is only sent when
+--          it closes, which can be after the answer).
 -- reassign a time correction (kind 'idle_reassign'); approved, the span moves to the
---          chosen project as a manual entry and its idle seconds are zeroed like a
+--          chosen project as a manual entry and its idle seconds are removed like a
 --          discard; rejected, the time stays where it was.
 
 CREATE TABLE idle_decisions (
@@ -34,6 +35,11 @@ CREATE INDEX idle_decisions_user ON idle_decisions (organization_id, user_id, id
 ALTER TABLE idle_decisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE idle_decisions FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON idle_decisions USING (rd_org_visible(organization_id)) WITH CHECK (rd_org_visible(organization_id));
+
+-- The agent's own idle seconds for a bucket, kept once a removal has touched it, so
+-- removals are always recomputed from what was measured (idempotent, and a bucket
+-- at a span's edge loses only the span's part: it may also hold a neighbouring run).
+ALTER TABLE activity_buckets ADD COLUMN idle_seconds_raw int CHECK (idle_seconds_raw BETWEEN 0 AND 60);
 
 ALTER TABLE time_corrections DROP CONSTRAINT IF EXISTS time_corrections_kind_check;
 ALTER TABLE time_corrections ADD CONSTRAINT time_corrections_kind_check CHECK (kind IN ('edit', 'manual_add', 'idle_reassign'));

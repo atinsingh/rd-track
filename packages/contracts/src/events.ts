@@ -79,15 +79,17 @@ export const idleDecisionPayload = z
     idle_started_at: timestamp,
     idle_ended_at: timestamp,
     decision: z.enum(IDLE_DECISIONS),
-    project_id: uuid.nullable().optional(),
-    task_id: uuid.nullable().optional(),
+    // Omitted, never null (agent wire notes); both only with `reassign`.
+    project_id: uuid.optional(),
+    task_id: uuid.optional(),
   })
   .refine((p) => new Date(p.idle_ended_at) > new Date(p.idle_started_at), 'idle_ended_at must be after idle_started_at')
   .refine(
     (p) => new Date(p.idle_ended_at).getTime() - new Date(p.idle_started_at).getTime() <= MAX_IDLE_SPAN_MS,
     'an idle span is at most 12 hours',
   )
-  .refine((p) => (p.decision === 'reassign') === Boolean(p.project_id), 'project_id is required for reassign, and only for reassign');
+  .refine((p) => (p.decision === 'reassign') === Boolean(p.project_id), 'project_id is required for reassign, and only for reassign')
+  .refine((p) => p.decision === 'reassign' || p.task_id === undefined, 'task_id is only for reassign');
 
 const envelopeBase = {
   event_id: uuid,

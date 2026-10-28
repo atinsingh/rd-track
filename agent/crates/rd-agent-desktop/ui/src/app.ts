@@ -386,7 +386,7 @@ function idleView(v: AppView, iv: IdleView): HTMLElement {
       taskSelect.value = idleChoice.task;
       picker.push(h("label", { class: "field" }, "Task", taskSelect));
     }
-    picker.push(h("p", { class: "hint" }, "Goes to your manager for approval, like any correction."));
+    picker.push(h("p", { class: "hint" }, "Handled like any time correction: if your organisation reviews corrections, your manager approves it first."));
   }
   const primary =
     idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;

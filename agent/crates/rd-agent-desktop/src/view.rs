@@ -253,8 +253,8 @@ pub struct IdleView {
     pub keep_label: String,
     /// "Remove 28 min".
     pub discard_label: String,
-    /// "Send for approval".
-    pub reassign_label: &'static str,
+    /// "Move {duration}" — a correction, approved first where the organisation reviews them.
+    pub reassign_label: String,
     /// Projects the time can be moved to (the session's own project left out).
     pub targets: Vec<DeviceProject>,
 }
@@ -289,7 +289,7 @@ where
         project,
         keep_label: format!("Keep {duration}"),
         discard_label: format!("Remove {duration}"),
-        reassign_label: "Send for approval",
+        reassign_label: format!("Move {duration}"),
         targets: projects
             .iter()
             .filter(|p| Some(p.id.as_str()) != prompt.project_id.as_deref())
@@ -807,7 +807,7 @@ mod tests {
         assert_eq!(v.project, "Client A");
         assert_eq!(v.keep_label, "Keep 29 min");
         assert_eq!(v.discard_label, "Remove 29 min");
-        assert_eq!(v.reassign_label, "Send for approval");
+        assert_eq!(v.reassign_label, "Move 29 min");
         let ids: Vec<_> = v.targets.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p2"], "the session's own project is not a target");
 

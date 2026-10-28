@@ -55,7 +55,7 @@ export async function processIngestJob(
              ON CONFLICT (session_id, bucket_start) DO UPDATE SET
                active_seconds = EXCLUDED.active_seconds, idle_seconds = EXCLUDED.idle_seconds,
                keyboard_count = EXCLUDED.keyboard_count, mouse_count = EXCLUDED.mouse_count,
-               data_quality = EXCLUDED.data_quality`,
+               data_quality = EXCLUDED.data_quality, idle_seconds_raw = NULL`,
             [
               r.session_id,
               s.organization_id,
@@ -111,8 +111,8 @@ export async function processIngestJob(
             startedAt: shifted(p.idle_started_at),
             endedAt: shifted(p.idle_ended_at),
             decision: p.decision as 'keep' | 'discard' | 'reassign',
-            projectId: (p.project_id as string | null | undefined) ?? null,
-            taskId: (p.task_id as string | null | undefined) ?? null,
+            projectId: (p.project_id as string | undefined) ?? null,
+            taskId: (p.task_id as string | undefined) ?? null,
           });
           break;
         default:

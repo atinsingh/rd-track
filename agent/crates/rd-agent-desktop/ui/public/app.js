@@ -254,7 +254,7 @@ function idleView(v, iv) {
             taskSelect.value = idleChoice.task;
             picker.push(h("label", { class: "field" }, "Task", taskSelect));
         }
-        picker.push(h("p", { class: "hint" }, "Goes to your manager for approval, like any correction."));
+        picker.push(h("p", { class: "hint" }, "Handled like any time correction: if your organisation reviews corrections, your manager approves it first."));
     }
     const primary = idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;
     return h("section", { class: "popover", "aria-labelledby": "idle-h" }, header(v), h("div", { class: "idle-panel" }, h("span", { class: "eyebrow" }, "Welcome back"), h("h1", { class: "title", id: "idle-h" }, iv.title), h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project), h("fieldset", { class: "choices" }, h("legend", { class: "sr-only" }, "What should happen to this time?"), choice("keep", "Keep it as working time"), choice("discard", "Remove it"), choice("reassign", "Move it to another project", canMove)), !canMove && h("p", { class: "hint" }, "There is no other project to move it to."), ...picker, error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) }, primary)), h("p", { class: "idle-foot" }, "Your choice — your manager can't make it for you. Tracking carries on either way.")));

@@ -100,6 +100,24 @@ describe('idle return decisions', () => {
     expect(theirs.rows[0].n).toBe(0);
   });
 
+  it('an edge minute loses only the span\u2019s part of its idle seconds', async () => {
+    const org = await makeOrg(env, 'idleedge');
+    const d = await enrollDevice(env, org, 'emp');
+    const sid = randomUUID();
+    env.clock.t = new Date('2026-10-26T10:00:00Z').getTime();
+    const evs = sessionEvents(d, sid);
+    // The run began 20 s into minute 05; that minute's first 20 idle seconds belong to an earlier run.
+    const answer = event(d, sid, 'idle.decision.v1', { idle_started_at: '2026-10-26T09:05:20.000Z', idle_ended_at: '2026-10-26T09:12:30.000Z', decision: 'discard' }, '2026-10-26T09:12:40.000Z');
+    await sendBatch(env, d, [...evs, answer]);
+    await env.drain();
+    // Re-sending a bucket of the span (offline replay) must not double-subtract or restore it.
+    await sendBatch(env, d, [bucket(d, sid, at('09:05'), 0, 60), bucket(d, sid, at('09:12'), 30, 30)]);
+    await env.drain();
+    const [s] = await sessionsOf(org);
+    expect(s!.idle_seconds).toBe(12 * 10 + 20);
+    expect(s!.tracked_seconds).toBe(12 * 60 + 30 + 20);
+  });
+
   it('keep changes nothing and is not listed', async () => {
     const org = await makeOrg(env, 'idle2');
     const d = await enrollDevice(env, org, 'emp');
@@ -193,11 +211,13 @@ describe('idle return decisions', () => {
     const r = await sendBatch(env, d, [
       decision(d, sid, 'reassign'),
       decision(d, sid, 'discard', { project_id: org.projectId }),
+      decision(d, sid, 'discard', { task_id: randomUUID() }),
+      decision(d, sid, 'reassign', { project_id: null }),
       event(d, sid, 'idle.decision.v1', { idle_started_at: at('09:12'), idle_ended_at: at('09:05'), decision: 'discard' }, at('09:13')),
       event(d, sid, 'idle.decision.v1', { idle_started_at: at('07:00'), idle_ended_at: at('07:30'), decision: 'discard' }, at('09:13')),
     ]);
     expect(r.body.results.map((x: { status: string; reason?: string }) => x.reason?.split(':')[0])).toEqual([
-      'invalid_event', 'invalid_event', 'invalid_event', 'outside_session_window',
+      'invalid_event', 'invalid_event', 'invalid_event', 'invalid_event', 'invalid_event', 'outside_session_window',
     ]);
   });
 });
