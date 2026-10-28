@@ -1,0 +1,92 @@
+/* Weekly timesheet: grid, status and history. Overtime is drawn in neutral ink, never red. */
+.grid td,
+.grid th {
+  white-space: nowrap;
+}
+.grid tfoot td,
+.grid tfoot th {
+  border-bottom: 0;
+  border-top: 1px solid var(--text);
+  font-weight: 600;
+}
+.grid tfoot tr + tr td,
+.grid tfoot tr + tr th {
+  border-top: 1px solid var(--rule-soft);
+  font-weight: 400;
+  color: var(--text-2);
+}
+.rowHead {
+  font-weight: 600;
+  text-align: left;
+}
+.weekend {
+  background: var(--canvas);
+}
+.over {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  border-bottom: 2px solid var(--data-2);
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+}
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+}
+.history li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--rule-soft);
+  font-size: 14px;
+}
+.history li:last-child {
+  border-bottom: 0;
+}
+.when {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+  min-width: 150px;
+}
+.tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--rule);
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  padding: 0 16px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-2);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tabActive {
+  color: var(--text);
+  border-bottom-color: var(--brand-red);
+}
+.limits {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  align-items: end;
+}

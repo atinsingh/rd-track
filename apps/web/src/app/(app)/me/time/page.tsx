@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues, SessionDTO } from '@rd/contracts';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
+import { TimeTabs } from '@/components/timesheet/TimeTabs';
 import { sessionTitle } from '@/components/day/SessionsList';
 import { Button } from '@/components/ui/Button';
 import { Empty, Resource } from '@/components/ui/DataState';
@@ -81,6 +82,7 @@ export default function MyTimePage() {
           </>
         }
       />
+      <TimeTabs current="sessions" />
       {notice ? (
         <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
           Your manager reviews it. You&apos;ll see the decision below.

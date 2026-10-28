@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues } from '@rd/contracts';
+import { TimesheetApprovals } from '@/components/timesheet/TimesheetApprovals';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { TextArea } from '@/components/ui/Field';
@@ -9,6 +10,7 @@ import { Banner, Card, PageHeader, dlClass, formActionsClass } from '@/component
 import { rd } from '@/lib/api';
 import { formatDuration, plural } from '@/lib/format';
 import { useMe } from '@/lib/me';
+import { can } from '@/lib/nav';
 import { dateInTz, formatDateTime, formatShortDay, formatTime } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../NoAccess';
@@ -85,44 +87,55 @@ export default function ApprovalsPage() {
     if (!id) return 'No project';
     return projects.data?.find((p) => p.id === id)?.name ?? `Project ${id.slice(0, 8)}`;
   };
-  if (!access.managesTeams) return <NoAccess what="Approvals are for team managers." />;
+  if (!can(access, 'approvals')) return <NoAccess what="Approvals are for team managers." />;
+  const timesheets = access.entitlements.includes('timesheets');
 
   return (
     <>
       <PageHeader
-        eyebrow="Team manager · Corrections"
+        eyebrow={`${access.managesTeams ? 'Team manager' : 'Org admin'} · ${timesheets ? 'Corrections and timesheets' : 'Corrections'}`}
         title="Approvals"
-        description="Corrections and manual time proposed by people in your teams. Original values are kept whatever you decide."
-      />
-      {!me.entitlements.includes('correction_approvals') ? (
-        <Banner tag="NOTE" title="Your plan doesn't include the approval workflow">
-          An org admin can turn it on by moving to Standard or Pro.
-        </Banner>
-      ) : null}
-      <Resource {...pending} label="Loading pending corrections">
-        {(list) =>
-          list.length === 0 ? (
-            <Card>
-              <Empty title="Nothing to review">When someone proposes a correction or adds manual time, it shows up here.</Empty>
-            </Card>
-          ) : (
-            <>
-              <p className="secondary">{plural(list.length, 'request')} waiting, oldest first.</p>
-              {[...list]
-                .sort((a, b) => a.created_at.localeCompare(b.created_at))
-                .map((c) => (
-                  <Review
-                    key={c.id}
-                    c={c}
-                    tz={tz}
-                    projectName={projectName}
-                    onDone={(id) => pending.mutate((prev) => prev?.filter((x) => x.id !== id))}
-                  />
-                ))}
-            </>
-          )
+        description={
+          access.managesTeams
+            ? 'Corrections, manual time and weekly timesheets from people in your teams. Original values are kept whatever you decide.'
+            : 'Weekly timesheets submitted by people across the organization. You cannot approve your own.'
         }
-      </Resource>
+      />
+      {timesheets ? <TimesheetApprovals tz={tz} /> : null}
+      {access.managesTeams ? (
+        <>
+          {timesheets ? <h2>Corrections and manual time</h2> : null}
+          {!me.entitlements.includes('correction_approvals') ? (
+            <Banner tag="NOTE" title="Your plan doesn't include the approval workflow">
+              An org admin can turn it on by moving to Standard or Pro.
+            </Banner>
+          ) : null}
+          <Resource {...pending} label="Loading pending corrections">
+            {(list) =>
+              list.length === 0 ? (
+                <Card>
+                  <Empty title="Nothing to review">When someone proposes a correction or adds manual time, it shows up here.</Empty>
+                </Card>
+              ) : (
+                <>
+                  <p className="secondary">{plural(list.length, 'request')} waiting, oldest first.</p>
+                  {[...list]
+                    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+                    .map((c) => (
+                      <Review
+                        key={c.id}
+                        c={c}
+                        tz={tz}
+                        projectName={projectName}
+                        onDone={(id) => pending.mutate((prev) => prev?.filter((x) => x.id !== id))}
+                      />
+                    ))}
+                </>
+              )
+            }
+          </Resource>
+        </>
+      ) : null}
     </>
   );
 }

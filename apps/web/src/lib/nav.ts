@@ -7,6 +7,7 @@ export type Capability =
   | 'approvals'
   | 'projects'
   | 'admin'
+  | 'work_limits'
   | 'audit'
   | 'exports'
   | 'webhooks';
@@ -40,14 +41,18 @@ export function can(a: Access, c: Capability): boolean {
     case 'screenshots':
       return a.entitlements.includes('screenshots');
     case 'team':
-    case 'approvals':
       return a.managesTeams;
+    case 'approvals':
+      // Org admins approve timesheets for people without a team manager.
+      return a.managesTeams || (a.isAdmin && a.entitlements.includes('timesheets'));
     case 'projects':
       return a.managesProjects;
     case 'admin':
       return a.isAdmin;
     case 'webhooks':
       return a.isAdmin && a.entitlements.includes('webhooks');
+    case 'work_limits':
+      return a.isAdmin && a.entitlements.includes('timesheets');
     case 'audit':
       return a.isAdmin || a.isAuditor;
   }
@@ -93,6 +98,7 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/policies', label: 'Policies', capability: 'admin' },
       { href: '/admin/apps', label: 'Work apps', capability: 'admin' },
       { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks' },
+      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits' },
       { href: '/admin/requests', label: 'Deletion requests', capability: 'admin' },
       { href: '/admin/billing', label: 'Billing', capability: 'admin' },
       { href: '/audit', label: 'Audit log', capability: 'audit' },
