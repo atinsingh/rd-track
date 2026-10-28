@@ -32,6 +32,8 @@ export const policySettingsSchema = z.strictObject({
   }),
   idle: z.strictObject({
     threshold_seconds: z.number().int().min(60).max(1800),
+    /** Ask the person what to do with an idle run when they come back (else: keep it). */
+    prompt_on_return: z.boolean(),
   }),
   apps: z.strictObject({
     capture_app_name: z.boolean(),
@@ -79,7 +81,7 @@ export type PartialPolicySettings = z.infer<typeof partialPolicySettingsSchema>;
 
 export const DEFAULT_POLICY: PolicySettings = {
   session: { allow_overlapping_sessions: false, require_project: false },
-  idle: { threshold_seconds: 300 },
+  idle: { threshold_seconds: 300, prompt_on_return: true },
   apps: { capture_app_name: true, capture_domains: false, capture_window_titles: false },
   screenshots: {
     enabled: false,
@@ -133,6 +135,7 @@ export const POLICY_FIELD_RULES: readonly FieldRule[] = [
   { path: ['apps', 'capture_domains'], strategy: 'restrictive_bool' },
   { path: ['apps', 'capture_window_titles'], strategy: 'restrictive_bool' },
   { path: ['idle', 'threshold_seconds'], strategy: 'specific', tie: 'max' },
+  { path: ['idle', 'prompt_on_return'], strategy: 'specific' },
   { path: ['session', 'allow_overlapping_sessions'], strategy: 'restrictive_bool' },
   { path: ['session', 'require_project'], strategy: 'any_true' },
   { path: ['work_hours'], strategy: 'specific' },
