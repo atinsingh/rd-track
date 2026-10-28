@@ -1,6 +1,7 @@
 import {
   MAX_BATCH_BYTES,
   devicePolicyQuery,
+  deviceWorkLimitsQuery,
   enrollRequest,
   eventBatchSchema,
   heartbeatRequest,
@@ -9,6 +10,8 @@ import {
   sessionStopRequest,
   uploadIntentRequest,
   type DeviceProjectsResponse,
+  type DeviceScheduleTodayResponse,
+  type DeviceWorkLimitsResponse,
 } from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../context';
@@ -19,6 +22,8 @@ import { parse } from '../lib/validate';
 import { assertLicensedForTracking } from './billing/service';
 import { enroll, heartbeat } from './devices/service';
 import { projectsForUser } from './org/service';
+import { deviceScheduleToday } from './scheduling/service';
+import { deviceWorkLimits } from './timesheets/service';
 import { ingestBatch } from './ingestion/service';
 import { signedPolicyForDevice } from './policy/service';
 import { completeUpload, createUploadIntent } from './screenshots/service';
@@ -53,6 +58,16 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
     const { project_id } = parse(devicePolicyQuery, req.query);
     return signedPolicyForDevice(deps, pool, deviceOf(req), project_id ?? null);
   });
+
+  // Stage 4 F4 / F3: what the tray needs for limit warnings and reminders. Reads only the device's own user.
+  app.get('/v1/device/work-limits', { config: { auth: 'device' } }, async (req): Promise<DeviceWorkLimitsResponse> => {
+    const { exclude_session_id } = parse(deviceWorkLimitsQuery, req.query);
+    return deviceWorkLimits(deps, pool, deviceOf(req), exclude_session_id ?? null);
+  });
+
+  app.get('/v1/device/schedule-today', { config: { auth: 'device' } }, async (req): Promise<DeviceScheduleTodayResponse> =>
+    deviceScheduleToday(deps, pool, deviceOf(req)),
+  );
 
   app.post('/v1/ingestion/event-batches', { config: { auth: 'device' }, bodyLimit: MAX_BATCH_BYTES }, async (req) => {
     const batch = parse(eventBatchSchema, req.body);

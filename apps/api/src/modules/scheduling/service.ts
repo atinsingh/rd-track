@@ -11,6 +11,7 @@ import {
   type TeamCalendarResponse,
 } from '@rd/contracts';
 import type { z } from 'zod';
+import type { DeviceScheduleTodayResponse } from '@rd/contracts';
 import type { shiftCreateRequest, shiftOverrideRequest, shiftUpdateRequest, holidayCreateRequest } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
@@ -459,4 +460,33 @@ export async function deleteHoliday(q: Queryable, actor: UserActor, id: string, 
   const r = await one(q, 'DELETE FROM holidays WHERE id = $1 AND organization_id = $2 RETURNING id', [id, actor.organizationId]);
   if (!r) throw errors.notFound('Holiday');
   await audit(q, { organizationId: actor.organizationId, actor, action: 'holiday.delete', targetType: 'holiday', targetId: id, requestId });
+}
+
+// ───────────── Stage 4 F3: the agent's reminder window ─────────────
+
+/**
+ * Today's working hours for the device's user. Shifts count only while the plan has
+ * schedules; a holiday, a cancelled shift or approved full-day leave means no reminders.
+ */
+export async function deviceScheduleToday(
+  deps: Pick<Deps, 'now'>,
+  q: Queryable,
+  device: { organizationId: string; userId: string },
+): Promise<DeviceScheduleTodayResponse> {
+  const timezone = await userTimezone(q, device.organizationId, device.userId);
+  const date = dateInTz(deps.now().getTime(), timezone);
+  const cal = (await loadCalendars(q, device.organizationId, [device.userId], date, date)).get(device.userId)!;
+  const { schedules } = await entitlementsOf(deps, q, device.organizationId);
+  if (!schedules) cal.shifts = [];
+  if (!schedules) cal.overrides = new Map();
+  const day = scheduleDay(cal, date);
+  const leave = leaveOn(cal, date, settingsOf(await getSettings(q, device.organizationId)));
+  const day_off = day.holiday ? 'holiday' : day.cancelled ? 'cancelled' : leave && !leave.partial ? 'leave' : null;
+  return {
+    date,
+    timezone,
+    scheduled: schedules && cal.shifts.length > 0,
+    shift: day.shift ? { start_at: day.shift.start_at, end_at: day.shift.end_at } : null,
+    day_off,
+  };
 }

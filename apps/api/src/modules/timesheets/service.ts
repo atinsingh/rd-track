@@ -6,6 +6,7 @@ import {
   isoWeekStart,
   weekDates,
   weeksBetween,
+  type DeviceWorkLimitsResponse,
   type EffectiveWorkLimits,
   type MemberOvertimeRow,
   type MyWorkLimitsResponse,
@@ -142,6 +143,7 @@ async function sessionTimes(
   tz: string,
   fromDate: string,
   toDate: string,
+  excludeSessionId: string | null = null,
 ): Promise<SessionTime[]> {
   const rows = await many<{
     id: string;
@@ -161,8 +163,9 @@ async function sessionTimes(
      LEFT JOIN projects p ON p.id = s.project_id
      LEFT JOIN LATERAL (SELECT sum(active_seconds + idle_seconds) AS secs FROM activity_buckets WHERE session_id = s.id) b ON true
      WHERE s.organization_id = $1 AND s.user_id = $2
-       AND s.started_at >= ($4::date::timestamp AT TIME ZONE $3) AND s.started_at < ($5::date::timestamp AT TIME ZONE $3)`,
-    [orgId, userId, tz, fromDate, toDate],
+       AND s.started_at >= ($4::date::timestamp AT TIME ZONE $3) AND s.started_at < ($5::date::timestamp AT TIME ZONE $3)
+       AND ($6::uuid IS NULL OR s.id <> $6)`,
+    [orgId, userId, tz, fromDate, toDate, excludeSessionId],
   );
   const corrected = rows.filter((r) => r.source === 'agent' && r.corrected && r.ended_at);
   const paused = await pausedWithin(deps, q, corrected);
@@ -268,13 +271,14 @@ async function liveTotals(
   userId: string,
   weeks: { period_start: string; timezone: string }[],
   limits: LimitRow[],
+  excludeSessionId: string | null = null,
 ): Promise<Map<string, TimesheetTotals>> {
   const out = new Map<string, TimesheetTotals>();
   const byZone = new Map<string, string[]>();
   for (const w of weeks) byZone.set(w.timezone, [...(byZone.get(w.timezone) ?? []), w.period_start]);
   for (const [tz, starts] of byZone) {
     const sorted = [...starts].sort();
-    const sessions = await sessionTimes(deps, q, orgId, userId, tz, sorted[0]!, addCalendarDays(sorted[sorted.length - 1]!, 7));
+    const sessions = await sessionTimes(deps, q, orgId, userId, tz, sorted[0]!, addCalendarDays(sorted[sorted.length - 1]!, 7), excludeSessionId);
     for (const w of sorted) {
       const mine = sessions.filter((s) => isoWeekStart(s.date) === w);
       out.set(w, buildTotals(w, mine, plainLimits(resolveLimits(limits, userId, addCalendarDays(w, 6)))));
@@ -754,6 +758,39 @@ export async function myWorkLimits(deps: Deps, q: Queryable, actor: UserActor): 
       remaining_seconds: left(limits.weekly_minutes, totals.total_seconds),
       overtime_seconds: totals.overtime_seconds,
     },
+  };
+}
+
+/**
+ * Stage 4 F4: limits and time worked so far, for the agent's warnings. `exclude` is the
+ * agent's running session, which it counts itself. An approved (locked) week reports its
+ * approved totals, which can't include a running session anyway.
+ */
+export async function deviceWorkLimits(
+  deps: Deps,
+  q: Queryable,
+  device: { organizationId: string; userId: string },
+  excludeSessionId: string | null,
+): Promise<DeviceWorkLimitsResponse> {
+  if (!(await timesheetsEnabled(deps, q, device.organizationId))) return { enabled: false };
+  const who = await person(q, device.organizationId, device.userId);
+  const now = deps.now();
+  const today = dateInZone(now, who.timezone);
+  const week = isoWeekStart(today);
+  const row = await sheetFor(q, device.organizationId, who.id, week);
+  const tz = row?.timezone ?? who.timezone;
+  const limitData = await limitRows(q, device.organizationId, [who.id]);
+  const limits = resolveLimits(limitData, who.id, today);
+  const live = (await liveTotals(deps, q, device.organizationId, who.id, [{ period_start: week, timezone: tz }], limitData, excludeSessionId)).get(week);
+  const totals = countedTotals(row ?? undefined, live)!;
+  return {
+    enabled: true,
+    as_of: now.toISOString(),
+    timezone: tz,
+    daily_minutes: limits.daily_minutes,
+    weekly_minutes: limits.weekly_minutes,
+    today: { date: today, worked_seconds: totals.days.find((d) => d.date === today)?.total_seconds ?? 0 },
+    week: { period_start: week, worked_seconds: totals.total_seconds },
   };
 }
 
