@@ -372,12 +372,22 @@ signing step runs only when its secrets exist.
 | Windows signing (Azure Trusted Signing, recommended) | `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` (S); `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` (V) | a service principal with the "Trusted Signing Certificate Profile Signer" role on an Azure Trusted Signing account + certificate profile (organization identity validation required) |
 | Updater signatures | `TAURI_SIGNING_PRIVATE_KEY` (S), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (S) | generated once with `npx @tauri-apps/cli@2.12.4 signer generate -w ~/.tauri/rd-track.key` — keep the private key offline/backed up; losing it means installed agents can never update again |
 | | `TAURI_UPDATER_PUBKEY` (V) | the matching public key (contents of `rd-track.key.pub`); CI writes it into the updater config, replacing the placeholder in `tauri.conf.json` |
-| | `TAURI_UPDATER_ENDPOINT` (V, optional) | real update endpoint; the committed placeholder is `https://updates.example.invalid/{{target}}/{{arch}}/{{current_version}}` |
 
-No real keys are committed. The update endpoint must serve Tauri's static/dynamic update
-JSON (`version`, `platforms.<target>-<arch>.{url, signature}`) — hosting it (e.g. S3 +
-CloudFront next to the web app) is an infrastructure task. Debug builds and builds with
-the placeholder key never install updates.
+No real keys are committed. Debug builds and builds with the placeholder key never install
+updates.
+
+**Where updates come from (G10).** The app asks the server it is enrolled with —
+`GET /v1/device/update?target&arch&current_version` with its device credential, a minute
+after start and then hourly. The API answers from `AGENT_VERSION` and
+`AGENT_DOWNLOAD_BASE_URL` (the `agent-v*` release): the bundle URL (`RoundDigital.Track.app.tar.gz`
+for macOS, the NSIS `…_x64-setup.exe` for Windows) and the `.sig` the release workflow
+published next to it, fetched and cached for ten minutes. No signature, an up-to-date app,
+Linux, or an organization that holds updates: `204`, nothing to install. Each organization
+chooses under Admin › Devices › App updates: *people choose when* (default — "Version x is
+ready", restart when it suits them), *automatically* (installed by itself, only while no
+session is open; a running session is never interrupted) or *hold* (nothing offered — to
+test a release first, or when IT deploys the MSI, which the updater does not replace). The
+update server must be `https://`.
 
 ### First run on employee machines
 
@@ -399,8 +409,9 @@ the placeholder key never install updates.
   Some EDR products flag processes that install low-level keyboard hooks — security teams
   may need to allow-list the signed binary.
 * **Both.** The first window is the enrollment screen. Nothing is recorded until the
-  employee starts a session and confirms the notice. Autostart at login is not configured
-  yet (follow-up: Tauri autostart plugin, off by default, shown in the notice).
+  employee starts a session and confirms the notice. *Open when I sign in to this
+  computer* (Settings in the app) is off until the person turns it on; it only opens the
+  app in the menu bar or tray (a LaunchAgent on macOS, the Run key on Windows).
 
 ### Contract (API)
 

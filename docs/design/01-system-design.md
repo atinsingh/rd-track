@@ -173,6 +173,7 @@ Every response carries `x-request-id`.
 | `POST /v1/screenshots/upload-intents` | `{session_id, content_type: "image/webp"\|"image/jpeg"}` | `201 {screenshot_id, upload_url, upload_headers, expires_at}` or `403 {code}` |
 | `POST /v1/screenshots/complete` | `{screenshot_id, captured_at, sha256, bytes, width, height}` | `200 {status: "verifying"}` |
 | `POST /v1/sessions`, `POST /v1/sessions/{id}/pause\|resume\|stop` | same fields as the lifecycle events | Session object. Equivalent to sending the event; provided for online clients. |
+| `GET /v1/device/update?target&arch&current_version` (G10) | — | `200 {version, url, signature, notes, pub_date, mode: "prompt"\|"auto"}` (Tauri's dynamic update format) or `204` when there is nothing to install or the organization holds updates. Admins set the mode with `GET\|PUT /v1/admin/agent-updates` `{mode: "prompt"\|"auto"\|"hold"}`. |
 
 ### 5.3 Event envelope
 

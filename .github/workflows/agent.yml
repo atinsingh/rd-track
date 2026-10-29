@@ -149,7 +149,6 @@ jobs:
       - name: Tauri config overrides for this build
         env:
           UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
-          UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
           AZURE_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
           AZURE_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           AZURE_PROFILE: ${{ vars.AZURE_SIGNING_PROFILE }}
@@ -168,8 +167,8 @@ jobs:
             c.bundle.windows.signCommand = `trusted-signing-cli -e ${env.AZURE_ENDPOINT} -a ${env.AZURE_ACCOUNT} -c ${env.AZURE_PROFILE} -d "RoundDigital Track" %1`;
           if (env.HAS_UPDATER_KEY === "true") {
             c.bundle.createUpdaterArtifacts = true;
+            // The update endpoint is the enrolled server (GET /v1/device/update), set at run time.
             c.plugins = { updater: { pubkey: env.UPDATER_PUBKEY } };
-            if (env.UPDATER_ENDPOINT) c.plugins.updater.endpoints = [env.UPDATER_ENDPOINT];
           }
           fs.writeFileSync("agent/crates/rd-agent-desktop/ci.tauri.json", JSON.stringify(c, null, 2));
           console.log(JSON.stringify(c, null, 2));

@@ -44,7 +44,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G7 | All | No notification bell or unread count; pages promise notifications that never come | M | P0 |
 | G8 | Emp / Mgr | No notification for corrections, timesheet submitted, deletion decided, device revoked or permission denied | S each | P0 |
 | G9 | Admin | Corrections from people with no manager never reached admins in the inbox — **fixed** | S | P0 |
-| G10 | Admin / Emp | No agent download in the web app; unsigned installers; updater placeholder; no autostart — **download done**; signing, updater and autostart remain | M | P0 |
+| G10 | Admin / Emp | No agent download in the web app; unsigned installers; updater placeholder; no autostart — **done**: download, updates from the enrolled server with an admin policy, open at login; signing runs as soon as the certificates are added | M | P0 |
 | G11 | Buyer | No terms / DPA acceptance at signup | S | P0 |
 | G12 | Admin | Enrolment codes admin-only, one per person; no deep link; no self-enrolment — **done** | M | P1 |
 | G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) | M | P1 |
@@ -230,6 +230,16 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      directory's changes are audited as "Directory sync". Migration 017; the load
      balancer routes `/scim/*` to the API.
    - Still open: SAML (OIDC covers the main providers), MDM packages and tenant logo (P2).
+
+   **7 done 2026-10-29 (G10)**: the desktop app updates from the server it is enrolled with
+   (`GET /v1/device/update`, device credential, migration 023), a minute after start and
+   then hourly. Each organization chooses under Admin › Devices › App updates: people
+   choose when (default), automatically between sessions (never during one), or hold. The
+   API builds the answer from the published release and its `.sig`; only bundles signed
+   with the key built into the app install. *Open when I sign in to this computer* is in
+   the app's Settings, off until the person turns it on. Code signing and notarization run
+   in the release workflow as soon as the certificates and the updater key are added as
+   secrets (agent/README.md); getting them is RoundDigital's to do.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

@@ -2,12 +2,12 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { enrollmentLink, type DeviceDTO, type EnrollmentCodeResponse, type PermissionState } from '@rd/contracts';
+import { enrollmentLink, type AgentUpdateMode, type DeviceDTO, type EnrollmentCodeResponse, type PermissionState } from '@rd/contracts';
 import { CopyButton } from '@/components/CopyButton';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
-import { SelectField } from '@/components/ui/Field';
+import { Segmented, SelectField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { byName, plural } from '@/lib/format';
@@ -189,6 +189,56 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
+const UPDATE_MODES: { value: AgentUpdateMode; label: string; detail: string }[] = [
+  { value: 'prompt', label: 'People choose when', detail: 'The app says a new version is ready; people restart it when it suits them.' },
+  { value: 'auto', label: 'Automatically', detail: 'The app installs it by itself, only while no session is running.' },
+  { value: 'hold', label: 'Hold', detail: 'No updates are offered. Use it to test a release first, or when IT deploys the MSI.' },
+];
+
+/** How the desktop app updates in this organization (G10). Only signed releases ever install. */
+function AppUpdates() {
+  const res = useApi('admin:agent-updates', (signal) => rd.admin.agentUpdates(signal));
+  const action = useAction();
+  // Shows the choice at once; puts the old one back if saving fails.
+  const set = async (mode: AgentUpdateMode) => {
+    const before = res.data;
+    res.mutate((prev) => (prev ? { ...prev, mode } : prev));
+    const r = await action.run(() => rd.admin.setAgentUpdateMode(mode));
+    res.mutate(() => r ?? before);
+  };
+  return (
+    <Card title="App updates" subtitle={res.data?.latest_version ? `Latest version ${res.data.latest_version}` : 'No release published for this service yet'}>
+      <Resource {...res} label="Loading update settings">
+        {(u) => (
+          <div className="stack" style={{ gap: 12 }}>
+            <Segmented<AgentUpdateMode>
+              legend="How the desktop app updates"
+              name="agent-update-mode"
+              value={u.mode}
+              onChange={(m) => void set(m)}
+              disabled={action.busy}
+              options={UPDATE_MODES.map(({ value, label }) => ({ value, label }))}
+            />
+            <p className="small secondary">{UPDATE_MODES.find((m) => m.value === u.mode)!.detail} Only releases signed by RoundDigital install.</p>
+            {u.versions.length ? (
+              <p className="small">
+                {u.versions.map((v, i) => (
+                  <span key={v.version}>
+                    {i ? ' · ' : ''}
+                    <span className="mono">{v.version}</span> on {plural(v.devices, 'computer')}
+                    {v.current ? '' : ' (behind)'}
+                  </span>
+                ))}
+              </p>
+            ) : null}
+            <ActionError error={action.error} />
+          </div>
+        )}
+      </Resource>
+    </Card>
+  );
+}
+
 export default function DevicesPage() {
   const { access, timezone: tz } = useMe();
   const devices = useApi(access.isAdmin ? 'admin:devices' : null, (signal) => rd.admin.devices(signal));
@@ -327,6 +377,7 @@ export default function DevicesPage() {
         </Resource>
       </Card>
 
+      <AppUpdates />
       <EnrollDialog
         open={enrolling}
         onClose={() => {

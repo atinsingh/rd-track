@@ -12,6 +12,8 @@ let error = null;
 let projectsRequested = false;
 // The "Reminders" settings section is open, and its last save error.
 let settingsOpen = false;
+// "Open when I sign in" (G10): read when the settings open; null until then.
+let openAtLogin = null;
 let settingsError = null;
 // Shown under the start button when "Start tracking" needs a project first.
 let startHint = null;
@@ -292,7 +294,23 @@ function remindersSection(v) {
                 },
             }), h("span", {}, name)))),
         ];
-    return h("section", { class: "settings", "aria-labelledby": "reminders-h" }, h("span", { class: "eyebrow", id: "reminders-h" }, "Reminders"), toggle("Reminders", r.enabled, false, (on) => ({ enabled: on })), toggle("When my hours start", r.start, off, (on) => ({ start: on })), toggle("When my hours end", r.stop, off, (on) => ({ stop: on })), toggle("Every hour after that, if still tracking", r.still_tracking, off, (on) => ({ still_tracking: on })), h("span", { class: "label" }, "My hours"), ...hours, h("p", { class: "hint" }, `${r.today}. Reminders stay on this computer; nothing is sent to your organization.`), settingsError && h("p", { class: "error", role: "alert" }, settingsError));
+    return h("section", { class: "settings", "aria-label": "Settings" }, h("span", { class: "eyebrow", id: "reminders-h" }, "Reminders"), toggle("Reminders", r.enabled, false, (on) => ({ enabled: on })), toggle("When my hours start", r.start, off, (on) => ({ start: on })), toggle("When my hours end", r.stop, off, (on) => ({ stop: on })), toggle("Every hour after that, if still tracking", r.still_tracking, off, (on) => ({ still_tracking: on })), h("span", { class: "label" }, "My hours"), ...hours, h("p", { class: "hint" }, `${r.today}. Reminders stay on this computer; nothing is sent to your organization.`), h("span", { class: "eyebrow" }, "This computer"), h("label", { class: `toggle${openAtLogin === null ? " disabled" : ""}` }, h("input", {
+        type: "checkbox",
+        checked: openAtLogin === true,
+        disabled: openAtLogin === null,
+        onchange: (e) => {
+            const enabled = e.target.checked;
+            settingsError = null;
+            invoke("set_open_at_login", { enabled })
+                .then((on) => {
+                openAtLogin = on;
+            })
+                .catch((err) => {
+                settingsError = String(err);
+            })
+                .finally(render);
+        },
+    }), h("span", {}, "Open when I sign in to this computer")), h("p", { class: "hint" }, "It waits in the menu bar or tray. Nothing is collected until you start a session."), settingsError && h("p", { class: "error", role: "alert" }, settingsError));
 }
 function onResolveIdle(iv) {
     const move = idleChoice.decision === "reassign";
@@ -370,9 +388,18 @@ function mainView(v) {
         onclick: () => {
             settingsOpen = !settingsOpen;
             settingsError = null;
+            if (settingsOpen)
+                invoke("get_open_at_login")
+                    .then((on) => {
+                    openAtLogin = on;
+                })
+                    .catch(() => {
+                    openAtLogin = null;
+                })
+                    .finally(render);
             render();
         },
-    }, settingsOpen ? "Close reminders" : "Reminders"), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit")));
+    }, settingsOpen ? "Close settings" : "Settings"), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit")));
 }
 function noticeView(n, review) {
     const screenshots = (i) => i.key === "screenshots.enabled";

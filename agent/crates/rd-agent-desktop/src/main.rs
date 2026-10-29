@@ -9,6 +9,7 @@
 mod controller;
 mod link;
 mod tray;
+mod updates;
 mod view;
 
 use std::sync::Arc;
@@ -16,9 +17,10 @@ use std::sync::Arc;
 use rd_agent_core::events::StopReason;
 use rd_agent_core::runtime::Command;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Updater, UpdaterExt};
 
 use controller::{AppView, Controller};
 use view::{RemindersInput, SessionNotice};
@@ -216,22 +218,63 @@ fn reenroll(app: AppHandle, ctl: Ctl<'_>) -> AppView {
 
 #[tauri::command]
 async fn install_update(app: AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| e.to_string())?;
+    let updater = updater_for(&app)?;
     let Some(update) = updater.check().await.map_err(|e| e.to_string())? else {
         return Ok(());
     };
-    // Stop the session cleanly before the installer replaces the binary.
+    install(&app, update).await
+}
+
+/// The updater for this computer's server, asking with its device credential (G10).
+fn updater_for(app: &AppHandle) -> Result<Updater, String> {
+    let (server, credential) = app
+        .state::<Arc<Controller>>()
+        .update_source()
+        .ok_or("this computer isn't connected yet")?;
+    let url = tauri::Url::parse(&updates::endpoint(&server)).map_err(|e| e.to_string())?;
+    app.updater_builder()
+        .endpoints(vec![url])
+        .map_err(|e| e.to_string())?
+        .header("Authorization", format!("Device {credential}"))
+        .map_err(|e| e.to_string())?
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// Downloads first, then stops the session cleanly (final sync) and lets the installer
+/// replace the app. A failed download leaves everything running.
+async fn install(app: &AppHandle, update: tauri_plugin_updater::Update) -> Result<(), String> {
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| e.to_string())?;
     let ctl = app.state::<Arc<Controller>>().inner().clone();
     blocking(move || {
         ctl.shutdown();
         Ok(())
     })
     .await?;
-    update
-        .download_and_install(|_, _| {}, || {})
-        .await
-        .map_err(|e| e.to_string())?;
+    update.install(bytes).map_err(|e| e.to_string())?;
     app.restart();
+}
+
+/// Open at login (G10): off until the person turns it on. It only opens the app in the
+/// menu bar or tray; nothing is collected until they start a session.
+#[tauri::command]
+fn get_open_at_login(app: AppHandle) -> bool {
+    app.autolaunch().is_enabled().unwrap_or(false)
+}
+
+#[tauri::command]
+fn set_open_at_login(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    let launcher = app.autolaunch();
+    if enabled {
+        launcher.enable()
+    } else {
+        launcher.disable()
+    }
+    .map_err(|e| e.to_string())?;
+    launcher.is_enabled().map_err(|e| e.to_string())
 }
 
 /// Quit: stop the session first (bounded final sync), then exit.
@@ -246,25 +289,48 @@ pub(crate) fn quit(app: AppHandle) {
     });
 }
 
-/// Background update check (release builds with a configured updater key only).
+/// Asks for updates a minute after start and then hourly (release builds only). The
+/// organization decides: offer it to the person, install it between sessions, or hold.
 fn check_for_updates(app: AppHandle) {
     if cfg!(debug_assertions) {
         return;
     }
-    tauri::async_runtime::spawn(async move {
-        let Ok(updater) = app.updater() else {
-            return;
-        };
-        match updater.check().await {
-            Ok(Some(u)) => {
-                let ctl = app.state::<Arc<Controller>>();
-                ctl.set_update(Some(u.version.clone()));
-                ctl.emit(&app);
-            }
-            Ok(None) => {}
-            Err(e) => log::info!("update check skipped: {e}"),
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_secs(60));
+        loop {
+            tauri::async_runtime::block_on(check_once(&app));
+            std::thread::sleep(std::time::Duration::from_secs(3600));
         }
     });
+}
+
+async fn check_once(app: &AppHandle) {
+    let Ok(updater) = updater_for(app) else {
+        return;
+    };
+    let ctl = app.state::<Arc<Controller>>().inner().clone();
+    match updater.check().await {
+        Ok(Some(u)) => {
+            if updates::apply(&u.raw_json, ctl.no_open_session()) == updates::Apply::Install {
+                log::info!("installing version {} between sessions", u.version);
+                let version = u.version.clone();
+                if let Err(e) = install(app, u).await {
+                    log::info!("automatic update failed: {e}");
+                    ctl.set_update(Some(version));
+                    ctl.emit(app);
+                }
+                return;
+            }
+            ctl.set_update(Some(u.version.clone()));
+            ctl.emit(app);
+        }
+        // Nothing to install, or held by the organization: no banner.
+        Ok(None) => {
+            ctl.set_update(None);
+            ctl.emit(app);
+        }
+        Err(e) => log::info!("update check skipped: {e}"),
+    }
 }
 
 /// An `rdtrack://enroll` link (from the web app, or forwarded by a second launch) fills in
@@ -298,6 +364,10 @@ fn main() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .manage(ctl.clone())
         .invoke_handler(tauri::generate_handler![
             get_view,
@@ -320,6 +390,8 @@ fn main() {
             quit_app,
             reenroll,
             install_update,
+            get_open_at_login,
+            set_open_at_login,
         ])
         .setup(move |app| {
             #[cfg(target_os = "macos")]

@@ -13,6 +13,7 @@ import {
   type DeviceScheduleTodayResponse,
   type DeviceWorkLimitsResponse,
 } from '@rd/contracts';
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
@@ -21,6 +22,7 @@ import { AppError, errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { assertLicensedForTracking } from './billing/service';
 import { enroll, heartbeat } from './devices/service';
+import { deviceUpdate } from './devices/updates';
 import { projectsForUser } from './org/service';
 import { deviceScheduleToday } from './scheduling/service';
 import { deviceWorkLimits } from './timesheets/service';
@@ -46,6 +48,14 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/v1/device/heartbeat', { config: { auth: 'device' } }, async (req) => {
     const body = parse(heartbeatRequest, req.body);
     return withTx(pool, (tx) => heartbeat(deps, tx, deviceOf(req), body));
+  });
+
+  // G10: the desktop app's updater asks here with its device credential.
+  const updateQuery = z.object({ target: z.string().max(20), arch: z.string().max(20), current_version: z.string().max(40) });
+  app.get('/v1/device/update', { config: { auth: 'device' } }, async (req, reply) => {
+    const q = parse(updateQuery, req.query);
+    const u = await deviceUpdate(deps.config.agentDownloads, pool, deviceOf(req), q, deps.now().getTime());
+    return u ? u : reply.code(204).send();
   });
 
   app.get('/v1/device/projects', { config: { auth: 'device' } }, async (req): Promise<DeviceProjectsResponse> => {

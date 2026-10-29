@@ -33,6 +33,8 @@ import type {
   ApprovalType,
   ApprovalsBatchResponse,
   AppCategory,
+  AgentUpdateMode,
+  AgentUpdateSettings,
   AppCategoryDTO,
   AppPresetId,
   PersonalInsights,
@@ -534,6 +536,8 @@ export const rd = {
     enrollmentCode: (userId: string) =>
       post<EnrollmentCodeResponse>('/v1/admin/enrollment-codes', { user_id: userId }),
     devices: (signal?: AbortSignal) => list<DeviceDTO>('/v1/admin/devices', { signal }),
+    agentUpdates: (signal?: AbortSignal) => get<AgentUpdateSettings>('/v1/admin/agent-updates', { signal }),
+    setAgentUpdateMode: (mode: AgentUpdateMode) => put<AgentUpdateSettings>('/v1/admin/agent-updates', { mode }),
     revokeDevice: (id: string) => ok(post(`/v1/admin/devices/${enc(id)}/revoke`)),
     deletionRequests: (signal?: AbortSignal) =>
       list<DeletionRequestDTO>('/v1/admin/deletion-requests', { signal }),

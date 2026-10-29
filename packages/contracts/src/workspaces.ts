@@ -81,6 +81,29 @@ export interface AgentDownloadsResponse {
   files: AgentDownload[];
 }
 
+// ───────────── desktop app updates (G10) ─────────────
+
+/** prompt: people restart when it suits them; auto: installed when no session runs; hold: none offered. */
+export const AGENT_UPDATE_MODES = ['prompt', 'auto', 'hold'] as const;
+export type AgentUpdateMode = (typeof AGENT_UPDATE_MODES)[number];
+export const agentUpdateSettingsRequest = z.strictObject({ mode: z.enum(AGENT_UPDATE_MODES) });
+export interface AgentUpdateSettings {
+  mode: AgentUpdateMode;
+  /** The version published for this service (`AGENT_VERSION`), if any. */
+  latest_version: string | null;
+  /** Connected computers per app version, newest first. */
+  versions: { version: string; devices: number; current: boolean }[];
+}
+/** `GET /v1/device/update`: Tauri's dynamic update format, plus how this organization applies it. */
+export interface DeviceUpdateResponse {
+  version: string;
+  url: string;
+  signature: string;
+  notes: string;
+  pub_date: string | null;
+  mode: 'prompt' | 'auto';
+}
+
 /** The scheme the desktop app registers; `rdtrack://enroll?server=…&code=…` fills its sign-in form. */
 export const AGENT_LINK_SCHEME = 'rdtrack';
 export function enrollmentLink(server: string, code: string): string {

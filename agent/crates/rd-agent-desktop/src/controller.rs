@@ -620,6 +620,18 @@ impl Controller {
         web(&server).then(|| format!("{}/me", server.trim_end_matches('/')))
     }
 
+    /// Where the updater asks: the enrolled server and this device's credential (G10).
+    pub fn update_source(&self) -> Option<(String, String)> {
+        let (identity, credential) = setup::load_for_run(&self.paths, self.creds.as_ref()).ok()?;
+        Some((identity.server_url, credential))
+    }
+
+    /// The runtime is up and no session is open, so an automatic update may restart the app.
+    pub fn no_open_session(&self) -> bool {
+        let i = lock(&self.inner);
+        i.phase == Some(Phase::Running) && i.live.as_ref().is_some_and(|l| l.session.is_none())
+    }
+
     /// Records that an update is ready.
     pub fn set_update(&self, version: Option<String>) {
         lock(&self.inner).update = version;

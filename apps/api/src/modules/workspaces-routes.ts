@@ -1,4 +1,5 @@
 import {
+  agentUpdateSettingsRequest,
   AUDIT_EXPORT_MAX_ROWS,
   auditQuery,
   type AdminOverview,
@@ -19,6 +20,7 @@ import { toCsv } from '../lib/csv';
 import { parse } from '../lib/validate';
 import { audit, listAudit } from './audit/service';
 import { createEnrollmentCode, listDevices } from './devices/service';
+import { setUpdateMode, updateSettings } from './devices/updates';
 import { adminOverview, auditPeople, moneyOverview } from './engine/workspaces';
 import { assertMoneyPlan } from './money/time';
 import { decideGrant, endGrant, listGrants } from './platform/support';
@@ -73,6 +75,12 @@ export async function workspacesRoutes(app: FastifyInstance, deps: Deps) {
 
   // ───────── getting the agent (G10, G12) ─────────
   app.get('/v1/agent/downloads', user, async (): Promise<AgentDownloadsResponse> => agentDownloads(deps.config.agentDownloads));
+  app.get('/v1/admin/agent-updates', user, async (req) => updateSettings(deps.config.agentDownloads, pool, requireRole(req, ADMIN_ROLES).organizationId));
+  app.put('/v1/admin/agent-updates', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    const { mode } = parse(agentUpdateSettingsRequest, req.body);
+    return withTx(pool, (tx) => setUpdateMode(deps.config.agentDownloads, tx, a, mode, req.id));
+  });
   app.get('/v1/me/devices', user, async (req): Promise<{ items: DeviceDTO[] }> => {
     const a = userOf(req);
     return { items: await listDevices(pool, a.organizationId, a.userId) };

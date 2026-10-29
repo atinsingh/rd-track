@@ -74,9 +74,6 @@
   "plugins": {
     "updater": {
       "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY (see agent/README.md, Desktop app: signing and updates)",
-      "endpoints": [
-        "https://updates.example.invalid/{{target}}/{{arch}}/{{current_version}}"
-      ],
       "windows": {
         "installMode": "passive"
       }
