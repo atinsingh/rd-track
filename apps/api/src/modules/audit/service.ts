@@ -29,6 +29,8 @@ function actorFields(a: AuditEntry['actor']): [string, string | null] {
       return ['platform', a.platformAdminId];
     case 'directory':
       return ['directory', a.tokenId];
+    case 'client':
+      return ['client', a.contactId];
     case 'system':
       return ['system', null];
   }
@@ -64,12 +66,15 @@ const SELECT = `
          CASE a.actor_type WHEN 'user' THEN u.display_name WHEN 'device' THEN d.name
            WHEN 'platform' THEN 'RoundDigital support · ' || pa.display_name
            WHEN 'directory' THEN 'Directory sync'
-           WHEN 'api_token' THEN 'API token · ' || tk.name ELSE NULL END AS actor_name
+           WHEN 'api_token' THEN 'API token · ' || tk.name
+           WHEN 'client' THEN 'Client · ' || cc.display_name || ' (' || ccl.name || ')' ELSE NULL END AS actor_name
   FROM audit_logs a
   LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
   LEFT JOIN devices d ON a.actor_type = 'device' AND d.id = a.actor_id
   LEFT JOIN platform_admins pa ON a.actor_type = 'platform' AND pa.id = a.actor_id
-  LEFT JOIN api_tokens tk ON a.actor_type = 'api_token' AND tk.id = a.actor_id`;
+  LEFT JOIN api_tokens tk ON a.actor_type = 'api_token' AND tk.id = a.actor_id
+  LEFT JOIN client_contacts cc ON a.actor_type = 'client' AND cc.id = a.actor_id
+  LEFT JOIN clients ccl ON ccl.id = cc.client_id`;
 
 export async function listAudit(
   q: Queryable,

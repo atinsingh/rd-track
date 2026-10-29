@@ -47,6 +47,7 @@ const ORG_TABLES: { table: string; drop?: string[] }[] = [
   { table: 'shifts' },
   { table: 'shift_overrides' },
   { table: 'clients' },
+  { table: 'client_contacts', drop: ['password_hash', 'link_token_hash'] },
   { table: 'pay_rates' },
   { table: 'bill_rates' },
   { table: 'project_budgets' },

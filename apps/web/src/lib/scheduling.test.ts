@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AttendanceDay, Me } from '@rd/contracts';
 import { accessFor, navFor } from './nav';
-import { attendanceDetail, attendanceLabel, calendarCellLabel, shiftTimesLabel, signedHours, weekdaysLabel } from './scheduling';
+import { accrualDayLabel, accrualLabel, attendanceDetail, attendanceLabel, calendarCellLabel, shiftTimesLabel, signedHours, weekdaysLabel } from './scheduling';
 
 const day = (over: Partial<AttendanceDay>): AttendanceDay => ({
   date: '2026-10-20',
@@ -77,5 +77,14 @@ describe('scheduling navigation', () => {
   it('shows team attendance to managers only', () => {
     expect(hrefs(me('employee', ['schedules'], ['t1']))).toContain('/team/attendance');
     expect(hrefs(me('org_admin', ['schedules']))).not.toContain('/team/attendance');
+  });
+});
+
+describe('accrual wording (F9)', () => {
+  it('says when the hours are added', () => {
+    expect(accrualLabel({ accrual: 'per_month', accrual_hours: 8, accrual_day: 'anniversary' })).toBe('8 h per month, on the day of the month they started');
+    expect(accrualLabel({ accrual: 'per_year', accrual_hours: 80, accrual_day: 'last' })).toBe('80 h per year, on 31 December');
+    expect(accrualDayLabel('per_month', 'first')).toBe('on the 1st');
+    expect(accrualLabel({ accrual: 'none', accrual_hours: 0 })).toBe('No accrual');
   });
 });

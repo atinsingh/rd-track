@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { TimeOffAccrual, TimeOffAssignmentDTO, TimeOffPolicyDTO, UserDTO } from '@rd/contracts';
+import { TIME_OFF_ACCRUAL_DAYS, type TimeOffAccrual, type TimeOffAccrualDay, type TimeOffAssignmentDTO, type TimeOffPolicyDTO, type UserDTO } from '@rd/contracts';
 import s from '@/components/scheduling/scheduling.module.css';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
@@ -10,7 +10,7 @@ import { Badge, Card, PageHeader, TableBox, formActionsClass, formGridClass, num
 import { rd } from '@/lib/api';
 import { byName } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { accrualLabel, formatHours, sched } from '@/lib/scheduling';
+import { accrualDayLabel, accrualLabel, formatHours, sched } from '@/lib/scheduling';
 import { formatShortDay, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
@@ -22,6 +22,7 @@ function PolicyForm({ onCreated }: { onCreated: (p: TimeOffPolicyDTO) => void })
   const [kind, setKind] = useState<'paid' | 'unpaid'>('paid');
   const [accrual, setAccrual] = useState<TimeOffAccrual>('per_month');
   const [hours, setHours] = useState('10');
+  const [day, setDay] = useState<TimeOffAccrualDay>('first');
   const [max, setMax] = useState('');
   const [carry, setCarry] = useState('');
   const [negative, setNegative] = useState(false);
@@ -34,6 +35,7 @@ function PolicyForm({ onCreated }: { onCreated: (p: TimeOffPolicyDTO) => void })
         kind,
         accrual,
         accrual_hours: accrual === 'none' ? 0 : Number(hours),
+        accrual_day: day,
         max_balance_hours: optionalNumber(max),
         carryover_hours: optionalNumber(carry),
         allow_negative: negative,
@@ -58,7 +60,16 @@ function PolicyForm({ onCreated }: { onCreated: (p: TimeOffPolicyDTO) => void })
           <option value="per_year">Every year</option>
         </SelectField>
         {accrual !== 'none' ? (
-          <TextField label="Hours each time" type="number" min={0} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
+          <>
+            <TextField label="Hours each time" type="number" min={0} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
+            <SelectField label="Added" value={day} onChange={(e) => setDay(e.target.value as TimeOffAccrualDay)} hint="Each person’s start date is the one on their assignment">
+              {TIME_OFF_ACCRUAL_DAYS.map((d) => (
+                <option key={d} value={d}>
+                  {accrualDayLabel(accrual, d)[0]!.toUpperCase() + accrualDayLabel(accrual, d).slice(1)}
+                </option>
+              ))}
+            </SelectField>
+          </>
         ) : null}
         <TextField label="Maximum balance (hours)" hint="Optional; accrual stops at this" type="number" min={0} step={0.5} value={max} onChange={(e) => setMax(e.target.value)} />
         <TextField label="Carryover (hours)" hint="Optional; hours above this expire on 1 January" type="number" min={0} step={0.5} value={carry} onChange={(e) => setCarry(e.target.value)} />

@@ -1,9 +1,11 @@
 import {
+  APP_PRESETS,
   DEFAULT_WORKING_HOURS,
   MIN_INSIGHTS_GROUP_SIZE,
   UTILIZATION_BAND_PERCENT,
   type AppCategory,
   type AppCategoryDTO,
+  type AppPresetId,
   type DayInsight,
   type ExpectedDay,
   type ExpectedHours,
@@ -17,7 +19,7 @@ import { audit } from '../audit/service';
 import { getSettings, loadCalendars } from '../scheduling/service';
 import { addDays, dateInTz } from '../scheduling/tz';
 import { limitRows, resolveLimits } from '../timesheets/service';
-import { dailyInsights, focusBlocks, summarize, type InsightBucket } from './compute';
+import { dailyInsights, focusBlocks, summarize, typicalDay, type InsightBucket } from './compute';
 import { expectedOn, summarizeExpected } from './expected';
 
 interface Range {
@@ -124,6 +126,7 @@ export async function personalInsights(q: Queryable, orgId: string, userId: stri
     work_apps: [...byCategory].map(([category, seconds]) => ({ category, seconds })).sort((a, b) => b.seconds - a.seconds),
     days,
     expected: (await expectedFor(q, orgId, new Map([[userId, days]]), r, tz)).get(userId)!,
+    typical_day: typicalDay(days),
   };
 }
 
@@ -218,6 +221,45 @@ export async function listCategories(q: Queryable, orgId: string): Promise<AppCa
   );
 }
 
+function upsertRule(q: Queryable, actor: UserActor, teamId: string | null, identifier: string, category: AppCategory) {
+  return one<{ id: string }>(
+    q,
+    `INSERT INTO app_categories (organization_id, team_id, app_identifier, category, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (organization_id, COALESCE(team_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(app_identifier))
+     DO UPDATE SET category = EXCLUDED.category
+     RETURNING id`,
+    [actor.organizationId, teamId, identifier, category, actor.userId],
+  );
+}
+
+/** Applies a preset (Stage 4 F9): one rule per identifier, replacing any rule for the same app and scope. */
+export async function applyPreset(
+  q: Queryable,
+  actor: UserActor,
+  input: { preset: AppPresetId; category: AppCategory; team_id?: string | null; identifiers?: string[] },
+  requestId?: string,
+): Promise<{ applied: number }> {
+  if (input.team_id) {
+    const t = await one(q, 'SELECT 1 FROM teams WHERE id = $1 AND organization_id = $2', [input.team_id, actor.organizationId]);
+    if (!t) throw errors.notFound('Team');
+  }
+  const all: string[] = APP_PRESETS[input.preset].apps.flatMap((a) => [...a.identifiers]);
+  const wanted = input.identifiers ?? all;
+  const unknown = wanted.filter((w) => !all.includes(w));
+  if (unknown.length) throw errors.validation(`Not in this preset: ${unknown.join(', ')}`);
+  for (const identifier of new Set(wanted)) await upsertRule(q, actor, input.team_id ?? null, identifier, input.category);
+  await audit(q, {
+    organizationId: actor.organizationId,
+    actor,
+    action: 'app_category.preset_applied',
+    targetType: 'app_category',
+    requestId,
+    metadata: { preset: input.preset, category: input.category, team_id: input.team_id ?? null, count: new Set(wanted).size },
+  });
+  return { applied: new Set(wanted).size };
+}
+
 export async function setCategory(
   q: Queryable,
   actor: UserActor,
@@ -228,15 +270,7 @@ export async function setCategory(
     const t = await one(q, 'SELECT 1 FROM teams WHERE id = $1 AND organization_id = $2', [input.team_id, actor.organizationId]);
     if (!t) throw errors.notFound('Team');
   }
-  const r = await one<{ id: string }>(
-    q,
-    `INSERT INTO app_categories (organization_id, team_id, app_identifier, category, created_by)
-     VALUES ($1, $2, $3, $4, $5)
-     ON CONFLICT (organization_id, COALESCE(team_id, '00000000-0000-0000-0000-000000000000'::uuid), lower(app_identifier))
-     DO UPDATE SET category = EXCLUDED.category
-     RETURNING id`,
-    [actor.organizationId, input.team_id ?? null, input.app_identifier, input.category, actor.userId],
-  );
+  const r = await upsertRule(q, actor, input.team_id ?? null, input.app_identifier, input.category);
   await audit(q, {
     organizationId: actor.organizationId,
     actor,

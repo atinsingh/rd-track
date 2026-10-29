@@ -134,6 +134,9 @@ function LoginForm() {
       <p className={s.fine}>
         New to Track? <a href="/signup">Create an organization</a> — free for up to 2 people, 14-day Pro trial.
       </p>
+      <p className={s.fine}>
+        A client of an agency that uses Track? <a href="/client/login">Sign in to the client portal</a>.
+      </p>
     </form>
   );
 }

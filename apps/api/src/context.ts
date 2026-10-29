@@ -49,7 +49,16 @@ export interface DirectoryActor {
   organizationId: string;
 }
 
-export type Actor = UserActor | DeviceActor | PlatformActor | DirectoryActor;
+/** A client's contact signed in to the read-only client portal (Stage 4 F9). */
+export interface ClientActor {
+  kind: 'client';
+  contactId: string;
+  clientId: string;
+  organizationId: string;
+  displayName: string;
+}
+
+export type Actor = UserActor | DeviceActor | PlatformActor | DirectoryActor | ClientActor;
 
 /** Someone changing an organization's people and teams: an admin, or its directory. */
 export type OrgActor = UserActor | DirectoryActor;

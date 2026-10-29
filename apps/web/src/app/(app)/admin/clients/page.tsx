@@ -2,12 +2,14 @@
 
 import { useState, type FormEvent } from 'react';
 import type { ClientDTO, ProjectDTO } from '@rd/contracts';
+import { ClientPortalAccess } from '@/components/money/ClientPortalAccess';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { SelectField, TextArea, TextField } from '@/components/ui/Field';
 import { Badge, Card, PageHeader, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd, type ClientBody } from '@/lib/api';
 import { plural } from '@/lib/format';
+import { useMe } from '@/lib/me';
 import { CURRENCIES } from '@/lib/money';
 import { useAction, useApi } from '@/lib/useApi';
 import { MoneyGate } from '../MoneyGate';
@@ -70,6 +72,9 @@ function ClientForm({
 
 function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projects: ProjectDTO[]; onChanged: () => void }) {
   const action = useAction();
+  const { timezone } = useMe();
+  // Contacts load only when the client is opened, not for every client on the page.
+  const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState('');
   const mine = new Set(client.projects.map((p) => p.id));
   const assignable = projects.filter((p) => !mine.has(p.id) && p.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
@@ -91,7 +96,7 @@ function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projec
   };
   return (
     <li className={s.item}>
-      <details>
+      <details onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary>
           <span className={s.summaryName}>
             {client.name} {client.archived ? <Badge>Archived</Badge> : null}
@@ -133,6 +138,7 @@ function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projec
             </form>
             <p className="small muted">A project belongs to one client at a time. Moving it changes future invoices only; issued invoices stay as they are.</p>
           </div>
+          {open ? <ClientPortalAccess client={client} tz={timezone} onChanged={onChanged} /> : null}
           <ClientForm initial={client} submitLabel="Save changes" busy={action.busy} onSubmit={update} />
           <div>
             <Button size="sm" variant="quiet" onClick={() => update({ archived: !client.archived })} disabled={action.busy}>

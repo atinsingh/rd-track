@@ -142,7 +142,23 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
      person shown gets an entry in their access log; amounts never go in the audit log;
    - the person sees their own under My time › My pay; recurring ones are ended, one-time
      ones (and recurring ones not yet started) removed.
-9. F9 polish items
+9. F9 polish — **done 2026-10-29** (migrations 021, 022):
+   - *Typical day* on My insights (as on the Insights artboard): the average first start and
+     last stop, and idle time a day, over the days with at least half an hour tracked; the
+     By day table gains Start–stop and Idle;
+   - *Save as PDF* on My insights opens `/print/insights`, a printable copy outside the app
+     shell (the browser's print dialog makes the PDF, as for invoices);
+   - an *AI tools* preset on Work apps: known identifiers for ChatGPT, Claude, Cursor,
+     Windsurf, Perplexity and LM Studio (bundle id on macOS, program file on Windows); the
+     admin picks the category and scope and can leave any out; it writes ordinary rules;
+   - time-off accrual day: on the 1st (as before), on the last day, or on the anniversary of
+     the person's assignment start (the last day of a shorter month for the 29th–31st);
+   - a read-only **client portal** for agencies (Pro): contacts invited from a client sign in
+     at `/client/login` on their own (their own table, sessions and cookie; no seat or role;
+     only `/v1/client-portal/*`) and see their projects' hours by week, budgets and issued
+     invoices. Totals per project unless the agency shows who worked, and then each person
+     shown gets an entry in "Who viewed your data". Removing access signs them out; a new
+     sign-in link doubles as a password reset.
 
 After step 4, the build order continues with the engine and role workspaces in
 [`07-product-review.md`](07-product-review.md); F5–F9 slot in after its slice 3.

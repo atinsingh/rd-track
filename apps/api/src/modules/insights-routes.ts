@@ -1,4 +1,4 @@
-import { appCategoryRequest, webhookCreateRequest } from '@rd/contracts';
+import { appCategoryRequest, appPresetRequest, webhookCreateRequest } from '@rd/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
@@ -7,7 +7,7 @@ import { errors } from '../lib/errors';
 import { parse, parseRange } from '../lib/validate';
 import { managedTeamIds } from './authz';
 import { assertEntitlement } from './billing/service';
-import { deleteCategory, listCategories, personalInsights, setCategory, teamInsights } from './insights/service';
+import { applyPreset, deleteCategory, listCategories, personalInsights, setCategory, teamInsights } from './insights/service';
 import { createEndpoint, deleteEndpoint, emitEvent, listDeliveries, listEndpoints } from './webhooks/service';
 
 type RangeReq = FastifyRequest<{ Querystring: { from?: string; to?: string; tz?: string } }>;
@@ -51,6 +51,10 @@ export async function insightsRoutes(app: FastifyInstance, deps: Deps) {
   app.put('/v1/admin/app-categories', user, async (req) => {
     const body = parse(appCategoryRequest, req.body);
     return withTx(pool, (tx) => setCategory(tx, requireRole(req, ADMIN_ROLES), body, req.id));
+  });
+  app.post('/v1/admin/app-categories/presets', user, async (req) => {
+    const body = parse(appPresetRequest, req.body);
+    return withTx(pool, (tx) => applyPreset(tx, requireRole(req, ADMIN_ROLES), body, req.id));
   });
   app.delete<{ Params: { id: string } }>('/v1/admin/app-categories/:id', user, async (req) => {
     await withTx(pool, (tx) => deleteCategory(tx, requireRole(req, ADMIN_ROLES), req.params.id, req.id));

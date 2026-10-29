@@ -73,6 +73,8 @@ export interface ClientDTO {
   archived: boolean;
   created_at: string;
   projects: { id: string; name: string }[];
+  /** Client portal (F9): contacts see who worked on their projects, not just totals. */
+  portal_show_people: boolean;
 }
 /** `PUT /v1/admin/projects/{id}/client` */
 export const projectClientRequest = z.strictObject({ client_id: uuid.nullable() });

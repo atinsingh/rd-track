@@ -16,6 +16,7 @@ import {
   type TimeOffPolicyDTO,
   type TimeOffRequestDTO,
   type TimeOffAccrual,
+  type TimeOffAccrualDay,
 } from '@rd/contracts';
 import { request, unwrapList } from './api';
 import { formatDayMonth, formatShortDay, formatTime, WEEKDAY_SHORT } from './time';
@@ -51,6 +52,7 @@ export interface PolicyBody {
   kind: 'paid' | 'unpaid';
   accrual: TimeOffAccrual;
   accrual_hours: number;
+  accrual_day: TimeOffAccrualDay;
   max_balance_hours: number | null;
   carryover_hours: number | null;
   allow_negative: boolean;
@@ -170,9 +172,15 @@ export const LEDGER_KIND_LABEL: Record<MyTimeOffResponse['ledger'][number]['kind
   carryover_expiry: 'Above carryover (expired)',
 };
 
-export function accrualLabel(p: { accrual: TimeOffAccrual; accrual_hours: number }): string {
+/** When the hours are added, for the policy form's choices and its summary (Stage 4 F9). */
+export function accrualDayLabel(accrual: TimeOffAccrual, day: TimeOffAccrualDay): string {
+  if (accrual === 'per_year') return day === 'first' ? 'on 1 January' : day === 'last' ? 'on 31 December' : 'on their start date each year';
+  return day === 'first' ? 'on the 1st' : day === 'last' ? 'on the last day of the month' : 'on the day of the month they started';
+}
+
+export function accrualLabel(p: { accrual: TimeOffAccrual; accrual_hours: number; accrual_day?: TimeOffAccrualDay }): string {
   if (p.accrual === 'none') return 'No accrual';
-  return `${formatHours(p.accrual_hours)} per ${p.accrual === 'per_month' ? 'month' : 'year'}`;
+  return `${formatHours(p.accrual_hours)} per ${p.accrual === 'per_month' ? 'month' : 'year'}, ${accrualDayLabel(p.accrual, p.accrual_day ?? 'first')}`;
 }
 
 /** Signed hours: "+8 h", "−24 h". */

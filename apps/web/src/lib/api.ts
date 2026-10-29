@@ -34,6 +34,7 @@ import type {
   ApprovalsBatchResponse,
   AppCategory,
   AppCategoryDTO,
+  AppPresetId,
   PersonalInsights,
   TeamInsights,
   WebhookDeliveryDTO,
@@ -567,6 +568,8 @@ export const rd = {
     setAppCategory: (body: { app_identifier: string; category: AppCategory; team_id?: string | null }) =>
       put<AppCategoryDTO>('/v1/admin/app-categories', body),
     deleteAppCategory: (id: string) => ok(del(`/v1/admin/app-categories/${enc(id)}`)),
+    applyAppPreset: (body: { preset: AppPresetId; category: AppCategory; team_id?: string | null; identifiers?: string[] }) =>
+      post<{ applied: number }>('/v1/admin/app-categories/presets', body),
     webhooks: (signal?: AbortSignal) => list<WebhookEndpointDTO>('/v1/admin/webhooks', { signal }),
     createWebhook: (body: { url: string; description?: string; events: WebhookEventType[] }) =>
       post<WebhookEndpointDTO>('/v1/admin/webhooks', body),

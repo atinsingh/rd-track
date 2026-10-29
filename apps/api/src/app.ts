@@ -4,7 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Deps } from './context';
 import { SYSTEM_SCOPE, tenantScope } from './db/tenant-scope';
-import { PLATFORM_COOKIE, SESSION_COOKIE } from './http';
+import { CLIENT_COOKIE, PLATFORM_COOKIE, SESSION_COOKIE } from './http';
 import { AppError } from './lib/errors';
 import { adminRoutes } from './modules/admin-routes';
 import { agentRoutes } from './modules/agent-routes';
@@ -17,6 +17,8 @@ import { authenticateDirectory } from './modules/scim/service';
 import { authenticateToken } from './modules/api-tokens/service';
 import { apiEndpoint } from './modules/api-tokens/surface';
 import { developerRoutes } from './modules/developer-routes';
+import { authenticateClient } from './modules/client-portal/service';
+import { clientPortalRoutes } from './modules/client-portal-routes';
 import { expensesRoutes } from './modules/expenses-routes';
 import { audit } from './modules/audit/service';
 import { withScope } from './db/tenant-scope';
@@ -114,6 +116,19 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       return;
     }
 
+    if (mode === 'client') {
+      const token = req.cookies[CLIENT_COOKIE];
+      const c = token ? await authenticateClient(deps, deps.pool, token) : null;
+      if (c === 'not_entitled') throw new AppError(403, 'portal_unavailable', 'The client portal is not available for this organization');
+      if (!c) throw new AppError(401, 'unauthenticated', 'Sign in required');
+      if (!SAFE_METHODS.has(req.method) && req.headers['x-rd-csrf'] !== '1') {
+        throw new AppError(403, 'csrf_failed', 'Missing x-rd-csrf header');
+      }
+      req.client = c;
+      narrowScope(c.organizationId);
+      return;
+    }
+
     // API tokens (F5): `Authorization: Bearer rdt_…`, only on the routes in the API reference.
     const bearer = /^Bearer\s+(rdt_(?:org|pat)_[A-Za-z0-9_-]{20,200})$/.exec(req.headers.authorization ?? '');
     if (bearer) {
@@ -206,6 +221,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));
   await app.register(async (s) => platformRoutes(s, deps));
+  await app.register(async (s) => clientPortalRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;
 }

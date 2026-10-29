@@ -272,6 +272,9 @@ export interface HolidayDTO {
 
 export const TIME_OFF_ACCRUALS = ['none', 'per_month', 'per_year'] as const;
 export type TimeOffAccrual = (typeof TIME_OFF_ACCRUALS)[number];
+/** Which day of each month (or year) the hours are added (Stage 4 F9). */
+export const TIME_OFF_ACCRUAL_DAYS = ['first', 'anniversary', 'last'] as const;
+export type TimeOffAccrualDay = (typeof TIME_OFF_ACCRUAL_DAYS)[number];
 
 export const timeOffPolicyCreate = z.strictObject({
   name: z.string().min(1).max(200),
@@ -279,6 +282,7 @@ export const timeOffPolicyCreate = z.strictObject({
   accrual: z.enum(TIME_OFF_ACCRUALS).default('none'),
   /** hours added each month or year */
   accrual_hours: hours.default(0),
+  accrual_day: z.enum(TIME_OFF_ACCRUAL_DAYS).default('first'),
   max_balance_hours: hours.nullable().optional(),
   /** hours kept into a new calendar year; null/omitted = everything carries over */
   carryover_hours: hours.nullable().optional(),
@@ -288,6 +292,7 @@ export const timeOffPolicyUpdate = z.strictObject({
   name: z.string().min(1).max(200).optional(),
   accrual: z.enum(TIME_OFF_ACCRUALS).optional(),
   accrual_hours: hours.optional(),
+  accrual_day: z.enum(TIME_OFF_ACCRUAL_DAYS).optional(),
   max_balance_hours: hours.nullable().optional(),
   carryover_hours: hours.nullable().optional(),
   allow_negative: z.boolean().optional(),
@@ -300,6 +305,7 @@ export interface TimeOffPolicyDTO {
   kind: 'paid' | 'unpaid';
   accrual: TimeOffAccrual;
   accrual_hours: number;
+  accrual_day: TimeOffAccrualDay;
   max_balance_hours: number | null;
   carryover_hours: number | null;
   allow_negative: boolean;

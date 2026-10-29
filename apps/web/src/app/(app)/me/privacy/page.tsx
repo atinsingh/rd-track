@@ -54,6 +54,7 @@ const ACTION_TEXT: Record<string, string> = {
   'pay_rate.view': 'Viewed your pay rate',
   'payroll_adjustment.view': 'Viewed your bonuses and deductions',
   'expense.receipt_view': 'Opened your expense receipt',
+  'client_portal.view_hours': 'Saw your hours on their project, in the client portal',
   'payroll_adjustment.create': 'Added a bonus, deduction or reimbursement for you',
   'payroll_adjustment.end': 'Ended a recurring bonus or deduction of yours',
   'payroll_adjustment.delete': 'Removed a bonus, deduction or reimbursement of yours',

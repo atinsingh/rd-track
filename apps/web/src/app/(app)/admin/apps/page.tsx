@@ -1,16 +1,93 @@
 'use client';
 
 import { useState } from 'react';
-import { APP_CATEGORIES, APP_CATEGORY_LABELS, type AppCategory } from '@rd/contracts';
+import { APP_CATEGORIES, APP_CATEGORY_LABELS, APP_PRESETS, type AppCategory, type AppCategoryDTO, type AppPresetId, type TeamSummary } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
-import { SelectField, TextField } from '@/components/ui/Field';
+import { Checkbox, SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from '../admin.module.css';
+
+/** A ready-made set of rules (Stage 4 F9): pick the category, leave out what you don't want. */
+function Preset({ id, teams, rules, onApplied }: { id: AppPresetId; teams: TeamSummary[]; rules: AppCategoryDTO[]; onApplied: () => void }) {
+  const preset = APP_PRESETS[id];
+  const all = preset.apps.flatMap((a) => [...a.identifiers]);
+  const [chosen, setChosen] = useState<ReadonlySet<string>>(() => new Set(all));
+  const [category, setCategory] = useState<AppCategory>('core_work');
+  const [teamId, setTeamId] = useState('');
+  const [done, setDone] = useState<string | null>(null);
+  const action = useAction();
+  const existing = (identifier: string) =>
+    rules.find((r) => r.app_identifier.toLowerCase() === identifier.toLowerCase() && (r.team_id ?? '') === teamId);
+  const toggle = (identifier: string) =>
+    setChosen((prev) => {
+      const next = new Set(prev);
+      if (next.has(identifier)) next.delete(identifier);
+      else next.add(identifier);
+      return next;
+    });
+  const apply = async () => {
+    setDone(null);
+    const identifiers = all.filter((i) => chosen.has(i));
+    const r = await action.run(() =>
+      rd.admin.applyAppPreset({ preset: id, category, team_id: teamId || null, identifiers: identifiers.length === all.length ? undefined : identifiers }),
+    );
+    if (r) {
+      setDone(`${r.applied} rules saved as ${APP_CATEGORY_LABELS[category]}.`);
+      onApplied();
+    }
+  };
+  return (
+    <Card title={`Preset · ${preset.label}`} subtitle={preset.description}>
+      <div className={s.presetApps}>
+        {preset.apps.map((a) => (
+          <fieldset key={a.name} className={s.presetApp}>
+            <legend>{a.name}</legend>
+            {a.identifiers.map((i) => {
+              const rule = existing(i);
+              return (
+                <Checkbox
+                  key={i}
+                  label={<span className="mono small">{i}</span>}
+                  hint={rule ? `Now ${APP_CATEGORY_LABELS[rule.category]}` : undefined}
+                  checked={chosen.has(i)}
+                  onChange={() => toggle(i)}
+                />
+              );
+            })}
+          </fieldset>
+        ))}
+      </div>
+      <div className={s.inlineForm}>
+        <SelectField label="Category" value={category} onChange={(e) => setCategory(e.target.value as AppCategory)}>
+          {APP_CATEGORIES.map((c) => (
+            <option key={c} value={c}>
+              {APP_CATEGORY_LABELS[c]}
+            </option>
+          ))}
+        </SelectField>
+        <SelectField label="Applies to" value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+          <option value="">Whole organization</option>
+          {teams.map((t) => (
+            <option key={t.id} value={t.id}>
+              Team · {t.name}
+            </option>
+          ))}
+        </SelectField>
+        <Button variant="primary" onClick={apply} disabled={chosen.size === 0 || action.busy}>
+          {action.busy ? 'Saving…' : `Apply ${chosen.size} rules`}
+        </Button>
+      </div>
+      <p className="small muted">Ticked apps get this category, replacing a rule they already have in the same scope. You can change or remove each one below.</p>
+      {done ? <p role="status">{done}</p> : null}
+      <ActionError error={action.error} />
+    </Card>
+  );
+}
 
 export default function WorkAppsPage() {
   const { access } = useMe();
@@ -71,6 +148,9 @@ export default function WorkAppsPage() {
         </form>
         <ActionError error={save.error} />
       </Card>
+      {(Object.keys(APP_PRESETS) as AppPresetId[]).map((id) => (
+        <Preset key={id} id={id} teams={teams.data ?? []} rules={categories.data ?? []} onApplied={categories.reload} />
+      ))}
       <Card title="Rules">
         <ActionError error={remove.error} />
         <Resource {...categories} label="Loading work-app rules">

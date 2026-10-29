@@ -16,3 +16,4 @@ export * from './lifecycle';
 export * from './sso';
 export * from './developers';
 export * from './expenses';
+export * from './client-portal';

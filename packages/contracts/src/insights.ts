@@ -35,7 +35,22 @@ export interface DayInsight {
   weekend: boolean;
   longest_stretch_seconds: number;
   long_day: boolean;
+  /** First and last tracked minute that day, local "HH:MM" (the stop is the end of the last minute). */
+  first_start: string;
+  last_stop: string;
+  /** Tracked minutes without input (Stage 4 F9). */
+  idle_seconds: number;
 }
+
+/** Your typical day (Stage 4 F9): averages over the days with at least half an hour tracked. */
+export interface TypicalDay {
+  /** Days the averages are over; the rest are null when there are none. */
+  days: number;
+  start: string | null;
+  stop: string | null;
+  idle_seconds: number | null;
+}
+export const TYPICAL_DAY_MIN_SECONDS = 30 * 60;
 
 /**
  * Where expected hours come from (Stage 4 F6): the person's schedule, else their work
@@ -88,6 +103,7 @@ export interface PersonalInsights {
   work_apps: { category: AppCategory | 'uncategorized'; seconds: number }[];
   days: DayInsight[];
   expected: ExpectedHours;
+  typical_day: TypicalDay;
 }
 
 export interface TeamInsights {
@@ -132,6 +148,36 @@ export interface AppCategoryDTO {
   category: AppCategory;
   created_at: string;
 }
+
+/**
+ * Ready-made sets of rules (Stage 4 F9). Identifiers are what the agent reports: the
+ * bundle id on macOS, the program file on Windows. An admin picks the category and can
+ * leave any identifier out.
+ */
+export const APP_PRESETS = {
+  ai_tools: {
+    label: 'AI tools',
+    description: 'Assistants and AI code editors people use for their work.',
+    apps: [
+      { name: 'ChatGPT', identifiers: ['com.openai.chat', 'ChatGPT.exe'] },
+      { name: 'Claude', identifiers: ['com.anthropic.claudefordesktop', 'Claude.exe'] },
+      { name: 'Cursor', identifiers: ['com.todesktop.230313mzl4w4u92', 'Cursor.exe'] },
+      { name: 'Windsurf', identifiers: ['com.exafunction.windsurf', 'Windsurf.exe'] },
+      { name: 'Perplexity', identifiers: ['ai.perplexity.mac', 'Perplexity.exe'] },
+      { name: 'LM Studio', identifiers: ['ai.elementlabs.lmstudio', 'LM Studio.exe'] },
+    ],
+  },
+} as const satisfies Record<string, { label: string; description: string; apps: readonly { name: string; identifiers: readonly string[] }[] }>;
+export type AppPresetId = keyof typeof APP_PRESETS;
+export const APP_PRESET_IDS = Object.keys(APP_PRESETS) as [AppPresetId, ...AppPresetId[]];
+
+export const appPresetRequest = z.strictObject({
+  preset: z.enum(APP_PRESET_IDS),
+  category: z.enum(APP_CATEGORIES),
+  team_id: uuid.nullable().optional(),
+  /** Only these identifiers from the preset; all of them when left out. */
+  identifiers: z.array(z.string().min(1).max(255)).min(1).max(100).optional(),
+});
 
 // ───────────── outbound webhooks (INT-03) ─────────────
 
