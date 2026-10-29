@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useMemo, useState, type FormEvent } from 'react';
 import { ORG_ROLES, createUserRequest, type OrgRole, type UserDTO } from '@rd/contracts';
-import { CopyButton } from '@/components/CopyButton';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
@@ -15,6 +14,7 @@ import { useMe } from '@/lib/me';
 import { timeZoneOptions } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
+import s from './users.module.css';
 
 const ROLE_LABEL: Record<OrgRole, string> = {
   employee: 'Employee',
@@ -43,9 +43,9 @@ function SeatError({ error }: { error: ApiError | null }) {
 }
 
 function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boolean; onClose: () => void; onCreated: (u: UserDTO) => void; defaultTz: string }) {
-  const [form, setForm] = useState({ email: '', display_name: '', org_role: 'employee' as OrgRole, timezone: defaultTz, tracking_enabled: true, password: '' });
+  const [form, setForm] = useState({ email: '', display_name: '', org_role: 'employee' as OrgRole, timezone: defaultTz, tracking_enabled: true });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [created, setCreated] = useState<{ user: UserDTO; initial_password?: string } | null>(null);
+  const [created, setCreated] = useState<UserDTO | null>(null);
   const action = useAction();
   const zones = useMemo(() => timeZoneOptions(defaultTz), [defaultTz]);
   const set = (p: Partial<typeof form>) => setForm((f) => ({ ...f, ...p }));
@@ -54,13 +54,13 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
     setCreated(null);
     setErrors({});
     action.reset();
-    setForm({ email: '', display_name: '', org_role: 'employee', timezone: defaultTz, tracking_enabled: true, password: '' });
+    setForm({ email: '', display_name: '', org_role: 'employee', timezone: defaultTz, tracking_enabled: true });
     onClose();
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const body = { ...form, email: form.email.trim(), display_name: form.display_name.trim(), password: form.password || undefined };
+    const body = { ...form, email: form.email.trim(), display_name: form.display_name.trim() };
     const parsed = createUserRequest.safeParse(body);
     if (!parsed.success) {
       const errs: Record<string, string> = {};
@@ -71,7 +71,7 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
     setErrors({});
     const res = await action.run(() => rd.admin.createUser(body));
     if (res) {
-      setCreated(res);
+      setCreated(res.user);
       onCreated(res.user);
     }
   };
@@ -80,9 +80,9 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
     <Dialog
       open={open}
       onClose={close}
-      title={created ? 'Person added' : 'Add a person'}
+      title={created ? 'Invite sent' : 'Invite a person'}
       eyebrow="Admin · People"
-      description={created ? undefined : 'They sign in with their email. People who track time use a billable seat; viewers are free.'}
+      description={created ? undefined : 'They get an email to choose their own password. People who track time use a billable seat; viewers are free.'}
       footer={
         created ? (
           <Button variant="primary" onClick={close}>
@@ -94,24 +94,12 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
       {created ? (
         <>
           <p>
-            <strong>{created.user.display_name}</strong> ({created.user.email}) can now sign in.
+            We emailed <strong>{created.display_name}</strong> at {created.email}. The link works once, for 7 days; they choose their own
+            password, so nobody else ever knows it.
           </p>
-          {created.initial_password ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, background: 'var(--ink)', color: 'var(--ink-text)', padding: 18 }}>
-              <span className="label-mono" style={{ color: 'var(--ink-muted)' }}>
-                Initial password · shown once
-              </span>
-              <span className="mono" style={{ fontSize: 20, color: '#fff', wordBreak: 'break-all', userSelect: 'all' }}>
-                {created.initial_password}
-              </span>
-              <span className="small">Share it directly with them. They should change it after first sign-in.</span>
-              <div>
-                <CopyButton text={created.initial_password} label="Copy password" variant="inverse" />
-              </div>
-            </div>
-          ) : (
-            <p className="secondary">They use the password you set.</p>
-          )}
+          <p className="secondary small">
+            Didn’t arrive? Use “Resend invite” on their row. Until they join they can’t sign in, and they don’t use a seat unless tracking is on.
+          </p>
         </>
       ) : (
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }} noValidate>
@@ -139,15 +127,6 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
             checked={form.tracking_enabled}
             onChange={(e) => set({ tracking_enabled: e.target.checked })}
           />
-          <TextField
-            label="Initial password (optional)"
-            type="password"
-            autoComplete="new-password"
-            hint="At least 12 characters. Leave empty to generate one that is shown once."
-            value={form.password}
-            error={errors.password}
-            onChange={(e) => set({ password: e.target.value })}
-          />
           {form.org_role === 'org_admin' || form.org_role === 'super_admin' ? (
             <p className="small secondary">Admins must set up two-factor sign-in the first time they sign in.</p>
           ) : null}
@@ -155,7 +134,7 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
           <div className={formActionsClass}>
             <Button onClick={close}>Cancel</Button>
             <Button type="submit" variant="primary" disabled={action.busy}>
-              {action.busy ? 'Adding…' : 'Add person'}
+              {action.busy ? 'Sending…' : 'Send invite'}
             </Button>
           </div>
         </form>
@@ -172,6 +151,9 @@ export default function AdminUsersPage() {
   const [deactivating, setDeactivating] = useState<UserDTO | null>(null);
   const toggle = useAction();
   const deact = useAction();
+  const rowAction = useAction();
+  const [rowNote, setRowNote] = useState<string | null>(null);
+  const [resettingMfa, setResettingMfa] = useState<UserDTO | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   if (!access.isAdmin) return <NoAccess what="People are managed by org admins." />;
@@ -198,6 +180,27 @@ export default function AdminUsersPage() {
     }
   };
 
+  const resend = async (u: UserDTO) => {
+    setRowNote(null);
+    setBusyId(u.id);
+    const ok = await rowAction.run(() => rd.admin.resendInvite(u.id));
+    setBusyId(null);
+    if (ok) {
+      setRowNote(`A new invite went to ${u.email}; the earlier link no longer works.`);
+      replace({ ...u, invited_at: new Date().toISOString() });
+    }
+  };
+  const confirmResetMfa = async () => {
+    if (!resettingMfa) return;
+    const u = resettingMfa;
+    const ok = await rowAction.run(() => rd.admin.resetMfa(u.id));
+    setResettingMfa(null);
+    if (ok) {
+      setRowNote(`Two-factor sign-in was reset for ${u.display_name}. They were signed out and set it up again at next sign-in.`);
+      replace({ ...u, mfa_enabled: false });
+    }
+  };
+
   const list = users.data ?? [];
   const active = list.filter((u) => u.status === 'active');
   const tracking = active.filter((u) => u.tracking_enabled).length;
@@ -214,7 +217,7 @@ export default function AdminUsersPage() {
         }
         actions={
           <Button variant="primary" onClick={() => setAdding(true)}>
-            Add a person →
+            Invite a person →
           </Button>
         }
       />
@@ -226,6 +229,10 @@ export default function AdminUsersPage() {
         </Banner>
       ) : null}
       <SeatError error={toggle.error} />
+      <ActionError error={rowAction.error} />
+      {rowNote ? (
+        <Banner role="status" title={rowNote} actions={<Button size="sm" variant="quiet" onClick={() => setRowNote(null)}>Dismiss</Button>} />
+      ) : null}
 
       <Card title="Everyone">
         <Resource {...users} label="Loading people">
@@ -277,13 +284,33 @@ export default function AdminUsersPage() {
                             </Button>
                           </td>
                           <td>{u.mfa_enabled ? <Badge>On</Badge> : <span className="muted">Off</span>}</td>
-                          <td>{inactive ? <Badge>Deactivated</Badge> : <Badge tone="solid">Active</Badge>}</td>
+                          <td>
+                            {inactive ? (
+                              <Badge>Deactivated</Badge>
+                            ) : u.invite_pending ? (
+                              <Badge tone="warn">Invited</Badge>
+                            ) : (
+                              <Badge tone="solid">Active</Badge>
+                            )}
+                          </td>
                           <td style={{ textAlign: 'right' }}>
-                            {!inactive && u.id !== me.user.id ? (
-                              <Button size="sm" variant="danger" onClick={() => setDeactivating(u)}>
-                                Deactivate
-                              </Button>
-                            ) : null}
+                            <span className={s.rowActions}>
+                              {!inactive && u.invite_pending ? (
+                                <Button size="sm" variant="quiet" disabled={busyId === u.id} onClick={() => void resend(u)}>
+                                  {busyId === u.id ? 'Sending…' : 'Resend invite'}
+                                </Button>
+                              ) : null}
+                              {!inactive && u.mfa_enabled && u.id !== me.user.id ? (
+                                <Button size="sm" variant="quiet" onClick={() => setResettingMfa(u)}>
+                                  Reset two-factor
+                                </Button>
+                              ) : null}
+                              {!inactive && u.id !== me.user.id ? (
+                                <Button size="sm" variant="danger" onClick={() => setDeactivating(u)}>
+                                  {u.invite_pending ? 'Cancel invite' : 'Deactivate'}
+                                </Button>
+                              ) : null}
+                            </span>
                           </td>
                         </tr>
                       );
@@ -325,6 +352,21 @@ export default function AdminUsersPage() {
       >
         <ActionError error={deact.error} />
       </Dialog>
+      <Dialog
+        open={resettingMfa !== null}
+        onClose={() => setResettingMfa(null)}
+        size="sm"
+        title={`Reset two-factor for ${resettingMfa?.display_name ?? ''}?`}
+        description="Use this when they lost their phone and their recovery codes. They are signed out everywhere and set up two-factor again the next time they sign in. They get a security notice."
+        footer={
+          <>
+            <Button onClick={() => setResettingMfa(null)}>Cancel</Button>
+            <Button variant="primary" onClick={() => void confirmResetMfa()} disabled={rowAction.busy}>
+              {rowAction.busy ? 'Resetting…' : 'Reset two-factor'}
+            </Button>
+          </>
+        }
+      />
     </>
   );
 }

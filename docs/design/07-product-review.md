@@ -117,8 +117,9 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
 1. **Engine foundation and trust fixes** — **done 2026-10-29**. Domain events, the
    notify service with email templates, the bell and preferences, billing-lifecycle
    emails (G6–G8); terms acceptance at signup (G11).
-2. **Identity on the engine.** Invites (also removes the operator-visible password, G1),
-   password reset, MFA recovery codes and admin MFA reset, account settings (G3–G5, G13).
+2. **Identity on the engine** — **done 2026-10-29**. Invites (also removes the
+   operator-visible password, G1), password reset, MFA recovery codes and admin MFA
+   reset, account settings (G3–G5, G13).
 3. **Work items and rules.** The server-side inbox with reviewer fallback, deletion
    requests in it, employee to-dos, timesheet deadlines and escalation, device-health
    alerts, a larger webhook catalogue (G19, G25, G28).

@@ -8,6 +8,7 @@ import { rd } from '@/lib/api';
 import { can, type Access } from '@/lib/nav';
 import { useMe } from '@/lib/me';
 import { useAction, useApi } from '@/lib/useApi';
+import { ProfileCard, SecurityCard } from './AccountCards';
 import s from './settings.module.css';
 
 /** Categories that can concern this person; the rest never reach them. */
@@ -46,8 +47,10 @@ export default function SettingsPage() {
       <PageHeader
         eyebrow="Me · Settings"
         title="Settings"
-        description={`Signed in as ${me.user.email}. Choose how Track tells you about things; some notices are always on because they are about your data or your account.`}
+        description={`Signed in as ${me.user.email}. Your profile, how you sign in, and how Track tells you about things.`}
       />
+      <ProfileCard />
+      <SecurityCard />
       <Card title="Notifications" subtitle="In-app notices appear under the bell in the menu. Emails carry a link, never your activity.">
         {prefs.error ? <ErrorState error={prefs.error} onRetry={prefs.reload} /> : null}
         {!prefs.data && !prefs.error ? <Loading label="Loading your notification settings" /> : null}

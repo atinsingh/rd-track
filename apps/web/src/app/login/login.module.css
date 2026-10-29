@@ -120,3 +120,36 @@
     padding: 24px 20px;
   }
 }
+
+/* An inline text button that reads like a link. */
+.linkButton {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--link);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover {
+  color: var(--link-hover);
+}
+
+/* A primary-looking link (e.g. "Sign in" after a finished flow). */
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  padding: 0 18px;
+  border-radius: var(--radius-control);
+  background: var(--action-red);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  align-self: flex-start;
+}
+.primaryLink:hover {
+  background: var(--action-red-hover);
+  color: #fff;
+}

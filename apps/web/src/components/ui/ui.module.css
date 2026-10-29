@@ -505,6 +505,17 @@ select.input {
   border-bottom: 1px solid var(--rule-soft);
   vertical-align: middle;
 }
+/* Row headers read like cells; only column headers use the small mono caps. */
+.table tbody th {
+  font: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+  padding: 12px 8px;
+  border-bottom: 1px solid var(--rule-soft);
+  white-space: normal;
+  vertical-align: middle;
+}
 .table th:first-child,
 .table td:first-child {
   padding-left: 0;

@@ -1,4 +1,7 @@
 import type {
+  AccountSecurity,
+  InviteInfo,
+  RecoveryCodesResponse,
   BillingInterval,
   DirectoryResponse,
   ApprovalType,
@@ -332,8 +335,26 @@ export const rd = {
     verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
     mfaEnroll: () => post<MfaEnrollResponse>('/v1/auth/mfa/enroll', {}, { redirectOnAuth: false }),
-    mfaEnrollConfirm: (code: string) => ok(post('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false })),
+    mfaEnrollConfirm: (code: string) => post<RecoveryCodesResponse>('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false }),
+    mfaRecovery: (recovery_code: string) =>
+      post<{ ok: true; recovery_codes_left: number }>('/v1/auth/mfa/recovery', { recovery_code }, { redirectOnAuth: false }),
     logout: () => ok(post('/v1/auth/logout', {}, { redirectOnAuth: false })),
+    // Links that arrive by email.
+    invite: (token: string) => get<InviteInfo>(`/v1/invites/${enc(token)}`, { redirectOnAuth: false }),
+    acceptInvite: (body: { token: string; password: string; timezone?: string }) =>
+      ok(post('/v1/invites/accept', body, { redirectOnAuth: false })),
+    requestPasswordReset: (email: string) => ok(post('/v1/auth/password-reset', { email }, { redirectOnAuth: false })),
+    confirmPasswordReset: (token: string, password: string) =>
+      ok(post('/v1/auth/password-reset/confirm', { token, password }, { redirectOnAuth: false })),
+    confirmEmailChange: (token: string) => ok(post('/v1/auth/email-change/confirm', { token }, { redirectOnAuth: false })),
+  },
+  account: {
+    security: (signal?: AbortSignal) => get<AccountSecurity>('/v1/me/security', { signal }),
+    update: (body: { display_name?: string; timezone?: string }) => ok(patch('/v1/me', body)),
+    changePassword: (current_password: string, new_password: string) => ok(post('/v1/me/password', { current_password, new_password })),
+    changeEmail: (new_email: string, current_password: string) => ok(post('/v1/me/email', { new_email, current_password })),
+    newRecoveryCodes: () => post<RecoveryCodesResponse>('/v1/auth/mfa/recovery-codes'),
+    signOutOthers: () => post<{ signed_out: number }>('/v1/me/sessions/sign-out-others'),
   },
   me: (opts?: RequestOptions) => get<Me>('/v1/me', opts),
   person: {
@@ -401,7 +422,9 @@ export const rd = {
   admin: {
     users: (signal?: AbortSignal) => list<UserDTO>('/v1/admin/users', { signal }),
     createUser: (body: CreateUserBody) =>
-      post<{ user: UserDTO; initial_password?: string }>('/v1/admin/users', body),
+      post<{ user: UserDTO; invite_sent: boolean }>('/v1/admin/users', body),
+    resendInvite: (id: string) => post<{ invite_sent: true }>(`/v1/admin/users/${enc(id)}/invite`),
+    resetMfa: (id: string) => ok(post(`/v1/admin/users/${enc(id)}/mfa/reset`)),
     /** Resolves to the updated user, or null when the API returns no body. */
     updateUser: (id: string, body: UpdateUserBody) =>
       patch<UserDTO | undefined>(`/v1/admin/users/${enc(id)}`, body).then((u) => u ?? null),

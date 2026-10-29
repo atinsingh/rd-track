@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import { Suspense, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
+import { RecoveryCodes } from '@/components/auth/RecoveryCodes';
 import { TextField } from '@/components/ui/Field';
 import { rd } from '@/lib/api';
 import { useAction, useApi } from '@/lib/useApi';
@@ -40,12 +41,56 @@ function CodeForm({ label, onSubmit, busy, submitLabel }: { label: string; onSub
   );
 }
 
+function RecoveryForm({ next, onBack }: { next: string; onBack: () => void }) {
+  const action = useAction();
+  const [code, setCode] = useState('');
+  const valid = /^[a-z2-9]{4}-[a-z2-9]{4}$/i.test(code.trim());
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!valid) return;
+    const ok = await action.run(() => rd.auth.mfaRecovery(code.trim().toLowerCase()));
+    if (ok) window.location.assign(next);
+  };
+  return (
+    <>
+      <span className="eyebrow">Track · Two-factor</span>
+      <h1 style={{ fontSize: 28 }}>Use a recovery code</h1>
+      <p className="secondary">Each code from the list you saved works once. Afterwards, create new codes in Settings.</p>
+      <form className={s.form} onSubmit={submit} noValidate>
+        <TextField
+          label="Recovery code"
+          name="recovery-code"
+          autoComplete="one-time-code"
+          spellCheck={false}
+          required
+          hint="Like k7m2-9qxd"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          className="mono"
+        />
+        <Button type="submit" variant="primary" disabled={action.busy || !valid}>
+          {action.busy ? 'Checking…' : 'Sign in →'}
+        </Button>
+      </form>
+      <ActionError error={action.error} />
+      <p className={s.fine}>
+        <button type="button" className={s.linkButton} onClick={onBack}>
+          Use the authenticator app instead
+        </button>{' '}
+        · No codes left? Ask another org admin to reset your two-factor sign-in.
+      </p>
+    </>
+  );
+}
+
 function Verify({ next }: { next: string }) {
   const action = useAction();
+  const [recovery, setRecovery] = useState(false);
   const verify = async (code: string) => {
     const ok = await action.run(() => rd.auth.mfaVerify(code));
     if (ok) window.location.assign(next);
   };
+  if (recovery) return <RecoveryForm next={next} onBack={() => setRecovery(false)} />;
   return (
     <>
       <span className="eyebrow">Track · Two-factor</span>
@@ -53,22 +98,42 @@ function Verify({ next }: { next: string }) {
       <p className="secondary">Open your authenticator app and enter the current code for RoundDigital Track.</p>
       <CodeForm label="Verification code" submitLabel="Verify →" busy={action.busy} onSubmit={verify} />
       <ActionError error={action.error} />
+      <p className={s.fine}>
+        Lost your phone?{' '}
+        <button type="button" className={s.linkButton} onClick={() => setRecovery(true)}>
+          Use a recovery code
+        </button>
+      </p>
     </>
   );
 }
 
-function Enroll({ next }: { next: string }) {
+function Enroll({ next, chosen = false }: { next: string; chosen?: boolean }) {
   const enroll = useApi('mfa-enroll', () => rd.auth.mfaEnroll());
   const action = useAction();
+  const [codes, setCodes] = useState<string[] | null>(null);
   const confirm = async (code: string) => {
-    const ok = await action.run(() => rd.auth.mfaEnrollConfirm(code));
-    if (ok) window.location.assign(next);
+    const r = await action.run(() => rd.auth.mfaEnrollConfirm(code));
+    if (r) setCodes(r.recovery_codes);
   };
+  if (codes) {
+    return (
+      <>
+        <span className="eyebrow">Track · Two-factor is on</span>
+        <h1 style={{ fontSize: 28 }}>Save your recovery codes</h1>
+        <RecoveryCodes codes={codes} doneLabel="Continue →" onDone={() => window.location.assign(next)} />
+      </>
+    );
+  }
   return (
     <>
       <span className="eyebrow">Track · Set up two-factor</span>
       <h1 style={{ fontSize: 28 }}>Set up two-factor sign-in</h1>
-      <p className="secondary">Your role can change policies and people, so it needs a second factor.</p>
+      <p className="secondary">
+        {chosen
+          ? 'A code from your authenticator app, as well as your password, keeps your account safe even if the password leaks.'
+          : 'Your role can change policies and people, so it needs a second factor.'}
+      </p>
       {enroll.error ? (
         <ErrorState error={enroll.error} onRetry={enroll.reload} />
       ) : !enroll.data ? (
@@ -101,7 +166,7 @@ function MfaFlow() {
   // Without the hint from login, ask the API whether this user already has MFA.
   const me = useApi(forcedEnroll ? null : 'mfa-me', (signal) => rd.me({ signal, redirectOnAuth: false }));
 
-  if (forcedEnroll) return <Enroll next={next} />;
+  if (forcedEnroll) return <Enroll next={next} chosen={params.get('reason') === 'choice'} />;
   if (me.error?.code === 'unauthenticated') {
     return (
       <>
