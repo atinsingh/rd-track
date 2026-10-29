@@ -19,6 +19,7 @@ import { ADMIN_ROLES, AUDIT_ROLES, requireRole } from '../http';
 import { errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { listAudit } from './audit/service';
+import { adminResetMfa, inviteUser } from './auth/identity';
 import { createEnrollmentCode, listDevices, revokeDevice } from './devices/service';
 import * as org from './org/service';
 import { listPolicies, publishPolicy, scopeDetail } from './policy/service';
@@ -41,8 +42,20 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/v1/admin/users', user, async (req) => ({ items: await org.listUsers(pool, admin(req).organizationId) }));
   app.post('/v1/admin/users', user, async (req, reply) => {
     const body = parse(createUserRequest, req.body);
-    const r = await withTx(pool, (tx) => org.createUser(deps, tx, admin(req), body, req.id));
-    return reply.code(201).send(r);
+    const { user: created, invite } = await withTx(pool, (tx) => org.createUser(deps, tx, admin(req), body, req.id));
+    // The invite link goes only to the person, after commit; the admin never sees it.
+    if (invite) await deps.email.send(invite);
+    return reply.code(201).send({ user: created, invite_sent: Boolean(invite) });
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/users/:id/invite', user, async (req) => {
+    const a = admin(req);
+    const invite = await withTx(pool, (tx) => inviteUser(deps, tx, { orgId: a.organizationId, userId: parse(z.uuid(), req.params.id), invitedBy: a, requestId: req.id }));
+    await deps.email.send(invite);
+    return { invite_sent: true };
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/users/:id/mfa/reset', user, async (req) => {
+    await withTx(pool, (tx) => adminResetMfa(deps, tx, admin(req), parse(z.uuid(), req.params.id), req.id));
+    return { ok: true };
   });
   app.patch<{ Params: { id: string } }>('/v1/admin/users/:id', user, async (req) => {
     const body = parse(updateUserRequest, req.body);

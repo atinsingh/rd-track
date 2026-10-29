@@ -37,6 +37,12 @@ describe('platform operators', () => {
     });
     expect(created.statusCode).toBe(201);
     const orgId = JSON.parse(created.body).organization_id;
+    // Manage, not read: the operator never receives a tenant password; the admin is invited.
+    expect(created.body).not.toMatch(/password/i);
+    expect(JSON.parse(created.body)).toMatchObject({ admin_invite_sent: true });
+    const invite = env.email.sent.at(-1)!;
+    expect(invite.to).toBe('admin@initech.test');
+    expect(invite.text).toMatch(/\/invite\?token=/);
     const sub = (await env.deps.pool.query('SELECT plan, status, trial_ends_at FROM subscriptions WHERE organization_id = $1', [orgId])).rows[0];
     expect(sub).toMatchObject({ plan: 'pro', status: 'trialing' });
 

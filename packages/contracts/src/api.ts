@@ -323,7 +323,10 @@ export const createUserRequest = z.strictObject({
   org_role: z.enum(ORG_ROLES).default('employee'),
   tracking_enabled: z.boolean().default(true),
   timezone: z.string().min(1).max(64).default('UTC'),
-  /** Initial password; omit to generate one that is returned once. */
+  /**
+   * For scripted provisioning only. Omit it and the person gets an invite email to choose
+   * their own password; nobody else ever sees it.
+   */
   password: z.string().min(12).max(200).optional(),
 });
 export const updateUserRequest = z.strictObject({
@@ -343,6 +346,9 @@ export interface UserDTO {
   timezone: string;
   teams: { id: string; name: string; role: 'member' | 'manager' }[];
   created_at: string;
+  /** Invited and hasn't chosen a password yet. */
+  invite_pending: boolean;
+  invited_at: string | null;
 }
 
 export const createTeamRequest = z.strictObject({ name: z.string().min(1).max(200) });

@@ -14,6 +14,7 @@ import {
 } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { issueRecoveryCodes } from './identity';
 
 interface UserRow {
   id: string;
@@ -143,7 +144,8 @@ export async function startMfaEnrollment(deps: Deps, q: Queryable, actor: UserAc
   };
 }
 
-export async function confirmMfaEnrollment(deps: Deps, q: Queryable, actor: UserActor, code: string, requestId?: string) {
+/** Turns MFA on and returns the one-time recovery codes, shown once. */
+export async function confirmMfaEnrollment(deps: Deps, q: Queryable, actor: UserActor, code: string, requestId?: string): Promise<string[]> {
   const u = await one<{ mfa_secret_enc: string | null; mfa_enabled: boolean }>(
     q,
     'SELECT mfa_secret_enc, mfa_enabled FROM users WHERE id = $1',
@@ -163,6 +165,7 @@ export async function confirmMfaEnrollment(deps: Deps, q: Queryable, actor: User
     targetId: actor.userId,
     requestId,
   });
+  return issueRecoveryCodes(deps, q, actor.organizationId, actor.userId);
 }
 
 export async function authenticateDevice(q: Queryable, credential: string): Promise<DeviceActor | 'revoked' | null> {

@@ -1,13 +1,16 @@
 import type { ProjectDTO, UserDTO } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
-import { hashPassword, randomToken } from '../../lib/crypto';
+import type { EmailMessage } from '../../email/sender';
+import { hashPassword } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { inviteUser } from '../auth/identity';
 import { assertSeatAvailable } from '../billing/service';
 
 const USER_SELECT = `
   SELECT u.id, u.email, u.display_name, u.org_role, u.status, u.tracking_enabled, u.mfa_enabled, u.timezone, u.created_at,
+    u.password_hash IS NULL AS invite_pending, u.invited_at,
     COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name, 'role', m.role) ORDER BY t.name)
               FROM team_memberships m JOIN teams t ON t.id = m.team_id
               WHERE m.user_id = u.id AND m.valid_to IS NULL), '[]') AS teams
@@ -36,17 +39,17 @@ export async function createUser(
     password?: string;
   },
   requestId?: string,
-): Promise<{ user: UserDTO; initial_password?: string }> {
+): Promise<{ user: UserDTO; invite: EmailMessage | null }> {
   if (input.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
   if (input.tracking_enabled) await assertSeatAvailable(q, actor.organizationId, deps.now());
   const exists = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
   if (exists) throw errors.conflict('email_taken', 'A user with this email already exists');
-  const password = input.password ?? randomToken(12);
+  // No password: the person is invited and chooses their own.
   const r = await one<{ id: string }>(
     q,
     `INSERT INTO users (organization_id, email, display_name, password_hash, org_role, tracking_enabled, timezone)
      VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-    [actor.organizationId, input.email, input.display_name, await hashPassword(password), input.org_role, input.tracking_enabled, input.timezone],
+    [actor.organizationId, input.email, input.display_name, input.password ? await hashPassword(input.password) : null, input.org_role, input.tracking_enabled, input.timezone],
   );
   await audit(q, {
     organizationId: actor.organizationId,
@@ -58,7 +61,8 @@ export async function createUser(
     requestId,
     metadata: { org_role: input.org_role, tracking_enabled: input.tracking_enabled },
   });
-  return { user: await getUser(q, actor.organizationId, r!.id), initial_password: input.password ? undefined : password };
+  const invite = input.password ? null : await inviteUser(deps, q, { orgId: actor.organizationId, userId: r!.id, invitedBy: actor, requestId });
+  return { user: await getUser(q, actor.organizationId, r!.id), invite };
 }
 
 export async function updateUser(

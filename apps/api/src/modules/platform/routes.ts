@@ -8,6 +8,7 @@ import { decryptSecret, hashPassword, randomToken, sha256Hex, verifyPassword, ve
 import { errors } from '../../lib/errors';
 import { parse } from '../../lib/validate';
 import { audit } from '../audit/service';
+import { inviteUser } from '../auth/identity';
 import { seatCounts } from '../billing/service';
 
 /**
@@ -50,7 +51,7 @@ export async function createOrganization(
   input: z.infer<typeof createOrgRequest>,
   actor: PlatformActor | { kind: 'system' },
   opts: { adminPasswordHash?: string; adminTracking?: boolean } = {},
-): Promise<{ organization_id: string; admin_user_id: string; admin_initial_password: string }> {
+): Promise<{ organization_id: string; admin_user_id: string }> {
   const exists = await one(q, 'SELECT 1 FROM organizations WHERE slug = $1', [input.slug]);
   if (exists) throw errors.conflict('slug_taken', 'An organization with this slug already exists');
   const o = await one<{ id: string }>(q, 'INSERT INTO organizations (name, slug, region) VALUES ($1, $2, $3) RETURNING id', [
@@ -72,13 +73,13 @@ export async function createOrganization(
       now.toISOString(),
     ],
   );
-  const password = randomToken(12);
-  // The first admin doesn't track time by default: viewer seats are free.
+  // The first admin doesn't track time by default: viewer seats are free. Without a
+  // password hash (operator-created tenants) the admin is invited and chooses their own.
   const u = await one<{ id: string }>(
     q,
     `INSERT INTO users (organization_id, email, display_name, password_hash, org_role, tracking_enabled)
      VALUES ($1, $2, $3, $4, 'org_admin', $5) RETURNING id`,
-    [o!.id, input.admin_email, input.admin_name, opts.adminPasswordHash ?? (await hashPassword(password)), opts.adminTracking ?? false],
+    [o!.id, input.admin_email, input.admin_name, opts.adminPasswordHash ?? null, opts.adminTracking ?? false],
   );
   await audit(q, {
     organizationId: o!.id,
@@ -88,7 +89,7 @@ export async function createOrganization(
     targetId: o!.id,
     metadata: { plan: trial ? 'pro_trial' : input.plan },
   });
-  return { organization_id: o!.id, admin_user_id: u!.id, admin_initial_password: password };
+  return { organization_id: o!.id, admin_user_id: u!.id };
 }
 
 export async function platformRoutes(app: FastifyInstance, deps: Deps) {
@@ -150,7 +151,13 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/platform/v1/organizations', platform, async (req, reply) => {
     const actor = verified(req);
     const body = parse(createOrgRequest, req.body);
-    return reply.code(201).send(await withTx(pool, (tx) => createOrganization(deps, tx, body, actor)));
+    // Operators manage tenants but never hold a tenant password: the first admin is invited (review G1).
+    const { created, invite } = await withTx(pool, async (tx) => {
+      const c = await createOrganization(deps, tx, body, actor);
+      return { created: c, invite: await inviteUser(deps, tx, { orgId: c.organization_id, userId: c.admin_user_id, invitedBy: null }) };
+    });
+    await deps.email.send(invite);
+    return reply.code(201).send({ ...created, admin_invite_sent: true });
   });
 
   app.patch<{ Params: { id: string } }>('/platform/v1/organizations/:id/subscription', platform, async (req) => {
