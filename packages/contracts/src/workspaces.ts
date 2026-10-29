@@ -84,7 +84,7 @@ export interface AgentDownloadsResponse {
 /** The scheme the desktop app registers; `rdtrack://enroll?server=…&code=…` fills its sign-in form. */
 export const AGENT_LINK_SCHEME = 'rdtrack';
 export function enrollmentLink(server: string, code: string): string {
-  return `${AGENT_LINK_SCHEME}://enroll?${new URLSearchParams({ server, code })}`;
+  return `${AGENT_LINK_SCHEME}://enroll?server=${encodeURIComponent(server)}&code=${encodeURIComponent(code)}`;
 }
 
 // ───────────── auditor ─────────────
