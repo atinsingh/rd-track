@@ -14,9 +14,10 @@ import {
 import type { ChangePlanResponse } from '@rd/contracts';
 import { StripeClient, type StripeEvent } from '../../billing/stripe';
 import type { Deps, UserActor } from '../../context';
-import { one, type Queryable } from '../../db/pool';
+import { many, one, withTx, type Queryable } from '../../db/pool';
 import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { publish, type DomainEventInput } from '../engine/events';
 
 interface SubscriptionRow {
   organization_id: string;
@@ -429,4 +430,58 @@ export async function assertEntitlement(q: Queryable, orgId: string, entitlement
   const sub = await currentSubscription(q, orgId, now);
   const plan = sub.status === 'trialing' ? 'pro' : sub.plan;
   if (!PLANS[plan].entitlements.includes(entitlement)) throw errors.paymentRequired(`${what} is not included in your plan.`);
+}
+
+/**
+ * Hourly (engine slice 1): tells org admins about each billing milestone once — the trial
+ * ending in 7 days and in 1 day, a failed payment, 3 days of grace left, and inactive.
+ * Dedupe keys carry the dates, so a new trial or grace period notifies again.
+ */
+export async function runBillingLifecycle(deps: Pick<Deps, 'now' | 'pool'>): Promise<number> {
+  const now = deps.now();
+  const orgs = await many<{ organization_id: string }>(
+    deps.pool,
+    `SELECT organization_id FROM subscriptions WHERE status <> 'active' OR plan <> 'free'`,
+  );
+  let published = 0;
+  for (const { organization_id: orgId } of orgs) {
+    published += await withTx(deps.pool, async (q) => {
+      const sub = await currentSubscription(q, orgId, now); // applies due transitions first
+      const daysLeft = (iso: string) => (Date.parse(iso) - now.getTime()) / DAY;
+      const events: DomainEventInput[] = [];
+      if (sub.status === 'trialing' && sub.trial_ends_at) {
+        const left = daysLeft(sub.trial_ends_at);
+        const milestone = left <= 1 ? 1 : left <= 7 ? 7 : null;
+        if (milestone && left > 0) {
+          events.push({
+            organizationId: orgId,
+            type: 'billing.trial_ending',
+            data: { days_left: Math.max(1, Math.ceil(left)), ends_at: sub.trial_ends_at },
+            dedupeKey: `trial_ending:${milestone}:${sub.trial_ends_at}`,
+          });
+        }
+      }
+      if ((sub.status === 'past_due' || sub.status === 'grace') && sub.plan !== 'free') {
+        events.push({
+          organizationId: orgId,
+          type: 'billing.payment_failed',
+          data: { grace_ends_at: sub.grace_ends_at },
+          dedupeKey: `payment_failed:${sub.grace_ends_at ?? 'open'}`,
+        });
+      }
+      if (sub.status === 'grace' && sub.grace_ends_at) {
+        const left = daysLeft(sub.grace_ends_at);
+        if (left <= 3 && left > 0) {
+          events.push({ organizationId: orgId, type: 'billing.grace_ending', data: { grace_ends_at: sub.grace_ends_at }, dedupeKey: `grace_3d:${sub.grace_ends_at}` });
+        }
+      }
+      if (sub.status === 'inactive') {
+        events.push({ organizationId: orgId, type: 'billing.inactive', dedupeKey: `inactive:${sub.grace_ends_at ?? sub.trial_ends_at ?? 'unknown'}` });
+      }
+      let n = 0;
+      for (const e of events) if (await publish(q, e)) n++;
+      return n;
+    });
+  }
+  return published;
 }

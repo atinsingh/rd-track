@@ -24,6 +24,7 @@ import { signEd25519 } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { currentPlan, currentSubscription } from '../billing/service';
+import { notify } from '../engine/notify';
 
 interface ScopeRow {
   scope_type: ScopeType;
@@ -304,17 +305,13 @@ export async function publishPolicy(
   );
   await q.query('UPDATE policies SET current_version = $2 WHERE id = $1', [policy!.id, version]);
 
-  for (const userId of expandedFor) {
-    await q.query(
-      `INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'policy_expansion', $3, $4)`,
-      [
-        orgId,
-        userId,
-        'What is collected about you has changed',
-        `${actor.displayName} published a policy change: ${input.change_note}. See "What's collected" for details.`,
-      ],
-    );
-  }
+  await notify(q, orgId, expandedFor, {
+    kind: 'policy_expansion',
+    category: 'privacy',
+    title: 'What is collected about you has changed',
+    body: `${actor.displayName} published a policy change: ${input.change_note}. See "What's collected" for details.`,
+    link: '/me/privacy',
+  });
   await audit(q, {
     organizationId: orgId,
     actor,

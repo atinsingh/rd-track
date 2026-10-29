@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TERMS_VERSION } from '@rd/contracts';
 import { encodeForm, signStripePayload } from '../src/billing/stripe';
 import { makeOrg, testEnv, type TestEnv } from './helpers';
 
@@ -72,7 +73,7 @@ describe('self-serve signup', () => {
     const res = await env.app.inject({
       method: 'POST',
       url: '/v1/signup',
-      payload: { org_name: 'Acme Studio', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password' },
+      payload: { org_name: 'Acme Studio', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password', accept_terms: true },
     });
     expect(res.statusCode).toBe(202);
     expect(await env.deps.pool.query(`SELECT 1 FROM users WHERE email = 'ada@acme.test'`).then((r) => r.rowCount)).toBe(0);
@@ -95,11 +96,23 @@ describe('self-serve signup', () => {
     expect(JSON.parse(again.body).error.code).toBe('signup_link_invalid');
   });
 
+  it('needs the terms accepted, and records which version against the organization', async () => {
+    const without = await env.app.inject({
+      method: 'POST',
+      url: '/v1/signup',
+      payload: { org_name: 'No Terms', display_name: 'Bo', email: 'bo@noterms.test', password: 'a-long-enough-password' },
+    });
+    expect(without.statusCode).toBe(400);
+    const org = await env.deps.pool.query(`SELECT o.terms_version, o.terms_accepted_at IS NOT NULL AS accepted, u.email = 'ada@acme.test' AS by_signer
+      FROM organizations o JOIN users u ON u.id = o.terms_accepted_by WHERE o.name = 'Acme Studio'`);
+    expect(org.rows[0]).toEqual({ terms_version: TERMS_VERSION, accepted: true, by_signer: true });
+  });
+
   it("doesn't reveal whether an email already has an account", async () => {
     const res = await env.app.inject({
       method: 'POST',
       url: '/v1/signup',
-      payload: { org_name: 'Again', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password' },
+      payload: { org_name: 'Again', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password', accept_terms: true },
     });
     expect(res.statusCode).toBe(202);
     expect(env.email.sent.at(-1)!.subject).toMatch(/already have/);

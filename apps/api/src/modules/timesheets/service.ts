@@ -29,6 +29,8 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertCanView, assertSameOrgUser, isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
+import { notify as notifyPeople } from '../engine/notify';
 
 /**
  * Weekly timesheets (submit → approve/reject, approval locks the week), work limits and
@@ -478,12 +480,7 @@ export async function pendingTimesheets(deps: Deps, q: Queryable, actor: UserAct
 // ───────────────────────── state changes ─────────────────────────
 
 async function notify(q: Queryable, orgId: string, userId: string, title: string, body: string) {
-  await q.query(`INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'timesheet_review', $3, $4)`, [
-    orgId,
-    userId,
-    title,
-    body,
-  ]);
+  await notifyPeople(q, orgId, [userId], { kind: 'timesheet_review', category: 'my_requests', title, body, link: '/me/time' });
 }
 
 async function recordEvent(
@@ -543,6 +540,13 @@ export async function submitTimesheet(
     targetUserId: actor.userId,
     requestId,
     metadata: { period_start: periodStart, total_seconds: dto.totals.total_seconds },
+  });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'timesheet.submitted',
+    subjectUserId: actor.userId,
+    actorUserId: actor.userId,
+    data: { timesheet_id: row.id, user_name: who.display_name, period_start: periodStart },
   });
   return buildDto(deps, q, actor, who, periodStart, await sheetFor(q, actor.organizationId, actor.userId, periodStart));
 }

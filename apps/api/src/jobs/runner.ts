@@ -1,7 +1,9 @@
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
 import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
-import { snapshotSeats } from '../modules/billing/service';
+import { runBillingLifecycle, snapshotSeats } from '../modules/billing/service';
+import { publish } from '../modules/engine/events';
+import { sendNotificationEmail } from '../modules/engine/notify';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
 import { checkAllBudgets } from '../modules/money/budgets';
@@ -30,7 +32,13 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
       await withTx(deps.pool, async (tx) => {
         await deleteScreenshot(deps, tx, p.screenshot_id!, 'employee_request');
         if (p.request_id) {
-          await tx.query(`UPDATE deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1`, [p.request_id]);
+          const done = await tx.query<{ organization_id: string; requester_id: string }>(
+            `UPDATE deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1 AND status <> 'completed'
+             RETURNING organization_id, requester_id`,
+            [p.request_id],
+          );
+          const r = done.rows[0];
+          if (r) await publish(tx, { organizationId: r.organization_id, type: 'deletion_request.completed', subjectUserId: r.requester_id, data: { request_id: p.request_id } });
         }
       });
       return;
@@ -61,6 +69,12 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'time_off.accrue':
       await runAccruals(deps);
       return;
+    case 'notification.email':
+      await withTx(deps.pool, (tx) => sendNotificationEmail(deps, tx, p.notification_id!));
+      return;
+    case 'billing.lifecycle':
+      await runBillingLifecycle(deps);
+      return;
     default:
       throw new Error(`Unknown job kind ${job.kind}`);
   }
@@ -90,6 +104,7 @@ export async function scheduleRecurring(deps: Deps): Promise<void> {
     // Idempotent per period, so running it often only makes the monthly accrual timely.
     ['time_off.accrue', 6 * 3600_000],
     ['budgets.check', 600_000],
+    ['billing.lifecycle', 3600_000],
   ];
   for (const [kind, everyMs] of schedule) {
     const r = await deps.pool.query(`SELECT 1 FROM jobs WHERE kind = $1 AND status IN ('queued', 'running') LIMIT 1`, [kind]);

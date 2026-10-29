@@ -457,14 +457,6 @@ export interface AuditEventDTO {
   metadata: Record<string, unknown>;
   created_at: string;
 }
-export interface NotificationDTO {
-  id: string;
-  kind: string;
-  title: string;
-  body: string;
-  created_at: string;
-  read_at: string | null;
-}
 
 // ───────────────────────── billing ─────────────────────────
 
@@ -504,6 +496,8 @@ export const signupRequest = z.strictObject({
   display_name: z.string().trim().min(1).max(200),
   email: z.email().max(320),
   password: z.string().min(12).max(200),
+  /** The subscription terms and data processing agreement (TERMS_VERSION). */
+  accept_terms: z.literal(true, { error: 'Accept the terms and the data processing agreement to continue.' }),
 });
 export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).max(200) });
 export const changePlanRequest = z.strictObject({

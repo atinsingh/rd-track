@@ -5,6 +5,8 @@ export interface EmailMessage {
   to: string;
   subject: string;
   text: string;
+  /** Optional HTML alternative; the text part is always sent. */
+  html?: string;
 }
 
 /** Transactional email. Messages carry links, never tenant activity data. */
@@ -40,7 +42,9 @@ export class SesEmailSender implements EmailSender {
       new SendEmailCommand({
         FromEmailAddress: this.from,
         Destination: { ToAddresses: [m.to] },
-        Content: { Simple: { Subject: { Data: m.subject }, Body: { Text: { Data: m.text } } } },
+        Content: {
+          Simple: { Subject: { Data: m.subject }, Body: { Text: { Data: m.text }, ...(m.html ? { Html: { Data: m.html } } : {}) } },
+        },
       }),
     );
   }

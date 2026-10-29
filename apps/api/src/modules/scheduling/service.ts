@@ -11,12 +11,13 @@ import {
   type TeamCalendarResponse,
 } from '@rd/contracts';
 import type { z } from 'zod';
-import type { DeviceScheduleTodayResponse } from '@rd/contracts';
+import type { DeviceScheduleTodayResponse, NotificationCategory } from '@rd/contracts';
 import type { shiftCreateRequest, shiftOverrideRequest, shiftUpdateRequest, holidayCreateRequest } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { notify as notifyPeople } from '../engine/notify';
 import { currentSubscription } from '../billing/service';
 import { attendanceDay, leaveOn, scheduleDay, summarize, type LeaveRow, type OverrideRow, type PersonCalendar, type SessionSpan, type Settings, type ShiftRow } from './attendance';
 import { addDays, dateInTz, daysBetween, eachDate, isValidTimeZone, utcMidnight } from './tz';
@@ -64,8 +65,17 @@ export async function todayFor(deps: Pick<Deps, 'now'>, q: Queryable, orgId: str
   return dateInTz(deps.now().getTime(), await userTimezone(q, orgId, userId));
 }
 
+const NOTICE_ROUTE: Record<string, { category: NotificationCategory; link: string }> = {
+  schedule_change: { category: 'schedule', link: '/me/schedule' },
+  time_off_adjustment: { category: 'schedule', link: '/me/schedule' },
+  time_off_request: { category: 'approvals', link: '/approvals' },
+  time_off_review: { category: 'my_requests', link: '/me/schedule' },
+};
+
+/** Scheduling and time-off notices go through the one notification service. */
 export async function notify(q: Queryable, orgId: string, userId: string, kind: string, title: string, body: string) {
-  await q.query(`INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, $3, $4, $5)`, [orgId, userId, kind, title, body]);
+  const route = NOTICE_ROUTE[kind] ?? { category: 'my_requests' as const, link: '/me/schedule' };
+  await notifyPeople(q, orgId, [userId], { kind, title, body, ...route });
 }
 
 // ───────────── settings ─────────────

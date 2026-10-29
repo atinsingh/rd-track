@@ -7,6 +7,7 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
 import { emitEvent } from '../webhooks/service';
 import { settleIdleReassign } from '../idle/apply';
 import { assertWeekUnlocked } from '../timesheets/service';
@@ -91,8 +92,16 @@ export async function proposeCorrection(
   if (sub.status !== 'trialing' && !hasEntitlement(sub.plan, 'correction_approvals')) {
     await apply(q, r!.id);
     await q.query(`UPDATE time_corrections SET status = 'approved', reviewed_at = now(), review_note = 'Applied automatically' WHERE id = $1`, [r!.id]);
+  } else {
+    await submitted(q, actor.organizationId, actor.userId, r!.id, actor.displayName);
   }
   return get(q, r!.id);
+}
+
+/** Tells the reviewers a correction is waiting (engine: correction.submitted). */
+async function submitted(q: Queryable, orgId: string, userId: string, correctionId: string, userName?: string) {
+  const name = userName ?? (await one<{ display_name: string }>(q, 'SELECT display_name FROM users WHERE id = $1', [userId]))?.display_name ?? 'Someone';
+  await publish(q, { organizationId: orgId, type: 'correction.submitted', subjectUserId: userId, actorUserId: userId, data: { correction_id: correctionId, user_name: name } });
 }
 
 async function apply(q: Queryable, id: string) {
@@ -163,6 +172,8 @@ export async function proposeIdleReassign(
   if (sub.status !== 'trialing' && !hasEntitlement(sub.plan, 'correction_approvals')) {
     await apply(q, r!.id);
     await q.query(`UPDATE time_corrections SET status = 'approved', reviewed_at = now(), review_note = 'Applied automatically' WHERE id = $1`, [r!.id]);
+  } else {
+    await submitted(q, input.organizationId, input.userId, r!.id);
   }
   return r!.id;
 }
@@ -228,6 +239,13 @@ export async function reviewCorrection(
     targetId: id,
     targetUserId: c.user_id,
     requestId,
+  });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'correction.decided',
+    subjectUserId: c.user_id,
+    actorUserId: actor.userId,
+    data: { correction_id: id, approved: approve, reviewer_name: actor.displayName, note: note?.trim() || null },
   });
   return get(q, id);
 }

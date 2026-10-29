@@ -7,6 +7,7 @@ import { enrollmentCode, normalizeEnrollmentCode, randomToken, sha256Hex } from 
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertLicensedForTracking, currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
 import { assertInOrg } from '../org/service';
 import { orgRevision } from '../policy/service';
 
@@ -92,6 +93,12 @@ export async function enroll(
   };
 }
 
+/** OS permissions that limit what can be measured. Accessibility is not used by the agent. */
+const MEASURED_PERMISSIONS = [
+  ['input_monitoring', 'Input Monitoring', 'computer activity'],
+  ['screen_recording', 'Screen Recording', 'the screenshots your organization’s policy asks for'],
+] as const;
+
 export async function heartbeat(
   deps: Deps,
   q: Queryable,
@@ -100,6 +107,7 @@ export async function heartbeat(
 ): Promise<HeartbeatResponse> {
   const now = deps.now();
   const offset = now.getTime() - new Date(input.client_time).getTime();
+  const before = await one<{ name: string; permissions: Record<string, string> | null }>(q, 'SELECT name, permissions FROM devices WHERE id = $1', [device.deviceId]);
   await q.query(
     `UPDATE devices SET last_seen_at = $2, agent_version = $3, permissions = $4,
        applied_policy_revision = COALESCE($5, applied_policy_revision),
@@ -107,6 +115,18 @@ export async function heartbeat(
      WHERE id = $1`,
     [device.deviceId, now.toISOString(), input.agent_version, input.permissions, input.applied_policy_revision, Math.round(offset)],
   );
+  // A permission the agent needs was just turned off (or never granted): tell the person, once a day.
+  for (const [key, label, what] of MEASURED_PERMISSIONS) {
+    if (input.permissions[key] === 'denied' && before?.permissions?.[key] !== 'denied') {
+      await publish(q, {
+        organizationId: device.organizationId,
+        type: 'device.permission_missing',
+        subjectUserId: device.userId,
+        data: { device_id: device.deviceId, device_name: before?.name ?? 'Your computer', permission_label: label, what },
+        dedupeKey: `permission:${device.deviceId}:${key}:${now.toISOString().slice(0, 10)}`,
+      });
+    }
+  }
   if (input.applied_policy_revision !== null) {
     await q.query(
       `INSERT INTO policy_receipts (device_id, organization_id, revision) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
@@ -142,10 +162,10 @@ export async function listDevices(q: Queryable, orgId: string): Promise<DeviceDT
 /** IAM-05 / DEV-04: revocation is immediate; open sessions on the device stop. */
 export async function revokeDevice(deps: Deps, q: Queryable, actor: UserActor, deviceId: string, requestId?: string) {
   const now = deps.now().toISOString();
-  const d = await one<{ user_id: string }>(
+  const d = await one<{ user_id: string; name: string }>(
     q,
     `UPDATE devices SET credential_status = 'revoked', revoked_at = $3
-     WHERE id = $1 AND organization_id = $2 AND credential_status = 'active' RETURNING user_id`,
+     WHERE id = $1 AND organization_id = $2 AND credential_status = 'active' RETURNING user_id, name`,
     [deviceId, actor.organizationId, now],
   );
   if (!d) {
@@ -173,5 +193,12 @@ export async function revokeDevice(deps: Deps, q: Queryable, actor: UserActor, d
     targetUserId: d.user_id,
     requestId,
     metadata: { stopped_sessions: open.length },
+  });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'device.revoked',
+    subjectUserId: d.user_id,
+    actorUserId: actor.userId,
+    data: { device_id: deviceId, device_name: d.name },
   });
 }

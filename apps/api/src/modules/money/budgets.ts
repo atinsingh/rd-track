@@ -13,6 +13,7 @@ import { many, one, withTx, type Queryable } from '../../db/pool';
 import { withScope } from '../../db/tenant-scope';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { notify } from '../engine/notify';
 import { managedProjectIds } from '../authz';
 import { assertInOrg } from '../org/service';
 import { assertMoneyPlan, groupSeconds, hasMoneyPlan, timeWithBillRates } from './time';
@@ -186,16 +187,16 @@ export async function checkBudget(deps: Pick<Deps, 'now'>, q: Queryable, b: Budg
   const u = await usage(q, b, deps.now());
   const due = b.alert_thresholds.filter((t) => u.used_percent >= t);
   if (due.length === 0) return 0;
-  const recipients = (
-    await many<{ id: string }>(
-      q,
-      `SELECT id FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')
-       UNION
-       SELECT pm.user_id FROM project_memberships pm JOIN users u ON u.id = pm.user_id
-       WHERE pm.organization_id = $1 AND pm.project_id = $2 AND pm.role = 'manager' AND pm.valid_to IS NULL AND u.status = 'active'`,
-      [b.organization_id, b.project_id],
-    )
-  ).map((r) => r.id);
+  // Project managers open the project report; admins who don't manage it open Rates and budgets.
+  const recipients = await many<{ id: string; manages: boolean }>(
+    q,
+    `SELECT pm.user_id AS id, true AS manages FROM project_memberships pm JOIN users u ON u.id = pm.user_id
+     WHERE pm.organization_id = $1 AND pm.project_id = $2 AND pm.role = 'manager' AND pm.valid_to IS NULL AND u.status = 'active'
+     UNION
+     SELECT id, false FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')
+       AND id NOT IN (SELECT user_id FROM project_memberships WHERE project_id = $2 AND role = 'manager' AND valid_to IS NULL)`,
+    [b.organization_id, b.project_id],
+  );
   const used = b.kind === 'hours' ? formatDuration(u.used_seconds) : amountText(b, u.used_cents!);
   const limit = b.kind === 'hours' ? formatDuration(b.limit_value) : amountText(b, b.limit_value);
   const when = b.resets === 'monthly' ? ' this month' : '';
@@ -217,15 +218,9 @@ export async function checkBudget(deps: Pick<Deps, 'now'>, q: Queryable, b: Budg
   if (b.stop_at_budget && top >= 100) {
     body += " New sessions on this project can't be started until the budget is raised or resets. Sessions already running are not stopped.";
   }
-  for (const userId of recipients) {
-    await q.query(`INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'project_budget', $3, $4)`, [
-      b.organization_id,
-      userId,
-      title,
-      body,
-    ]);
-    sent++;
-  }
+  const note = { kind: 'project_budget', category: 'budgets' as const, title, body };
+  sent += await notify(q, b.organization_id, recipients.filter((r) => r.manages).map((r) => r.id), { ...note, link: `/projects?project=${b.project_id}` });
+  sent += await notify(q, b.organization_id, recipients.filter((r) => !r.manages).map((r) => r.id), { ...note, link: '/admin/rates' });
   return sent;
 }
 

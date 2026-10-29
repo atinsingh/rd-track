@@ -3,9 +3,12 @@ import {
   exportCreateRequest,
   reviewRequest,
   timeCorrectionRequest,
+  notificationPreferencesUpdate,
   type DirectoryPerson,
   type DirectoryResponse,
   type MemberVisibility,
+  type NotificationPreferencesResponse,
+  type NotificationsResponse,
 } from '@rd/contracts';
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
@@ -22,7 +25,8 @@ import { myCorrections, pendingForReviewer, proposeCorrection, reviewCorrection 
 import { createExport, getExport, listExports } from './exports/service';
 import { listProjects, projectsForUser } from './org/service';
 import { myPolicy, resolveFor } from './policy/service';
-import { listNotifications, markNotificationRead, requestDeletion } from './privacy/service';
+import { requestDeletion } from './privacy/service';
+import { listNotifications, markAllRead, markRead, preferencesFor, unreadCount, updatePreferences } from './engine/notify';
 import { listScreenshots, viewUrl } from './screenshots/service';
 
 type RangeReq = FastifyRequest<{ Querystring: { from?: string; to?: string; tz?: string } }>;
@@ -58,10 +62,23 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     const a = userOf(req);
     return { items: await projectsForUser(pool, a.organizationId, a.userId) };
   });
-  app.get('/v1/me/notifications', user, async (req) => ({ items: await listNotifications(pool, userOf(req).userId) }));
+  // Engine: the person's own notifications and how they want to get them.
+  app.get<{ Querystring: { unread?: string } }>('/v1/me/notifications', user, async (req): Promise<NotificationsResponse> =>
+    listNotifications(pool, userOf(req).userId, { unreadOnly: req.query.unread === '1' || req.query.unread === 'true' }),
+  );
+  app.get('/v1/me/notifications/unread-count', user, async (req) => ({ unread: await unreadCount(pool, userOf(req).userId) }));
   app.post<{ Params: { id: string } }>('/v1/me/notifications/:id/read', user, async (req) => {
-    await markNotificationRead(pool, userOf(req).userId, req.params.id);
+    await markRead(pool, userOf(req).userId, parse(z.uuid(), req.params.id));
     return { ok: true };
+  });
+  app.post('/v1/me/notifications/read-all', user, async (req) => ({ marked: await markAllRead(pool, userOf(req).userId) }));
+  app.get('/v1/me/notification-preferences', user, async (req): Promise<NotificationPreferencesResponse> => ({
+    items: await preferencesFor(pool, userOf(req).userId),
+  }));
+  app.put('/v1/me/notification-preferences', user, async (req): Promise<NotificationPreferencesResponse> => {
+    const a = userOf(req);
+    const body = parse(notificationPreferencesUpdate, req.body);
+    return { items: await withTx(pool, (tx) => updatePreferences(tx, a.organizationId, a.userId, body.items)) };
   });
   app.get('/v1/me/corrections', user, async (req) => ({ items: await myCorrections(pool, userOf(req)) }));
   app.post('/v1/me/time-corrections', user, async (req, reply) => {
