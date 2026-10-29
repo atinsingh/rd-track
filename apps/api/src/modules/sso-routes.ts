@@ -10,7 +10,8 @@ import {
   type SsoSettings,
   type SsoStartResponse,
 } from '@rd/contracts';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { PoolClient } from 'pg';
 import { z } from 'zod';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
@@ -20,6 +21,7 @@ import { parse } from '../lib/validate';
 import { audit } from './audit/service';
 import { createSession } from './auth/service';
 import { createScimToken, revokeScimToken } from './scim/service';
+import { spFor, spMetadata } from './sso/saml';
 import * as sso from './sso/service';
 
 /** Ties a sign-in at the identity provider to the browser that started it. */
@@ -64,13 +66,13 @@ export async function ssoRoutes(app: FastifyInstance, deps: Deps) {
     const browser = browserCookie(reply);
     return { redirect_url: await withTx(pool, (tx) => sso.startSignIn(deps, tx, email, browser, return_to)) };
   });
-  app.get<{ Querystring: Record<string, string | undefined> }>('/v1/auth/sso/callback', limited, async (req, reply) => {
-    const q = req.query;
+  /** Ends a sign-in at the identity provider: a session (or a passed test), or back to where the failure is explained. */
+  const finish = async (req: FastifyRequest, reply: FastifyReply, complete: (tx: PoolClient, browser: string | undefined) => Promise<sso.CallbackResult>) => {
     const browser = req.cookies[BROWSER_COOKIE];
     reply.clearCookie(BROWSER_COOKIE, { path: '/v1/auth/sso' });
     try {
       const r = await withTx(pool, async (tx) => {
-        const done = await sso.completeSignIn(deps, tx, { state: q.state, code: q.code, error: q.error, browser }, req.id);
+        const done = await complete(tx, browser);
         if (done.kind === 'tested') return { to: '/admin/sso?test=ok' };
         const token = await createSession(deps, tx, done.userId, done.orgId, true);
         await audit(tx, { organizationId: done.orgId, actor: { kind: 'system' }, action: 'auth.login', targetType: 'user', targetId: done.userId, targetUserId: done.userId, requestId: req.id, metadata: { via: 'sso' } });
@@ -85,7 +87,40 @@ export async function ssoRoutes(app: FastifyInstance, deps: Deps) {
       }
       throw e;
     }
+  };
+
+  // OpenID Connect: the provider sends the browser back here with a code.
+  app.get<{ Querystring: Record<string, string | undefined> }>('/v1/auth/sso/callback', limited, async (req, reply) => {
+    const q = req.query;
+    return finish(req, reply, (tx, browser) => sso.completeSignIn(deps, tx, { state: q.state, code: q.code, error: q.error, browser }, req.id));
   });
+
+  // SAML: Track's metadata, for the organization's provider to import. Its URL is also Track's entity ID.
+  app.get<{ Params: { orgId: string } }>('/v1/auth/sso/saml/:orgId', limited, async (req, reply) => {
+    const orgId = parse(z.uuid(), req.params.orgId);
+    return reply
+      .header('content-type', 'application/samlmetadata+xml; charset=utf-8')
+      .header('content-disposition', 'inline; filename="rd-track-saml.xml"')
+      .send(spMetadata(spFor(deps.config.webUrl, orgId)));
+  });
+
+  // SAML answers arrive as a cross-site form post: accept that body type on this route only.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string', bodyLimit: 512 * 1024 }, (_req, body, done) => {
+    done(null, Object.fromEntries(new URLSearchParams(body as string)));
+  });
+  app.post<{ Params: { orgId: string }; Body: Record<string, string | undefined> }>('/v1/auth/sso/saml/:orgId/acs', limited, async (req, reply) => {
+    const orgId = parse(z.uuid(), req.params.orgId);
+    const body = req.body ?? {};
+    const relayState = typeof body.RelayState === 'string' ? body.RelayState : undefined;
+    const ok = await withTx(pool, (tx) => sso.receiveSamlResponse(deps, tx, orgId, { relayState, samlResponse: body.SAMLResponse }, req.id));
+    // Sign-ins started from the provider's app list aren't accepted: nothing ties them to a browser.
+    if (!ok) return land(reply, `/login?sso_error=${relayState ? 'expired' : 'start_in_track'}`);
+    // The browser cookie wasn't sent with the cross-site post; it is with this same-site GET.
+    return reply.redirect(`/v1/auth/sso/saml/finish?${new URLSearchParams({ state: relayState! })}`, 303);
+  });
+  app.get<{ Querystring: Record<string, string | undefined> }>('/v1/auth/sso/saml/finish', limited, async (req, reply) =>
+    finish(req, reply, (tx, browser) => sso.completeSamlSignIn(deps, tx, { state: req.query.state, browser }, req.id)),
+  );
 
   // ───────── settings (org admin) ─────────
   app.get('/v1/admin/sso', user, async (req): Promise<SsoSettings> => sso.ssoSettings(deps, pool, admin(req).organizationId));

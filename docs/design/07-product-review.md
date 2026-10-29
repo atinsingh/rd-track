@@ -229,7 +229,7 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      (an existing team of the same name is claimed; managers keep their role). The
      directory's changes are audited as "Directory sync". Migration 017; the load
      balancer routes `/scim/*` to the API.
-   - Still open: SAML (OIDC covers the main providers), MDM packages and tenant logo (P2).
+   - SAML 2.0 followed in slice 9; MDM packages and the tenant logo in slice 8.
 
    **7 done 2026-10-29 (G10)**: the desktop app updates from the server it is enrolled with
    (`GET /v1/device/update`, device credential, migration 023), a minute after start and
@@ -257,6 +257,32 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      alone never connects a computer, and nothing is recorded until the person starts a
      session. "I have a code from my administrator" keeps the usual way.
    - G29 was already gone: policy changes notify people through the notify service.
+
+   **9 done 2026-10-29 (G26, Pro)**: single sign-on through a SAML 2.0 provider (AD FS,
+   Entra ID, Okta, Google Workspace, OneLogin, JumpCloud…), next to OpenID Connect. An
+   organization has one connection and picks the protocol; switching replaces the other's
+   details (migration 025).
+   - *Setting up*: the admin pastes the provider's metadata XML (or its entity ID,
+     HTTP-Redirect sign-in URL and signing certificate by hand). Track shows its own entity
+     ID, reply URL (ACS) and a metadata URL the provider can import. Each organization has
+     its own: `/v1/auth/sso/saml/{org}` and `…/{org}/acs`. Test-before-turn-on, "Require
+     single sign-on", verified domains and creating accounts on first sign-in work exactly
+     as with OpenID Connect. A new provider or sign-in URL goes back to a draft; a new
+     certificate alone doesn't, so a provider rolling its key can list both and nobody is
+     locked out. The page warns 30 days before the last certificate expires.
+   - *Signing in*: Track sends an unsigned AuthnRequest over HTTP-Redirect with the
+     sign-in state as RelayState. The answer must be signed (the Response or its
+     assertion) by one of the stored certificates, from the provider's entity ID, for
+     Track's entity ID, in response to that very request, and recent. The provider posts
+     it cross-site, so the browser cookie isn't sent: Track checks it, keeps the outcome
+     with the sign-in state, and sends the browser to a same-site page that finishes the
+     sign-in only in the browser that started it, once. A persistent name ID is bound to
+     the person like an OpenID subject; a transient one isn't (they're matched by
+     address). Sign-ins started from the provider's app list are turned away with an
+     explanation, since nothing ties them to a browser; encrypted assertions aren't
+     accepted (TLS protects the answer, and Track publishes no encryption key).
+   - Libraries: `@node-saml/node-saml` (signature, audience, InResponseTo and time checks)
+     and `@xmldom/xmldom` for metadata; no DTDs are read.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

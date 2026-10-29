@@ -26,12 +26,42 @@ export interface SsoDomainDTO {
   txt_value: string;
 }
 
-export const ssoConnectionRequest = z.strictObject({
+const oidcConnection = z.strictObject({
+  protocol: z.literal('oidc'),
   issuer: z.url().max(500),
   client_id: z.string().trim().min(1).max(500),
   /** Required when creating; leave out to keep the stored secret. */
   client_secret: z.string().min(1).max(2000).optional(),
 });
+
+/** Largest IdP metadata document accepted (some carry several certificates and logos). */
+export const SAML_METADATA_MAX = 200_000;
+
+/**
+ * A SAML 2.0 provider: paste its metadata XML, or give the three values by hand. Track
+ * reads the entity ID, the HTTP-Redirect sign-in URL and the signing certificates from it.
+ */
+const samlConnection = z
+  .strictObject({
+    protocol: z.literal('saml'),
+    metadata_xml: z.string().trim().min(1).max(SAML_METADATA_MAX).optional(),
+    idp_entity_id: z.string().trim().min(1).max(500).optional(),
+    sso_url: z.url().max(2000).optional(),
+    /** PEM or bare base64; several when the provider is rolling its key. */
+    certificate: z.string().trim().min(1).max(50_000).optional(),
+  })
+  .refine((v) => v.metadata_xml || (v.idp_entity_id && v.sso_url && v.certificate), {
+    message: "Paste the provider's metadata, or enter its entity ID, sign-in URL and certificate",
+  });
+
+export const ssoConnectionRequest = z.preprocess(
+  // Before SAML there was only OpenID Connect, sent without a protocol.
+  (v) => (v && typeof v === 'object' && !('protocol' in v) ? { ...v, protocol: 'oidc' } : v),
+  z.discriminatedUnion('protocol', [oidcConnection, samlConnection]),
+);
+export type SsoConnectionRequest = z.infer<typeof ssoConnectionRequest>;
+
+export type SsoProtocol = 'oidc' | 'saml';
 
 export const ssoOptionsRequest = z.strictObject({
   /** On once a test sign-in has worked; off returns the connection to a draft. */
@@ -40,9 +70,20 @@ export const ssoOptionsRequest = z.strictObject({
   jit_provisioning: z.boolean().optional(),
 });
 
+export interface SamlIdpDTO {
+  entity_id: string;
+  sso_url: string;
+  /** The signing certificates Track checks assertions against. */
+  certificates: { subject: string; expires_at: string }[];
+}
+
 export interface SsoConnectionDTO {
-  issuer: string;
-  client_id: string;
+  protocol: SsoProtocol;
+  /** OpenID Connect only. */
+  issuer: string | null;
+  client_id: string | null;
+  /** SAML only. */
+  saml: SamlIdpDTO | null;
   status: 'draft' | 'active';
   enforced: boolean;
   jit_provisioning: boolean;
@@ -64,8 +105,10 @@ export const scimTokenRequest = z.strictObject({ label: z.string().trim().min(1)
 export interface SsoSettings {
   connection: SsoConnectionDTO | null;
   domains: SsoDomainDTO[];
-  /** Paste into the identity provider as the sign-in redirect URI. */
+  /** Paste into the identity provider as the sign-in redirect URI (OpenID Connect). */
   redirect_uri: string;
+  /** What a SAML provider needs about Track: its entity ID, where to post answers, and metadata to import. */
+  saml: { entity_id: string; acs_url: string; metadata_url: string };
   scim: { base_url: string; tokens: ScimTokenDTO[] };
 }
 
@@ -100,5 +143,6 @@ export const SSO_ERRORS = {
   deactivated: 'Your Track account is deactivated. Ask your admin.',
   wrong_person: 'The test sign-in has to be you: sign in to your identity provider as yourself.',
   seats: 'Your organization has no free seats. Ask your admin.',
+  start_in_track: 'Start signing in from the Track sign-in page rather than from your identity provider’s app list.',
 } as const;
 export type SsoErrorCode = keyof typeof SSO_ERRORS;
