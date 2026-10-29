@@ -37,6 +37,42 @@ export interface DayInsight {
   long_day: boolean;
 }
 
+/**
+ * Where expected hours come from (Stage 4 F6): the person's schedule, else their work
+ * limits, else the organization's standard day (Mon–Fri). Holidays expect nothing and
+ * approved time off is taken off. Never a target: over and under are shown in blue and
+ * orange, never red.
+ */
+export type ExpectedSource = 'schedule' | 'work_limits' | 'default';
+
+export interface ExpectedDay {
+  date: string;
+  expected_seconds: number;
+  tracked_seconds: number;
+  focus_seconds: number;
+  source: ExpectedSource;
+  holiday: string | null;
+  /** Approved time off taken off this day's expected hours. */
+  leave_seconds: number;
+}
+
+export interface ExpectedHours {
+  expected_seconds: number;
+  tracked_seconds: number;
+  /** tracked ÷ expected, or null when nothing was expected. */
+  percent: number | null;
+  /** The source used on most days. */
+  source: ExpectedSource;
+  /** e.g. "Mon–Fri 09:00–17:30", when the schedule is the source. */
+  schedule: string | null;
+  /** The standard or work-limit day in hours, when that is the source. */
+  day_hours: number | null;
+  days: ExpectedDay[];
+}
+
+/** Within ±10 % of expected counts as "about as expected" in team counts. */
+export const UTILIZATION_BAND_PERCENT = 10;
+
 export interface PersonalInsights {
   from: string;
   to: string;
@@ -51,6 +87,7 @@ export interface PersonalInsights {
   longest_stretch_seconds: number;
   work_apps: { category: AppCategory | 'uncategorized'; seconds: number }[];
   days: DayInsight[];
+  expected: ExpectedHours;
 }
 
 export interface TeamInsights {
@@ -69,6 +106,17 @@ export interface TeamInsights {
   people_with_long_days: number;
   people_with_after_hours: number;
   focus_share_percent: number | null;
+  /** Tracked against expected hours: averages, and counts of people — never names. */
+  utilization: {
+    expected_seconds: number;
+    tracked_seconds: number;
+    percent: number | null;
+    under: number;
+    about: number;
+    over: number;
+    /** People with nothing expected in the period (all leave, holidays). */
+    none: number;
+  };
 }
 
 export const appCategoryRequest = z.strictObject({

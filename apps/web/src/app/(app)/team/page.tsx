@@ -2,9 +2,10 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import type { CorrectionDTO, MemberReportRow, TeamOvertimeReport, TeamReport } from '@rd/contracts';
+import { UTILIZATION_BAND_PERCENT, type CorrectionDTO, type MemberReportRow, type TeamOvertimeReport, type TeamReport } from '@rd/contracts';
 import type { Range } from '@/lib/api';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
+import { expectedStyles } from '@/components/insights/Expected';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
 import { Stats } from '@/components/Stats';
 import { StatusBadge, memberTimesheetHref } from '@/components/timesheet/TimesheetView';
@@ -169,26 +170,48 @@ function TeamInsightsCard({ teamId, range, tz, isAdmin }: { teamId: string; rang
       ) : !insights.data ? (
         <Loading label="Loading team insights" />
       ) : (
-        <Stats
-          items={[
-            { label: 'Tracked / person', value: formatDuration(insights.data.per_person.tracked_seconds) },
-            {
-              label: 'Focus / person',
-              value: formatDuration(insights.data.per_person.focus_seconds),
-              note: `${percentOrDash(insights.data.focus_share_percent)} of tracked`,
-            },
-            {
-              label: 'Outside hours / person',
-              value: formatDuration(insights.data.per_person.after_hours_seconds),
-              note: `${insights.data.people_with_after_hours} of ${insights.data.member_count} people`,
-            },
-            {
-              label: 'People with a long day',
-              value: `${insights.data.people_with_long_days} / ${insights.data.member_count}`,
-              note: 'More than 10 hours tracked',
-            },
-          ]}
-        />
+        <>
+          <Stats
+            items={[
+              {
+                label: 'Tracked vs expected',
+                value: percentOrDash(insights.data.utilization.percent),
+                note: `${formatDuration(insights.data.utilization.tracked_seconds)} of ${formatDuration(insights.data.utilization.expected_seconds)} per person`,
+              },
+              {
+                label: 'Focus / person',
+                value: formatDuration(insights.data.per_person.focus_seconds),
+                note: `${percentOrDash(insights.data.focus_share_percent)} of tracked`,
+              },
+              {
+                label: 'Outside hours / person',
+                value: formatDuration(insights.data.per_person.after_hours_seconds),
+                note: `${insights.data.people_with_after_hours} of ${insights.data.member_count} people`,
+              },
+              {
+                label: 'People with a long day',
+                value: `${insights.data.people_with_long_days} / ${insights.data.member_count}`,
+                note: 'More than 10 hours tracked',
+              },
+            ]}
+          />
+          <p className={expectedStyles.counts}>
+            <span>
+              <span className={expectedStyles.under} aria-hidden="true" />
+              {insights.data.utilization.under} under expected
+            </span>
+            <span>
+              <span className={expectedStyles.about} aria-hidden="true" />
+              {insights.data.utilization.about} about as expected (±{UTILIZATION_BAND_PERCENT}%)
+            </span>
+            <span>
+              <span className={expectedStyles.over} aria-hidden="true" />
+              {insights.data.utilization.over} over
+            </span>
+            {insights.data.utilization.none ? <span>{insights.data.utilization.none} with nothing expected</span> : null}
+            <span className="muted">Counts only — never who.</span>
+          </p>
+        </>
       )}
     </Card>
   );

@@ -90,7 +90,7 @@ interface LimitRow {
   effective_from: string;
 }
 
-async function limitRows(q: Queryable, orgId: string, userIds: string[]): Promise<LimitRow[]> {
+export async function limitRows(q: Queryable, orgId: string, userIds: string[]): Promise<LimitRow[]> {
   return many<LimitRow>(
     q,
     `SELECT user_id, daily_minutes, weekly_minutes, effective_from::text AS effective_from FROM work_limits

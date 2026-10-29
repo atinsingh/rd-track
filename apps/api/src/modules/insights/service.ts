@@ -1,8 +1,12 @@
 import {
   DEFAULT_WORKING_HOURS,
   MIN_INSIGHTS_GROUP_SIZE,
+  UTILIZATION_BAND_PERCENT,
   type AppCategory,
   type AppCategoryDTO,
+  type DayInsight,
+  type ExpectedDay,
+  type ExpectedHours,
   type PersonalInsights,
   type TeamInsights,
 } from '@rd/contracts';
@@ -10,7 +14,11 @@ import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { getSettings, loadCalendars } from '../scheduling/service';
+import { addDays, dateInTz } from '../scheduling/tz';
+import { limitRows, resolveLimits } from '../timesheets/service';
 import { dailyInsights, focusBlocks, summarize, type InsightBucket } from './compute';
+import { expectedOn, summarizeExpected } from './expected';
 
 interface Range {
   from: string;
@@ -43,6 +51,40 @@ export async function categoryMap(q: Queryable, orgId: string, userId: string): 
   const m = new Map<string, AppCategory>();
   for (const r of rows) m.set(r.app_identifier, r.category); // team rows come last and win
   return m;
+}
+
+/** Local dates covered by `r` in `tz`. */
+function datesIn(r: Range, tz: string): string[] {
+  const first = dateInTz(Date.parse(r.from), tz);
+  const last = dateInTz(Date.parse(r.to) - 1, tz);
+  const out: string[] = [];
+  for (let d = first; d <= last && out.length < 400; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
+/** Expected hours for each person over the range, matched with what they tracked each day. */
+async function expectedFor(q: Queryable, orgId: string, tracked: Map<string, DayInsight[]>, r: Range, tz: string): Promise<Map<string, ExpectedHours>> {
+  const users = [...tracked.keys()];
+  const dates = datesIn(r, tz);
+  const out = new Map<string, ExpectedHours>();
+  if (dates.length === 0) return out;
+  const [cals, settings, limits] = await Promise.all([
+    loadCalendars(q, orgId, users, dates[0]!, dates[dates.length - 1]!),
+    getSettings(q, orgId),
+    limitRows(q, orgId, users),
+  ]);
+  const dayHours = Number(settings.default_day_hours);
+  for (const u of users) {
+    const cal = cals.get(u)!;
+    const byDate = new Map((tracked.get(u) ?? []).map((d) => [d.date, d]));
+    const days: ExpectedDay[] = dates.map((date) => ({
+      ...expectedOn(cal, date, resolveLimits(limits, u, date), dayHours),
+      tracked_seconds: byDate.get(date)?.tracked_seconds ?? 0,
+      focus_seconds: byDate.get(date)?.focus_seconds ?? 0,
+    }));
+    out.set(u, summarizeExpected(days, cal, resolveLimits(limits, u, dates[dates.length - 1]!), dayHours));
+  }
+  return out;
 }
 
 export async function personalInsights(q: Queryable, orgId: string, userId: string, r: Range, tz: string): Promise<PersonalInsights> {
@@ -81,6 +123,7 @@ export async function personalInsights(q: Queryable, orgId: string, userId: stri
     longest_stretch_seconds: s.longest_stretch_seconds,
     work_apps: [...byCategory].map(([category, seconds]) => ({ category, seconds })).sort((a, b) => b.seconds - a.seconds),
     days,
+    expected: (await expectedFor(q, orgId, new Map([[userId, days]]), r, tz)).get(userId)!,
   };
 }
 
@@ -117,7 +160,13 @@ export async function teamInsights(
   const buckets = await bucketsFor(q, actor.organizationId, members, r);
   const perUser = new Map<string, InsightBucket[]>();
   for (const b of buckets) perUser.set(b.user_id, [...(perUser.get(b.user_id) ?? []), b]);
-  const summaries = members.map((u) => summarize(dailyInsights(perUser.get(u) ?? [], tz, DEFAULT_WORKING_HOURS)));
+  const daily = new Map(members.map((u) => [u, dailyInsights(perUser.get(u) ?? [], tz, DEFAULT_WORKING_HOURS)]));
+  const summaries = members.map((u) => summarize(daily.get(u)!));
+  const expected = [...(await expectedFor(q, actor.organizationId, daily, r, tz)).values()];
+  const band = (e: ExpectedHours) =>
+    e.percent === null ? 'none' : e.percent < 100 - UTILIZATION_BAND_PERCENT ? 'under' : e.percent > 100 + UTILIZATION_BAND_PERCENT ? 'over' : 'about';
+  const expectedTotal = expected.reduce((n, e) => n + e.expected_seconds, 0);
+  const trackedForExpected = expected.reduce((n, e) => n + e.tracked_seconds, 0);
   const total = (f: (s: (typeof summaries)[number]) => number) => summaries.reduce((n, s) => n + f(s), 0);
   const tracked = total((s) => s.tracked_seconds);
   const focus = total((s) => s.focus_seconds);
@@ -145,6 +194,15 @@ export async function teamInsights(
     people_with_long_days: summaries.filter((s) => s.long_days > 0).length,
     people_with_after_hours: summaries.filter((s) => s.after_hours_seconds > 0).length,
     focus_share_percent: tracked > 0 ? Math.round((focus / tracked) * 100) : null,
+    utilization: {
+      expected_seconds: Math.round(expectedTotal / members.length),
+      tracked_seconds: Math.round(trackedForExpected / members.length),
+      percent: expectedTotal > 0 ? Math.round((trackedForExpected / expectedTotal) * 100) : null,
+      under: expected.filter((e) => band(e) === 'under').length,
+      about: expected.filter((e) => band(e) === 'about').length,
+      over: expected.filter((e) => band(e) === 'over').length,
+      none: expected.filter((e) => band(e) === 'none').length,
+    },
   };
 }
 

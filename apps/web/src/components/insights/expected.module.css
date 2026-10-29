@@ -1,0 +1,129 @@
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.swatchFocus,
+.swatchOther {
+  width: 12px;
+  height: 12px;
+}
+.swatchFocus {
+  background: var(--series-1);
+}
+.swatchOther {
+  background: var(--series-1-light);
+}
+.swatchExpected {
+  width: 14px;
+  border-top: 2px dashed var(--text);
+}
+.chart {
+  display: grid;
+  gap: 18px;
+  align-items: end;
+  height: 210px;
+  border-bottom: 1px solid var(--text);
+  padding: 0 8px;
+}
+.col {
+  position: relative;
+  height: 210px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+.total {
+  display: block;
+  margin: 2px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.stack {
+  width: 100%;
+  max-width: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.focus {
+  background: var(--series-1);
+}
+.other {
+  background: var(--series-1-light);
+}
+.expected {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px dashed var(--text);
+}
+.labels {
+  display: grid;
+  gap: 18px;
+  padding: 0 8px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-3);
+}
+.note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-2);
+  background: var(--rule-soft);
+  padding: 10px 12px;
+}
+.meter {
+  position: relative;
+  display: block;
+  height: 8px;
+  background: var(--data-track);
+  margin-top: 6px;
+}
+.meterFill {
+  display: block;
+  height: 8px;
+  background: var(--series-1);
+}
+.meterMark {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 16px;
+  margin-left: -1px;
+  background: var(--text);
+}
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.under,
+.about,
+.over {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+}
+.under {
+  background: var(--series-1);
+}
+.about {
+  background: var(--data-3);
+}
+.over {
+  background: var(--series-2);
+}

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { APP_CATEGORY_LABELS, type PersonalInsights } from '@rd/contracts';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
+import { ExpectedChart, ExpectedMeter, differenceText } from '@/components/insights/Expected';
 import { Stats, statStyles } from '@/components/Stats';
 import { Empty, Resource } from '@/components/ui/DataState';
 import { Segmented } from '@/components/ui/Field';
@@ -16,11 +17,25 @@ import { useApi } from '@/lib/useApi';
 type Period = 'week' | 'four_weeks';
 
 function Summary({ d }: { d: PersonalInsights }) {
+  const e = d.expected;
   return (
     <Card title="Overview">
       <Stats
         items={[
-          { label: 'Tracked', value: formatDuration(d.tracked_seconds) },
+          {
+            label: 'Tracked vs expected',
+            value: (
+              <>
+                {formatDuration(e.tracked_seconds)} <span className="small secondary">of {formatDuration(e.expected_seconds)}</span>
+              </>
+            ),
+            note: (
+              <>
+                <ExpectedMeter e={e} />
+                {e.percent === null ? 'Nothing expected in this period' : `${e.percent}% of ${e.source === 'schedule' ? 'your schedule' : 'expected'} · ${differenceText(e)}`}
+              </>
+            ),
+          },
           {
             label: 'Focus time',
             value: formatDuration(d.focus.seconds),
@@ -75,7 +90,16 @@ function WorkApps({ d }: { d: PersonalInsights }) {
   );
 }
 
+function AgainstExpected({ d, byWeek }: { d: PersonalInsights; byWeek: boolean }) {
+  return (
+    <Card title={d.expected.source === 'schedule' ? 'Each day against your schedule' : 'Each day against your expected hours'}>
+      <ExpectedChart e={d.expected} byWeek={byWeek} />
+    </Card>
+  );
+}
+
 function Days({ d }: { d: PersonalInsights }) {
+  const expected = new Map(d.expected.days.map((x) => [x.date, x.expected_seconds]));
   return (
     <Card title="By day">
       {d.days.length === 0 ? (
@@ -88,6 +112,9 @@ function Days({ d }: { d: PersonalInsights }) {
                 <th scope="col">Day</th>
                 <th scope="col" className={numClass}>
                   Tracked
+                </th>
+                <th scope="col" className={numClass}>
+                  Expected
                 </th>
                 <th scope="col" className={numClass}>
                   Focus
@@ -108,6 +135,7 @@ function Days({ d }: { d: PersonalInsights }) {
                 <tr key={day.date}>
                   <td>{formatShortDay(day.date)}</td>
                   <td className={numClass}>{formatDuration(day.tracked_seconds)}</td>
+                  <td className={numClass}>{durationOrDash(expected.get(day.date) ?? 0)}</td>
                   <td className={numClass}>
                     {durationOrDash(day.focus_seconds)}
                     {day.focus_blocks > 1 ? <span className="small muted"> · {day.focus_blocks}</span> : null}
@@ -178,6 +206,7 @@ export default function MyInsightsPage() {
           <>
             <Wellbeing d={d} />
             <Summary d={d} />
+            <AgainstExpected d={d} byWeek={period !== 'week'} />
             <WorkApps d={d} />
             <Days d={d} />
           </>

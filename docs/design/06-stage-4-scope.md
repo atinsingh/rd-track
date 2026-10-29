@@ -104,7 +104,18 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
      their data in "Who viewed your data";
    - owners are told a week before a token expires; Settings › Developers has tabs for API
      tokens, webhooks and the reference; personal tokens are in My account › Settings.
-6. F6 expected hours
+6. F6 expected hours — **done 2026-10-29**:
+   - worked out on read, per day: the person's schedule (their shifts and overrides),
+     else their work limits (the daily limit, else a fifth of the weekly one, on
+     weekdays), else the organization's standard day on weekdays; holidays expect
+     nothing and approved time off is taken off (`apps/api/src/modules/insights/expected.ts`);
+   - My insights opens with "Tracked vs expected" (the person's own %, a meter with the
+     expected mark) and a chart of each day — or each week over 4 weeks — with focus and
+     other tracked time against a dashed expected line, and a sentence saying where the
+     expectation comes from; the By day table gains an Expected column;
+   - team insights (Pro, 5+ people) add the average % and counts of people under, about
+     (±10 %) and over expected — counts only, never who;
+   - blue for under and the series, orange for over, grey for about; never red.
 7. F7 expenses → F8 payroll adjustments
 8. F9 polish items
 
