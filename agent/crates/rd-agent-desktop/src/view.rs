@@ -7,9 +7,15 @@ use rd_agent_core::describe::{
     describe_collection, format_duration, CollectionItem, NEVER_COLLECTED,
 };
 use rd_agent_core::events::IdleDecision;
+use rd_agent_core::limits::{LimitScope, LimitSummary};
 use rd_agent_core::platform::PermissionStatus;
 use rd_agent_core::policy::PolicySettings;
-use rd_agent_core::runtime::{IdlePrompt, LiveStatus, Notice, PolicyPreview};
+use rd_agent_core::reminders::{
+    parse_hhmm, HoursSource, MyHours, ReminderChoice, ReminderKind, ReminderSettings,
+};
+use rd_agent_core::runtime::{
+    IdlePrompt, LiveStatus, Notice, PolicyPreview, ReminderPrompt, ReminderStatus,
+};
 use serde::Serialize;
 
 /// Tray icon state.
@@ -56,8 +62,10 @@ pub struct Banner {
     pub id: String,
     /// `info` or `warn`.
     pub kind: &'static str,
-    /// Text.
+    /// Text (the title when there is a `detail` line).
     pub text: String,
+    /// One line of why, under the title.
+    pub detail: Option<String>,
     /// Optional action.
     pub action: Option<BannerAction>,
     /// Whether the employee may dismiss it.
@@ -70,9 +78,23 @@ impl Banner {
             id: id.into(),
             kind,
             text: text.into(),
+            detail: None,
             action: None,
             dismissible: true,
         }
+    }
+
+    fn detail(mut self, line: &str) -> Self {
+        self.detail = Some(line.into());
+        self
+    }
+
+    /// The only button acknowledges (dismisses) the banner.
+    fn acknowledge(mut self, label: &str) -> Self {
+        let id = self.id.clone();
+        self = self.action(label, "dismiss_banner", Some(&id));
+        self.dismissible = false;
+        self
     }
 
     fn action(mut self, label: &str, command: &str, arg: Option<&str>) -> Self {
@@ -329,6 +351,259 @@ pub fn check_idle_target(
     Ok(())
 }
 
+/// "8 h", "7 h 30 min": a limit, in hours.
+pub fn limit_hours(minutes: u32) -> String {
+    match (minutes / 60, minutes % 60) {
+        (0, m) => format!("{m} min"),
+        (h, 0) => format!("{h} h"),
+        (h, m) => format!("{h} h {m} min"),
+    }
+}
+
+/// Why a limit banner appears (one line, the same for every limit banner).
+pub const LIMIT_DETAIL: &str =
+    "Tracking continues — this is a heads-up from your organization's work limits.";
+
+/// Title of a work-limit banner: "80% of today's 8 h limit", "You've reached this
+/// week's 40 h limit".
+pub fn limit_title(scope: LimitScope, percent: u8, limit_minutes: u32) -> String {
+    let period = match scope {
+        LimitScope::Daily => "today's",
+        LimitScope::Weekly => "this week's",
+    };
+    let limit = limit_hours(limit_minutes);
+    if percent >= 100 {
+        format!("You've reached {period} {limit} limit")
+    } else {
+        format!("{percent}% of {period} {limit} limit")
+    }
+}
+
+/// "8h" / "7h 30m": a limit in the popover's duration style.
+fn short_hours(minutes: u32) -> String {
+    match (minutes / 60, minutes % 60) {
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h {m:02}m"),
+    }
+}
+
+/// The popover's limit lines: "5h 12m of 8h today", "31h 05m of 40h this week".
+pub fn limit_lines(summary: Option<&LimitSummary>) -> (Option<String>, Option<String>) {
+    let Some(s) = summary else {
+        return (None, None);
+    };
+    let line = |p: &rd_agent_core::limits::LimitProgress, when: &str| {
+        format!(
+            "{} of {} {when}",
+            format_duration(p.worked_seconds),
+            short_hours(p.limit_minutes)
+        )
+    };
+    (
+        s.daily.as_ref().map(|p| line(p, "today")),
+        s.weekly.as_ref().map(|p| line(p, "this week")),
+    )
+}
+
+/// One button of the reminder card.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReminderButton {
+    /// Label.
+    pub label: &'static str,
+    /// Passed back to `resolve_reminder`.
+    pub choice: &'static str,
+}
+
+/// The reminder card (title, one line, two buttons).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReminderView {
+    /// Prompt id, passed back to `resolve_reminder`.
+    pub id: String,
+    /// `start`, `stop`, `still_tracking`.
+    pub kind: ReminderKind,
+    /// "Ready to start tracking?"
+    pub title: String,
+    /// "Your hours started at 09:00."
+    pub detail: String,
+    /// "Start tracking" / "Stop tracking".
+    pub primary: ReminderButton,
+    /// "Not today" / "Keep tracking".
+    pub secondary: ReminderButton,
+}
+
+/// Builds the reminder card; times are shown in `tz` (the device's local zone), with
+/// the date when it is not today's.
+pub fn reminder_view<Tz: TimeZone>(
+    prompt: &ReminderPrompt,
+    now: DateTime<Utc>,
+    tz: &Tz,
+) -> ReminderView
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let today = now.with_timezone(tz).date_naive();
+    let time = |t: DateTime<Utc>| {
+        let local = t.with_timezone(tz);
+        if local.date_naive() == today {
+            local.format("%H:%M").to_string()
+        } else {
+            local.format("%-d %b %H:%M").to_string()
+        }
+    };
+    let hours = match prompt.source {
+        HoursSource::Organization => "Your shift",
+        HoursSource::Mine => "Your hours",
+    };
+    let (stop, keep) = (
+        ReminderButton {
+            label: "Stop tracking",
+            choice: "stop",
+        },
+        ReminderButton {
+            label: "Keep tracking",
+            choice: "keep",
+        },
+    );
+    let (title, detail, primary, secondary) = match prompt.kind {
+        ReminderKind::Start => (
+            "Ready to start tracking?".to_owned(),
+            format!(
+                "{hours} started at {}.",
+                time(prompt.hours_start.unwrap_or(prompt.hours_end))
+            ),
+            ReminderButton {
+                label: "Start tracking",
+                choice: "start",
+            },
+            ReminderButton {
+                label: "Not today",
+                choice: "not_today",
+            },
+        ),
+        ReminderKind::Stop => (
+            format!("{hours} ended at {}", time(prompt.hours_end)),
+            "This session is still tracking.".to_owned(),
+            stop,
+            keep,
+        ),
+        ReminderKind::StillTracking => (
+            "Still tracking?".to_owned(),
+            format!("{hours} ended at {}.", time(prompt.hours_end)),
+            stop,
+            keep,
+        ),
+    };
+    ReminderView {
+        id: prompt.id.to_string(),
+        kind: prompt.kind,
+        title,
+        detail,
+        primary,
+        secondary,
+    }
+}
+
+/// Parses the reminder card's choice.
+pub fn parse_reminder_choice(s: &str) -> Option<ReminderChoice> {
+    match s {
+        "start" => Some(ReminderChoice::Start),
+        "not_today" => Some(ReminderChoice::NotToday),
+        "stop" => Some(ReminderChoice::Stop),
+        "keep" => Some(ReminderChoice::Keep),
+        _ => None,
+    }
+}
+
+/// The "Reminders" settings section.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RemindersView {
+    /// Master switch.
+    pub enabled: bool,
+    /// Start reminder.
+    pub start: bool,
+    /// Stop reminder.
+    pub stop: bool,
+    /// "Still tracking?"
+    pub still_tracking: bool,
+    /// "09:00".
+    pub my_start: String,
+    /// "17:30".
+    pub my_end: String,
+    /// ISO weekdays of my hours.
+    pub my_days: Vec<u8>,
+    /// Shown instead of the hours editor when the organization's schedule applies.
+    pub schedule_note: Option<&'static str>,
+    /// "Today 09:00–17:30" / "No reminders today".
+    pub today: String,
+}
+
+/// Builds the settings section; times in `tz`.
+pub fn reminders_view<Tz: TimeZone>(status: &ReminderStatus, tz: &Tz) -> RemindersView
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let s = &status.settings;
+    let today = match &status.window {
+        Some(w) => format!(
+            "Today {}–{}",
+            w.start.with_timezone(tz).format("%H:%M"),
+            w.end.with_timezone(tz).format("%H:%M")
+        ),
+        None => "No reminders today".to_owned(),
+    };
+    RemindersView {
+        enabled: s.enabled,
+        start: s.start,
+        stop: s.stop,
+        still_tracking: s.still_tracking,
+        my_start: s.my_hours.start.format("%H:%M").to_string(),
+        my_end: s.my_hours.end.format("%H:%M").to_string(),
+        my_days: s.my_hours.days.clone(),
+        schedule_note: status
+            .schedule_sets_hours
+            .then_some("Your organization's schedule sets these hours"),
+        today,
+    }
+}
+
+/// What the settings section sends back.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct RemindersInput {
+    /// Master switch.
+    pub enabled: bool,
+    /// Start reminder.
+    pub start: bool,
+    /// Stop reminder.
+    pub stop: bool,
+    /// "Still tracking?"
+    pub still_tracking: bool,
+    /// `HH:MM`.
+    pub my_start: String,
+    /// `HH:MM`.
+    pub my_end: String,
+    /// ISO weekdays.
+    pub my_days: Vec<u8>,
+}
+
+/// Checks the section's input; the error is shown under it.
+pub fn parse_reminders_input(input: &RemindersInput) -> Result<ReminderSettings, String> {
+    let start = parse_hhmm(&input.my_start).ok_or("Enter a start time like 09:00.")?;
+    let end = parse_hhmm(&input.my_end).ok_or("Enter an end time like 17:30.")?;
+    ReminderSettings {
+        enabled: input.enabled,
+        start: input.start,
+        stop: input.stop,
+        still_tracking: input.still_tracking,
+        my_hours: MyHours {
+            start,
+            end,
+            days: input.my_days.clone(),
+        },
+    }
+    .validated()
+    .map_err(str::to_owned)
+}
+
 /// Inputs to [`banners`] beyond the runtime status.
 #[derive(Debug, Clone, Default)]
 pub struct BannerContext<'a> {
@@ -367,6 +642,7 @@ fn permission_banner(name: &str, text: &str, ctx: &BannerContext<'_>) -> Banner 
 /// Banners for the popover, most important first.
 pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner> {
     let mut out = Vec::new();
+    let paused = TrayState::of(live) == TrayState::Paused;
     if let Some(l) = live {
         if let Some(msg) = &l.agent.tracking_unavailable_message {
             out.push(
@@ -434,6 +710,22 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
             Notice::LicenseUnavailable { .. } | Notice::Revoked => continue,
             // Shown as its own panel from `LiveStatus::idle_prompt`.
             Notice::IdleReturn { .. } => continue,
+            // Shown as the reminder card from `LiveStatus::reminder`.
+            Notice::Reminder { .. } => continue,
+            // Nothing about limits is shown while a session is paused.
+            Notice::LimitWarning { .. } if paused => continue,
+            Notice::LimitWarning {
+                scope,
+                percent,
+                limit_minutes,
+                ..
+            } => Banner::new(
+                format!("n{id}"),
+                "info",
+                limit_title(*scope, *percent, *limit_minutes),
+            )
+            .detail(LIMIT_DETAIL)
+            .acknowledge("Got it"),
             Notice::LicenseRestored => {
                 Banner::new(format!("n{id}"), "info", "Tracking is available again.")
             }
@@ -572,6 +864,9 @@ mod tests {
             outbox_depth: 0,
             revoked: false,
             idle_prompt: None,
+            limits: None,
+            reminder: None,
+            reminders: ReminderStatus::default(),
         }
     }
 
@@ -867,6 +1162,255 @@ mod tests {
             ..Default::default()
         };
         assert!(banners(Some(&live()), &ctx).is_empty());
+    }
+
+    fn limit_notice(scope: LimitScope, percent: u8, limit_minutes: u32) -> Notice {
+        Notice::LimitWarning {
+            id: "x".into(),
+            scope,
+            percent,
+            limit_minutes,
+            worked_seconds: 0,
+        }
+    }
+
+    #[test]
+    fn limit_banners_are_a_title_one_line_and_got_it() {
+        let notices = vec![
+            (1, limit_notice(LimitScope::Daily, 80, 480)),
+            (2, limit_notice(LimitScope::Weekly, 100, 2400)),
+            (3, limit_notice(LimitScope::Daily, 100, 450)),
+        ];
+        let ctx = BannerContext {
+            notices: &notices,
+            ..Default::default()
+        };
+        let mut l = live();
+        l.session = Some(session("active"));
+        let b = banners(Some(&l), &ctx);
+        let texts: Vec<_> = b.iter().map(|b| b.text.as_str()).collect();
+        assert_eq!(
+            texts,
+            [
+                "80% of today's 8 h limit",
+                "You've reached this week's 40 h limit",
+                "You've reached today's 7 h 30 min limit"
+            ]
+        );
+        for x in &b {
+            assert_eq!(x.kind, "info", "a heads-up, not a warning");
+            assert_eq!(
+                x.detail.as_deref(),
+                Some(
+                    "Tracking continues — this is a heads-up from your organization's work limits."
+                )
+            );
+            let a = x.action.as_ref().unwrap();
+            assert_eq!(
+                (a.label.as_str(), a.command.as_str()),
+                ("Got it", "dismiss_banner")
+            );
+            assert_eq!(a.arg.as_deref(), Some(x.id.as_str()));
+            assert!(!x.dismissible, "one action only");
+        }
+        // Nothing about limits while paused.
+        l.session = Some(session("paused"));
+        assert!(banners(Some(&l), &ctx).is_empty());
+        // Not tracking (the session stopped after the warning): still listed until "Got it".
+        l.session = None;
+        assert_eq!(banners(Some(&l), &ctx).len(), 3);
+    }
+
+    #[test]
+    fn limit_hours_and_popover_lines() {
+        assert_eq!(limit_hours(480), "8 h");
+        assert_eq!(limit_hours(450), "7 h 30 min");
+        assert_eq!(limit_hours(45), "45 min");
+        assert_eq!(limit_lines(None), (None, None));
+        let summary: LimitSummary = serde_json::from_value(serde_json::json!({
+            "daily": {"scope": "daily", "limit_minutes": 480, "worked_seconds": 18_720, "period": "2026-10-28"},
+            "weekly": {"scope": "weekly", "limit_minutes": 2430, "worked_seconds": 111_900, "period": "2026-10-26"}
+        }))
+        .unwrap();
+        assert_eq!(
+            limit_lines(Some(&summary)),
+            (
+                Some("5h 12m of 8h today".to_owned()),
+                Some("31h 05m of 40h 30m this week".to_owned())
+            )
+        );
+    }
+
+    fn reminder(kind: &str, source: &str, start: Option<&str>, end: &str) -> ReminderPrompt {
+        serde_json::from_value(serde_json::json!({
+            "id": "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
+            "kind": kind, "hours_start": start, "hours_end": end, "source": source
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn reminder_cards_wording() {
+        let now = Utc.with_ymd_and_hms(2026, 10, 28, 9, 10, 0).unwrap();
+        let v = reminder_view(
+            &reminder(
+                "start",
+                "mine",
+                Some("2026-10-28T09:00:00Z"),
+                "2026-10-28T17:30:00Z",
+            ),
+            now,
+            &Utc,
+        );
+        assert_eq!(v.id, "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b");
+        assert_eq!(v.title, "Ready to start tracking?");
+        assert_eq!(v.detail, "Your hours started at 09:00.");
+        assert_eq!(
+            (v.primary.label, v.primary.choice),
+            ("Start tracking", "start")
+        );
+        assert_eq!(
+            (v.secondary.label, v.secondary.choice),
+            ("Not today", "not_today")
+        );
+
+        let riga = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
+        let v = reminder_view(
+            &reminder(
+                "start",
+                "organization",
+                Some("2026-10-28T06:30:00Z"),
+                "2026-10-28T14:30:00Z",
+            ),
+            now,
+            &riga,
+        );
+        assert_eq!(v.detail, "Your shift started at 08:30.");
+
+        let late = Utc.with_ymd_and_hms(2026, 10, 28, 17, 40, 0).unwrap();
+        let v = reminder_view(
+            &reminder(
+                "stop",
+                "mine",
+                Some("2026-10-28T09:00:00Z"),
+                "2026-10-28T17:30:00Z",
+            ),
+            late,
+            &Utc,
+        );
+        assert_eq!(v.title, "Your hours ended at 17:30");
+        assert_eq!(v.detail, "This session is still tracking.");
+        assert_eq!(
+            (v.primary.label, v.primary.choice),
+            ("Stop tracking", "stop")
+        );
+        assert_eq!(
+            (v.secondary.label, v.secondary.choice),
+            ("Keep tracking", "keep")
+        );
+
+        let v = reminder_view(
+            &reminder(
+                "still_tracking",
+                "organization",
+                None,
+                "2026-10-28T17:30:00Z",
+            ),
+            late,
+            &Utc,
+        );
+        assert_eq!(v.title, "Still tracking?");
+        assert_eq!(v.detail, "Your shift ended at 17:30.");
+        // After midnight the date is shown.
+        let next = Utc.with_ymd_and_hms(2026, 10, 29, 0, 40, 0).unwrap();
+        let v = reminder_view(
+            &reminder("still_tracking", "mine", None, "2026-10-28T17:30:00Z"),
+            next,
+            &Utc,
+        );
+        assert_eq!(v.detail, "Your hours ended at 28 Oct 17:30.");
+    }
+
+    #[test]
+    fn reminder_notice_is_not_a_banner_and_choices_parse() {
+        let notices = vec![(
+            4,
+            Notice::Reminder {
+                id: uuid::Uuid::nil(),
+                reminder: ReminderKind::Start,
+            },
+        )];
+        let ctx = BannerContext {
+            notices: &notices,
+            ..Default::default()
+        };
+        assert!(banners(Some(&live()), &ctx).is_empty());
+        assert_eq!(parse_reminder_choice("start"), Some(ReminderChoice::Start));
+        assert_eq!(
+            parse_reminder_choice("not_today"),
+            Some(ReminderChoice::NotToday)
+        );
+        assert_eq!(parse_reminder_choice("stop"), Some(ReminderChoice::Stop));
+        assert_eq!(parse_reminder_choice("keep"), Some(ReminderChoice::Keep));
+        assert_eq!(parse_reminder_choice("snooze"), None);
+    }
+
+    #[test]
+    fn reminders_section_shows_my_hours_or_the_schedule_note() {
+        let mut st = ReminderStatus::default();
+        let v = reminders_view(&st, &Utc);
+        assert!(v.enabled && v.start && v.stop && v.still_tracking);
+        assert_eq!((v.my_start.as_str(), v.my_end.as_str()), ("09:00", "17:30"));
+        assert_eq!(v.my_days, [1, 2, 3, 4, 5]);
+        assert_eq!(v.schedule_note, None);
+        assert_eq!(v.today, "No reminders today");
+        st.schedule_sets_hours = true;
+        st.window = serde_json::from_value(serde_json::json!({
+            "date": "2026-10-28", "start": "2026-10-28T08:00:00Z", "end": "2026-10-28T16:00:00Z",
+            "source": "organization"
+        }))
+        .unwrap();
+        let v = reminders_view(&st, &Utc);
+        assert_eq!(
+            v.schedule_note,
+            Some("Your organization's schedule sets these hours")
+        );
+        assert_eq!(v.today, "Today 08:00–16:00");
+    }
+
+    #[test]
+    fn reminders_input_is_checked() {
+        let ok = RemindersInput {
+            enabled: true,
+            start: false,
+            stop: true,
+            still_tracking: true,
+            my_start: "08:15".into(),
+            my_end: "16:45".into(),
+            my_days: vec![5, 1, 2],
+        };
+        let s = parse_reminders_input(&ok).unwrap();
+        assert!(!s.start);
+        assert_eq!(s.my_hours.days, [1, 2, 5]);
+        assert_eq!(s.my_hours.start.format("%H:%M").to_string(), "08:15");
+        let bad = |f: fn(&mut RemindersInput)| {
+            let mut i = ok.clone();
+            f(&mut i);
+            parse_reminders_input(&i).unwrap_err()
+        };
+        assert_eq!(
+            bad(|i| i.my_start = "8".into()),
+            "Enter a start time like 09:00."
+        );
+        assert_eq!(
+            bad(|i| i.my_end = "".into()),
+            "Enter an end time like 17:30."
+        );
+        assert_eq!(
+            bad(|i| i.my_end = "08:00".into()),
+            "The end of your hours must be after the start."
+        );
+        assert_eq!(bad(|i| i.my_days = vec![8]), "Unknown workday.");
     }
 
     #[test]

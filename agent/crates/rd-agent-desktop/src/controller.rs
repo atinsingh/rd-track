@@ -22,7 +22,10 @@ use rd_agent_core::runtime::{
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::view::{self, Banner, BannerContext, IdleView, SessionNotice, TrayState};
+use crate::view::{
+    self, Banner, BannerContext, IdleView, ReminderView, RemindersInput, RemindersView,
+    SessionNotice, TrayState,
+};
 
 /// Where the app is in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -65,12 +68,20 @@ pub struct AppView {
     pub today: String,
     /// "71%".
     pub activity: Option<String>,
+    /// "5h 12m of 8h today" when a daily work limit applies.
+    pub limit_today: Option<String>,
+    /// "31h 05m of 40h this week" when a weekly work limit applies.
+    pub limit_week: Option<String>,
     /// Sync line.
     pub sync: String,
     /// Banners.
     pub banners: Vec<Banner>,
     /// The "Welcome back" panel while an idle-return prompt is unanswered.
     pub idle: Option<IdleView>,
+    /// The reminder card (never while paused).
+    pub reminder: Option<ReminderView>,
+    /// The "Reminders" settings section.
+    pub reminders: RemindersView,
     /// Whether a session can be started now.
     pub can_start: bool,
     /// The policy requires a project.
@@ -511,6 +522,59 @@ impl Controller {
         Err("Your choice was not saved. Try again.".into())
     }
 
+    /// The person's answer to the reminder `id` (`start`, `not_today`, `stop`, `keep`).
+    /// Waits (≤ 2 s) until the runtime has cleared it. Blocking. For `start` the
+    /// popover then runs its usual start flow (project, session-start notice).
+    pub fn resolve_reminder(&self, id: &str, choice: &str) -> Result<(), String> {
+        let choice = view::parse_reminder_choice(choice).ok_or("unknown choice")?;
+        let id = uuid::Uuid::parse_str(id).map_err(|_| "unknown reminder")?;
+        {
+            let i = lock(&self.inner);
+            let shown = i
+                .live
+                .as_ref()
+                .and_then(|l| l.reminder.as_ref())
+                .filter(|r| r.id == id)
+                .ok_or("This reminder was already answered.")?;
+            if !choice.answers(shown.kind) {
+                return Err("unknown choice".into());
+            }
+        }
+        self.send(Command::ResolveReminder { id, choice })?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let pending = lock(&self.inner)
+                .live
+                .as_ref()
+                .and_then(|l| l.reminder.as_ref())
+                .is_some_and(|r| r.id == id);
+            if !pending {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err("Your choice was not saved. Try again.".into())
+    }
+
+    /// Saves the employee's reminder settings (local only). Waits (≤ 2 s) until the
+    /// runtime reports them. Blocking.
+    pub fn set_reminders(&self, input: &RemindersInput) -> Result<(), String> {
+        let settings = view::parse_reminders_input(input)?;
+        self.send(Command::SetReminderSettings(settings.clone()))?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let saved = lock(&self.inner)
+                .live
+                .as_ref()
+                .is_some_and(|l| l.reminders.settings == settings);
+            if saved {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err("Your settings were not saved. Try again.".into())
+    }
+
     /// Dismisses a banner.
     pub fn dismiss(&self, id: &str) {
         let mut i = lock(&self.inner);
@@ -577,6 +641,7 @@ impl Controller {
         );
         let tray = TrayState::of(live);
         let session = live.and_then(|l| l.session.as_ref());
+        let limit_lines = view::limit_lines(live.and_then(|l| l.limits.as_ref()));
         AppView {
             phase: i.phase.unwrap_or(Phase::Starting),
             error: i.error.clone(),
@@ -594,6 +659,8 @@ impl Controller {
             activity: live
                 .and_then(|l| l.today.activity_percent())
                 .map(|p| format!("{p}%")),
+            limit_today: limit_lines.0,
+            limit_week: limit_lines.1,
             sync: live
                 .map(|l| view::sync_line(l, Utc::now()))
                 .unwrap_or_else(|| "Starting…".into()),
@@ -601,6 +668,14 @@ impl Controller {
             idle: live
                 .and_then(|l| l.idle_prompt.as_ref())
                 .map(|p| view::idle_view(p, &i.projects, &Local)),
+            reminder: live
+                .filter(|_| tray != TrayState::Paused)
+                .and_then(|l| l.reminder.as_ref())
+                .map(|r| view::reminder_view(r, Utc::now(), &Local)),
+            reminders: view::reminders_view(
+                &live.map(|l| l.reminders.clone()).unwrap_or_default(),
+                &Local,
+            ),
             can_start: live.is_some_and(|l| {
                 l.session.is_none() && l.agent.tracking_unavailable.is_none() && !l.revoked
             }),
@@ -672,10 +747,16 @@ impl RuntimeObserver for Observer {
     }
 
     fn notice(&mut self, notice: &Notice) {
-        if let Notice::IdleReturn { .. } = notice {
-            // The panel itself comes from `LiveStatus::idle_prompt`; bring it into view.
-            crate::tray::show_for_prompt(&self.app);
-            return;
+        match notice {
+            // The panel / card itself comes from `LiveStatus`; bring it into view.
+            Notice::IdleReturn { .. } | Notice::Reminder { .. } => {
+                crate::tray::show_for_prompt(&self.app);
+                return;
+            }
+            // There are no native notifications: the banner shows in the popover,
+            // which opens (without taking focus) so the heads-up is seen.
+            Notice::LimitWarning { .. } => crate::tray::show_for_prompt(&self.app),
+            _ => {}
         }
         let mut i = lock(&self.ctl.inner);
         let id = i.next_notice;

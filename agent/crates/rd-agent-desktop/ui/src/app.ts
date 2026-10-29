@@ -13,7 +13,14 @@ declare global {
 }
 
 interface BannerAction { label: string; command: string; arg: string | null }
-interface Banner { id: string; kind: "info" | "warn"; text: string; action: BannerAction | null; dismissible: boolean }
+interface Banner {
+  id: string;
+  kind: "info" | "warn";
+  text: string;
+  detail: string | null;
+  action: BannerAction | null;
+  dismissible: boolean;
+}
 interface Task { id: string; name: string }
 interface Project { id: string; name: string; tasks: Task[] }
 interface IdleView {
@@ -27,6 +34,28 @@ interface IdleView {
   targets: Project[];
 }
 type IdleDecision = "keep" | "discard" | "reassign";
+type ReminderChoice = "start" | "not_today" | "stop" | "keep";
+interface ReminderButton { label: string; choice: ReminderChoice }
+interface ReminderView {
+  id: string;
+  kind: "start" | "stop" | "still_tracking";
+  title: string;
+  detail: string;
+  primary: ReminderButton;
+  secondary: ReminderButton;
+}
+interface RemindersView {
+  enabled: boolean;
+  start: boolean;
+  stop: boolean;
+  still_tracking: boolean;
+  my_start: string;
+  my_end: string;
+  my_days: number[];
+  schedule_note: string | null;
+  today: string;
+}
+type RemindersInput = Omit<RemindersView, "schedule_note" | "today">;
 interface AppView {
   phase: "enroll" | "starting" | "running" | "stopping" | "revoked" | "error";
   error: string | null;
@@ -38,9 +67,13 @@ interface AppView {
   camera: string | null;
   today: string;
   activity: string | null;
+  limit_today: string | null;
+  limit_week: string | null;
   sync: string;
   banners: Banner[];
   idle: IdleView | null;
+  reminder: ReminderView | null;
+  reminders: RemindersView;
   can_start: boolean;
   require_project: boolean;
   projects: Project[];
@@ -72,6 +105,11 @@ let selectedTask = "";
 let busy = false;
 let error: string | null = null;
 let projectsRequested = false;
+// The "Reminders" settings section is open, and its last save error.
+let settingsOpen = false;
+let settingsError: string | null = null;
+// Shown under the start button when "Start tracking" needs a project first.
+let startHint: string | null = null;
 const enrollForm = { server: "", code: "", name: "" };
 // The person's pending choice on the idle-return panel (reset for each new prompt).
 const idleChoice: { id: string; decision: IdleDecision; project: string; task: string } = {
@@ -161,14 +199,56 @@ function loadProjects(): void {
 
 const opt = (s: string): string | null => (s === "" ? null : s);
 
-function onStart(): void {
-  void run(async () => {
-    const data = await invoke<SessionNotice>("prepare_session", {
-      projectId: opt(selectedProject),
-      taskId: opt(selectedTask),
-    });
-    notice = { data, review: false };
+async function prepareStart(): Promise<void> {
+  const data = await invoke<SessionNotice>("prepare_session", {
+    projectId: opt(selectedProject),
+    taskId: opt(selectedTask),
   });
+  notice = { data, review: false };
+}
+
+function onStart(): void {
+  startHint = null;
+  void run(prepareStart);
+}
+
+// A reminder's buttons. "Start tracking" continues into the same flow as the Start
+// button (project picker, then the session-start notice).
+function onReminder(r: ReminderView, choice: ReminderChoice): void {
+  void run(async () => {
+    view = await invoke<AppView>("resolve_reminder", { id: r.id, choice });
+    if (choice !== "start") return;
+    if (!view.can_start) return;
+    if (view.require_project && !selectedProject) {
+      startHint = "Choose a project, then start the session.";
+      return;
+    }
+    await prepareStart();
+  });
+}
+
+function saveReminders(change: Partial<RemindersInput>): void {
+  if (!view) return;
+  const r = view.reminders;
+  const settings: RemindersInput = {
+    enabled: r.enabled,
+    start: r.start,
+    stop: r.stop,
+    still_tracking: r.still_tracking,
+    my_start: r.my_start,
+    my_end: r.my_end,
+    my_days: r.my_days,
+    ...change,
+  };
+  settingsError = null;
+  invoke<AppView>("set_reminder_settings", { settings })
+    .then((v) => {
+      view = v;
+    })
+    .catch((e) => {
+      settingsError = String(e);
+    })
+    .finally(render);
 }
 
 function onConfirmStart(): void {
@@ -190,6 +270,8 @@ function onBannerAction(b: Banner): void {
       await invoke(a.command, { name: a.arg });
     } else if (a.command === "install_update") {
       await invoke("install_update");
+    } else if (a.command === "dismiss_banner") {
+      await invoke("dismiss_banner", { id: a.arg });
     }
     await refresh();
   });
@@ -202,7 +284,8 @@ function banners(v: AppView): Node[] {
     h(
       "div",
       { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" },
-      h("span", {}, b.text),
+      b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text),
+      b.detail && h("span", { class: "banner-detail" }, b.detail),
       (b.action || b.dismissible) &&
         h(
           "div",
@@ -308,6 +391,86 @@ function sessionButtons(v: AppView): HTMLElement {
       { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },
       "Stop",
     ),
+  );
+}
+
+// A start / stop / "still tracking?" reminder: title, one line, two buttons.
+function reminderCard(r: ReminderView): HTMLElement {
+  return h(
+    "div",
+    { class: "banner info reminder", role: "status" },
+    h("strong", { class: "banner-title" }, r.title),
+    h("span", { class: "banner-detail" }, r.detail),
+    h(
+      "div",
+      { class: "row" },
+      h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label),
+      h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label),
+    ),
+  );
+}
+
+const WEEKDAYS: [number, string][] = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
+
+// "Reminders": employee-controlled, kept on this computer only.
+function remindersSection(v: AppView): HTMLElement {
+  const r = v.reminders;
+  const toggle = (label: string, checked: boolean, disabled: boolean, change: (on: boolean) => Partial<RemindersInput>): HTMLElement =>
+    h(
+      "label",
+      { class: `toggle${disabled ? " disabled" : ""}` },
+      h("input", {
+        type: "checkbox",
+        checked,
+        disabled,
+        onchange: (e: Event) => saveReminders(change((e.target as HTMLInputElement).checked)),
+      }),
+      h("span", {}, label),
+    );
+  const off = !r.enabled;
+  const hours: Node[] = r.schedule_note
+    ? [h("p", { class: "hint" }, r.schedule_note)]
+    : [
+        h(
+          "div",
+          { class: "hours" },
+          h("label", { class: "field" }, "Start", h("input", { type: "time", value: r.my_start, disabled: off, onchange: (e: Event) => saveReminders({ my_start: (e.target as HTMLInputElement).value }) })),
+          h("label", { class: "field" }, "End", h("input", { type: "time", value: r.my_end, disabled: off, onchange: (e: Event) => saveReminders({ my_end: (e.target as HTMLInputElement).value }) })),
+        ),
+        h(
+          "fieldset",
+          { class: "days" },
+          h("legend", { class: "sr-only" }, "Workdays"),
+          ...WEEKDAYS.map(([d, name]) =>
+            h(
+              "label",
+              { class: `day${r.my_days.includes(d) ? " on" : ""}` },
+              h("input", {
+                type: "checkbox",
+                checked: r.my_days.includes(d),
+                disabled: off,
+                onchange: (e: Event) => {
+                  const on = (e.target as HTMLInputElement).checked;
+                  saveReminders({ my_days: on ? [...r.my_days, d] : r.my_days.filter((x) => x !== d) });
+                },
+              }),
+              h("span", {}, name),
+            ),
+          ),
+        ),
+      ];
+  return h(
+    "section",
+    { class: "settings", "aria-labelledby": "reminders-h" },
+    h("span", { class: "eyebrow", id: "reminders-h" }, "Reminders"),
+    toggle("Reminders", r.enabled, false, (on) => ({ enabled: on })),
+    toggle("When my hours start", r.start, off, (on) => ({ start: on })),
+    toggle("When my hours end", r.stop, off, (on) => ({ stop: on })),
+    toggle("Every hour after that, if still tracking", r.still_tracking, off, (on) => ({ still_tracking: on })),
+    h("span", { class: "label" }, "My hours"),
+    ...hours,
+    h("p", { class: "hint" }, `${r.today}. Reminders stay on this computer; nothing is sent to your organization.`),
+    settingsError && h("p", { class: "error", role: "alert" }, settingsError),
   );
 }
 
@@ -432,10 +595,12 @@ function mainView(v: AppView): HTMLElement {
     "section",
     { class: "popover", "aria-label": "RoundDigital Track" },
     header(v),
+    v.reminder && reminderCard(v.reminder),
     ...banners(v),
     v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera),
     ...projectPickers(v),
     sessionButtons(v),
+    v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint),
     error && h("p", { class: "error", role: "alert" }, error),
     h(
       "div",
@@ -449,16 +614,38 @@ function mainView(v: AppView): HTMLElement {
         v.activity ? h("span", { class: "mono" }, v.activity) : "",
       ),
     ),
+    (v.limit_today || v.limit_week) &&
+      h(
+        "div",
+        { class: "limits" },
+        h("span", { class: "label" }, "Work limit"),
+        h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l): l is string => !!l).map((l) => h("span", { class: "mono" }, l))),
+      ),
     h(
       "div",
       { class: "foot" },
       h("span", {}, v.sync),
       h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, "My dashboard →"),
     ),
+    settingsOpen && remindersSection(v),
     h(
       "div",
       { class: "small-links" },
       h("span", { class: "hint" }, `v${v.version}`),
+      h(
+        "button",
+        {
+          class: "link",
+          type: "button",
+          "aria-expanded": String(settingsOpen),
+          onclick: () => {
+            settingsOpen = !settingsOpen;
+            settingsError = null;
+            render();
+          },
+        },
+        settingsOpen ? "Close reminders" : "Reminders",
+      ),
       h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit"),
     ),
   );

@@ -2,6 +2,7 @@ use super::*;
 use crate::api::LicenseBlock;
 use crate::clock::{FakeClock, SystemClock};
 use crate::events::{Envelope, StopReason};
+use crate::limits::LimitScope;
 use crate::outbox::{Outbox, StaticKey};
 use crate::platform::{HttpResponse, InputSample};
 use crate::policy::tests::{doc, pinned};
@@ -1632,4 +1633,498 @@ fn runtime_resolve_idle_command_queues_the_event_and_clears_live_status() {
             "decision": "keep"
         })
     );
+}
+
+// ----- Stage 4 F4 / F3: work-limit warnings and reminders ---------------------------
+
+fn utc_harness_at(start: DateTime<Utc>, outbox: SharedOutbox) -> Harness {
+    let mut cfg = AgentConfig::new(identity());
+    cfg.time_zone = Some(chrono_tz::Tz::UTC);
+    harness_at(start, outbox, cfg)
+}
+
+fn utc_harness() -> Harness {
+    utc_harness_at(t0(), shared_outbox())
+}
+
+fn work_limits(daily: Option<u32>, weekly: Option<u32>, today: u64, week: u64) -> WorkLimits {
+    serde_json::from_value(json!({
+        "as_of": "2026-10-28T09:00:00Z", "timezone": "UTC",
+        "daily_minutes": daily, "weekly_minutes": weekly,
+        "today": {"date": "2026-10-28", "worked_seconds": today},
+        "week": {"period_start": "2026-10-26", "worked_seconds": week}
+    }))
+    .unwrap()
+}
+
+fn schedule_doc(v: Value) -> ScheduleToday {
+    serde_json::from_value(v).unwrap()
+}
+
+fn limit_warnings(notices: &[Notice]) -> Vec<(LimitScope, u8)> {
+    notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::LimitWarning { scope, percent, .. } => Some((*scope, *percent)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn reminder_kinds(notices: &[Notice]) -> Vec<ReminderKind> {
+    notices
+        .iter()
+        .filter_map(|n| match n {
+            Notice::Reminder { reminder, .. } => Some(*reminder),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Only the event types a session always produced: limits and reminders add none.
+fn only_session_events(h: &Harness) {
+    for e in h.events() {
+        assert!(
+            [
+                "session.started.v1",
+                "session.paused.v1",
+                "session.resumed.v1",
+                "session.stopped.v1",
+                "activity_bucket.v1",
+                "app_usage.v1",
+            ]
+            .contains(&e.body.event_type()),
+            "unexpected {}",
+            e.body.event_type()
+        );
+    }
+}
+
+#[test]
+fn limit_warnings_count_the_running_session_and_never_repeat() {
+    let outbox = shared_outbox();
+    let mut h = utc_harness_at(t0(), outbox.clone());
+    let id = h.agent.start(None, None).unwrap();
+    h.step(1);
+    // Fetched at start, leaving out the running session.
+    assert!(h
+        .agent
+        .take_data_requests()
+        .contains(&DataRequest::WorkLimits {
+            exclude_session_id: Some(id)
+        }));
+    // 7 h 59 min from the server against an 8 h limit; 39 h 59 min against 40 h.
+    h.agent.on_work_limits(
+        Some(work_limits(Some(480), Some(2400), 479 * 60, 2399 * 60)),
+        Some(id),
+    );
+    // The next tick shows 80% of both; 100% once this session adds a minute, counted
+    // locally from its current partial minute on.
+    let mut seen = Vec::new();
+    for _ in 0..62 {
+        h.step(1);
+        seen.extend(limit_warnings(&h.agent.take_notices()));
+    }
+    assert_eq!(
+        seen,
+        [
+            (LimitScope::Daily, 80),
+            (LimitScope::Weekly, 80),
+            (LimitScope::Daily, 100),
+            (LimitScope::Weekly, 100)
+        ]
+    );
+    let daily = h.agent.limit_summary().unwrap().daily.unwrap();
+    assert_eq!(daily.limit_minutes, 480);
+    assert_eq!(
+        daily.worked_seconds - 479 * 60,
+        u64::from(h.tracked_seconds().0) + h.agent.activity.unemitted_seconds(),
+        "server figure + this session's buckets + its current minute"
+    );
+    h.step(600);
+    assert!(limit_warnings(&h.agent.take_notices()).is_empty());
+    only_session_events(&h);
+
+    // A restart (crash recovery) repeats nothing.
+    drop(h);
+    let mut h = utc_harness_at(t0() + TimeDelta::seconds(700), outbox);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    h.step(120);
+    assert!(limit_warnings(&h.agent.take_notices()).is_empty());
+    assert!(
+        h.agent
+            .limit_summary()
+            .unwrap()
+            .daily
+            .unwrap()
+            .worked_seconds
+            >= 480 * 60
+    );
+}
+
+#[test]
+fn limits_refresh_every_five_minutes_while_active_only() {
+    let mut h = utc_harness();
+    let fetches = |h: &mut Harness| {
+        h.agent
+            .take_data_requests()
+            .into_iter()
+            .filter(|r| matches!(r, DataRequest::WorkLimits { .. }))
+            .count()
+    };
+    h.step(30);
+    assert_eq!(fetches(&mut h), 0, "no session: no fetch");
+    h.agent.start(None, None).unwrap();
+    h.step(1);
+    assert_eq!(fetches(&mut h), 1);
+    h.step(299);
+    assert_eq!(fetches(&mut h), 0);
+    h.step(1);
+    assert_eq!(fetches(&mut h), 1, "five minutes later");
+    h.agent.pause().unwrap();
+    h.step(900);
+    assert_eq!(fetches(&mut h), 0, "paused: none");
+    h.agent.resume().unwrap();
+    h.step(1);
+    assert_eq!(fetches(&mut h), 1, "again on resume");
+}
+
+#[test]
+fn no_limit_warning_while_paused_and_none_without_limits() {
+    let mut h = utc_harness();
+    let id = h.agent.start(None, None).unwrap();
+    h.step(5);
+    h.agent.pause().unwrap();
+    // Another device pushed today over the limit while this one is paused.
+    h.agent
+        .on_work_limits(Some(work_limits(Some(60), None, 7200, 7200)), Some(id));
+    h.step(120);
+    assert!(limit_warnings(&h.agent.take_notices()).is_empty());
+    assert!(
+        h.agent.limit_summary().is_some(),
+        "the popover line still shows it"
+    );
+    h.agent.resume().unwrap();
+    h.step(1);
+    assert_eq!(
+        limit_warnings(&h.agent.take_notices()),
+        [(LimitScope::Daily, 100)]
+    );
+
+    // Plans without work limits (`enabled: false`).
+    let mut h = utc_harness();
+    let id = h.agent.start(None, None).unwrap();
+    h.agent.on_work_limits(None, Some(id));
+    h.step(60);
+    assert!(limit_warnings(&h.agent.take_notices()).is_empty());
+    assert_eq!(h.agent.limit_summary(), None);
+}
+
+#[test]
+fn an_offline_copy_is_kept_until_midnight() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 23, 50, 0).unwrap();
+    let mut h = utc_harness_at(start, shared_outbox());
+    let id = h.agent.start(None, None).unwrap();
+    h.agent
+        .on_work_limits(Some(work_limits(Some(480), None, 3600, 3600)), Some(id));
+    h.step(60);
+    assert!(h.agent.limit_summary().is_some());
+    // Offline: no new copy arrives. After midnight the old one says nothing.
+    h.step(600);
+    assert_eq!(h.agent.limit_summary(), None);
+    assert!(!h.agent.limits.uncounted.is_empty());
+}
+
+#[test]
+fn schedule_is_fetched_at_startup_hourly_and_when_the_date_changes() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 22, 0, 30).unwrap();
+    let mut h = utc_harness_at(start, shared_outbox());
+    let fetches = |h: &mut Harness| {
+        h.agent
+            .take_data_requests()
+            .into_iter()
+            .filter(|r| *r == DataRequest::ScheduleToday)
+            .count()
+    };
+    h.step(1);
+    assert_eq!(fetches(&mut h), 1, "at startup");
+    h.step(3600);
+    assert_eq!(fetches(&mut h), 1, "an hour later");
+    // 23:00:31 → 00:00:31: one fetch at midnight for the new date.
+    h.step(1800);
+    assert_eq!(fetches(&mut h), 0);
+    h.step(1800);
+    assert_eq!(fetches(&mut h), 1);
+}
+
+#[test]
+fn start_reminder_answers_and_settings_persist() {
+    let outbox = shared_outbox();
+    let mut h = utc_harness_at(t0(), outbox.clone());
+    h.agent.on_schedule(Some(schedule_doc(
+        json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": false, "shift": null, "day_off": null}),
+    )));
+    let st = h.agent.reminder_status();
+    assert!(!st.schedule_sets_hours);
+    assert_eq!(st.window.unwrap().source, HoursSource::Mine);
+    // 09:00:30 → 09:10:30: not tracking, nothing ran today.
+    h.step(600);
+    assert_eq!(
+        reminder_kinds(&h.agent.take_notices()),
+        [ReminderKind::Start]
+    );
+    let p = h.agent.reminder().cloned().unwrap();
+    assert_eq!(p.kind, ReminderKind::Start);
+    assert_eq!(p.hours_start, Some(at(9, 0, 0)));
+    // A choice that does not answer it, or a stale id, changes nothing.
+    assert!(!h
+        .agent
+        .resolve_reminder(p.id, ReminderChoice::Stop)
+        .unwrap());
+    assert!(!h
+        .agent
+        .resolve_reminder(Uuid::new_v4(), ReminderChoice::NotToday)
+        .unwrap());
+    assert!(h.agent.reminder().is_some());
+    assert!(h
+        .agent
+        .resolve_reminder(p.id, ReminderChoice::NotToday)
+        .unwrap());
+    assert!(h.agent.reminder().is_none());
+    h.step(3600);
+    assert!(reminder_kinds(&h.agent.take_notices()).is_empty());
+
+    // Settings are validated and kept locally across restarts.
+    let mut s = ReminderSettings::default();
+    s.my_hours.end = s.my_hours.start;
+    assert!(matches!(
+        h.agent.set_reminder_settings(s),
+        Err(AgentError::InvalidReminderSettings(_))
+    ));
+    let s = ReminderSettings {
+        stop: false,
+        ..ReminderSettings::default()
+    };
+    h.agent.set_reminder_settings(s.clone()).unwrap();
+    assert!(h.events().is_empty(), "nothing is queued for the server");
+    drop(h);
+    let mut h = utc_harness_at(at(10, 30, 0), outbox);
+    assert_eq!(h.agent.reminder_status().settings, s);
+    h.step(60);
+    assert!(
+        reminder_kinds(&h.agent.take_notices()).is_empty(),
+        "\"Not today\" survives the restart"
+    );
+}
+
+#[test]
+fn organization_schedule_sets_hours_and_day_off_silences() {
+    let mut h = utc_harness();
+    h.agent.on_schedule(Some(schedule_doc(json!({
+        "date": "2026-10-28", "timezone": "UTC", "scheduled": true,
+        "shift": {"start_at": "2026-10-28T08:30:00Z", "end_at": "2026-10-28T16:30:00Z"},
+        "day_off": null
+    }))));
+    let st = h.agent.reminder_status();
+    assert!(st.schedule_sets_hours);
+    assert_eq!(st.window.unwrap().source, HoursSource::Organization);
+    // 08:40 has passed: the start reminder comes on the next tick.
+    h.step(1);
+    assert_eq!(
+        reminder_kinds(&h.agent.take_notices()),
+        [ReminderKind::Start]
+    );
+
+    let mut h = utc_harness();
+    h.agent.on_schedule(Some(schedule_doc(json!({
+        "date": "2026-10-28", "timezone": "UTC", "scheduled": true, "shift": null, "day_off": "holiday"
+    }))));
+    assert!(h.agent.reminder_status().window.is_none());
+    assert!(h.agent.reminder_status().schedule_sets_hours);
+    h.step(900);
+    assert!(reminder_kinds(&h.agent.take_notices()).is_empty());
+}
+
+#[test]
+fn stop_reminder_never_while_paused_and_stop_tracking_choice() {
+    let mut h = utc_harness();
+    let mut s = ReminderSettings::default();
+    s.my_hours.start = reminders::parse_hhmm("07:00").unwrap();
+    s.my_hours.end = reminders::parse_hhmm("08:55").unwrap();
+    h.agent.set_reminder_settings(s).unwrap();
+    h.agent.start(None, None).unwrap();
+    // The stop reminder is due at 09:05; the session is paused across it: nothing.
+    h.step(30);
+    h.agent.pause().unwrap();
+    h.step(600);
+    assert!(reminder_kinds(&h.agent.take_notices()).is_empty());
+    h.agent.resume().unwrap();
+    h.step(1);
+    assert_eq!(
+        reminder_kinds(&h.agent.take_notices()),
+        [ReminderKind::Stop]
+    );
+    let p = h.agent.reminder().cloned().unwrap();
+    assert_eq!(p.hours_end, at(8, 55, 0));
+    // "Keep tracking" just clears it; an hour later: "still tracking?".
+    assert!(h
+        .agent
+        .resolve_reminder(p.id, ReminderChoice::Keep)
+        .unwrap());
+    assert_eq!(h.agent.state(), SessionState::Active);
+    h.step(3600);
+    assert_eq!(
+        reminder_kinds(&h.agent.take_notices()),
+        [ReminderKind::StillTracking]
+    );
+    // "Stop tracking" stops the session as the person's own stop.
+    let p = h.agent.reminder().cloned().unwrap();
+    assert!(h
+        .agent
+        .resolve_reminder(p.id, ReminderChoice::Stop)
+        .unwrap());
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+    let stopped = h.of_type("session.stopped.v1");
+    assert_eq!(
+        serde_json::to_value(&stopped[0]).unwrap()["payload"]["reason"],
+        "user"
+    );
+    only_session_events(&h);
+}
+
+#[test]
+fn runtime_publishes_limits_and_reminders_and_fetches_them() {
+    let clock = FakeClock::new(t0());
+    let outbox = shared_outbox();
+    let mut cfg = AgentConfig::new(identity());
+    cfg.time_zone = Some(chrono_tz::Tz::UTC);
+    let (rt, _handle) = Runtime::new(
+        cfg,
+        RuntimeDeps {
+            clock: Arc::new(clock.clone()),
+            input: Box::new(FakeInput::new()),
+            foreground: Box::new(FakeForeground::new("app")),
+            capturer: FakeCapturer::new(64, 32),
+            transport: FakeTransport::new(),
+            credentials: Arc::new(MemoryCredentials::default()),
+            outbox,
+            device_credential: "cred".into(),
+            seed: Some(1),
+        },
+    )
+    .unwrap();
+    let rec = Recorder::default();
+    let mut rt = rt.with_observer(Box::new(rec.clone()));
+    rt.handle_command(Command::SetReminderSettings(ReminderSettings {
+        enabled: false,
+        ..ReminderSettings::default()
+    }));
+    assert!(!rt.live_status().reminders.settings.enabled);
+    rt.handle_command(Command::Start {
+        project_id: None,
+        task_id: None,
+    });
+    let id = rt.live_status().session.unwrap().id;
+    clock.advance(Duration::from_secs(1));
+    rt.agent.tick();
+    rt.forward_agent_outputs();
+    let jobs: Vec<_> = std::iter::from_fn(|| rt.jobs_rx.as_ref().unwrap().try_recv().ok())
+        .filter_map(|j| match j {
+            NetJob::FetchWorkLimits(e) => Some(format!("limits {}", e == Some(id))),
+            NetJob::FetchSchedule => Some("schedule".into()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(jobs, ["schedule", "limits true"]);
+    rt.handle_net(NetEvent::WorkLimits {
+        excluded: Some(id),
+        limits: Some(work_limits(Some(480), None, 3600, 3600)),
+    });
+    let live = rt.live_status();
+    assert_eq!(live.limits.unwrap().daily.unwrap().limit_minutes, 480);
+    assert!(live.reminder.is_none());
+    // The notice the tray receives, as serialized.
+    rt.handle_net(NetEvent::WorkLimits {
+        excluded: Some(id),
+        limits: Some(work_limits(Some(60), None, 3600, 3600)),
+    });
+    clock.advance(Duration::from_secs(1));
+    rt.agent.tick();
+    rt.forward_agent_outputs();
+    let notices = rec.0.lock().unwrap().1.clone();
+    let n = notices
+        .iter()
+        .find(|n| matches!(n, Notice::LimitWarning { .. }))
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(n).unwrap(),
+        json!({"kind": "limit_warning", "id": "daily:2026-10-28:100", "scope": "daily",
+               "percent": 100, "limit_minutes": 60, "worked_seconds": 3602})
+    );
+}
+
+#[test]
+fn network_worker_maps_limits_and_schedule_responses() {
+    let t = FakeTransport::new();
+    let (tx, rx) = mpsc::channel();
+    let mut w = NetWorker {
+        api: ApiClient::new("http://h", t.clone()).with_credential("c"),
+        outbox: shared_outbox(),
+        clock: Arc::new(FakeClock::new(t0())),
+        capturer: FakeCapturer::new(8, 8),
+        events: tx,
+        health: Arc::new(Mutex::new(Health::default())),
+        syncer: Syncer::default(),
+        opts: RunOptions::new(),
+        status: SyncStatus::default(),
+        shared_status: Arc::new(Mutex::new(SyncStatus::default())),
+        online: true,
+        blocked: None,
+        next_sync: Duration::ZERO,
+        next_heartbeat: Duration::ZERO,
+        next_policy: Duration::ZERO,
+    };
+    let drain = || -> Vec<NetEvent> {
+        rx.try_iter()
+            .filter_map(|i| match i {
+                Input::Net(e) => Some(e),
+                Input::Command(_) => None,
+            })
+            .collect()
+    };
+    t.push(200, json!({"enabled": false}));
+    assert!(!w.fetch_work_limits(None));
+    assert!(matches!(
+        drain().as_slice(),
+        [NetEvent::WorkLimits { limits: None, .. }]
+    ));
+    // An older server without the endpoints: no limits, "my hours".
+    t.push(404, json!({"error": {"code": "not_found"}}));
+    assert!(!w.fetch_work_limits(None));
+    t.push(404, json!({"error": {"code": "not_found"}}));
+    assert!(!w.fetch_schedule());
+    assert!(matches!(
+        drain().as_slice(),
+        [
+            NetEvent::WorkLimits { limits: None, .. },
+            NetEvent::Schedule(None)
+        ]
+    ));
+    // Offline: the agent keeps its copies (it only hears that the network is down).
+    t.fail_next("offline");
+    assert!(!w.fetch_work_limits(None));
+    t.fail_next("offline");
+    assert!(!w.fetch_schedule());
+    assert!(matches!(drain().as_slice(), [NetEvent::Online(false)]));
+    // Other errors (e.g. a plain 401) keep them too.
+    t.push(401, json!({"error": {"code": "unauthorized"}}));
+    assert!(!w.fetch_schedule());
+    assert!(drain().is_empty());
+    // Revocation is revocation.
+    t.push(
+        401,
+        json!({"error": {"code": "device_revoked", "message": "x"}}),
+    );
+    assert!(w.fetch_work_limits(None));
+    assert!(matches!(drain().as_slice(), [NetEvent::Revoked]));
 }

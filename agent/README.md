@@ -17,6 +17,8 @@ agent/
     │       ├── apps.rs        foreground samples → app_usage segments
     │       ├── screenshot.rs  random slot per interval, capture gates, capture pipeline
     │       ├── policy.rs      Ed25519 signed policy, typed settings, work hours, cache
+    │       ├── limits.rs      work-limit warnings at 80% / 100% (pure, local only)
+    │       ├── reminders.rs   start / stop / "still tracking?" reminders (pure, local only)
     │       ├── outbox.rs      SQLite outbox sealed with ChaCha20-Poly1305, sequence counter
     │       ├── sync.rs        batching, per-event results, backoff, bisection
     │       ├── clock.rs       Clock trait (wall + monotonic), suspend / clock-change detection
@@ -150,6 +152,38 @@ slot within the first second when the project policy enables screenshots).
 * **Crash recovery.** The open session is snapshotted every 10 s. On restart within 10
   minutes it is resumed with `data_gap {reason: offline_agent_stopped}`; otherwise it is
   closed with `session.stopped {reason: shutdown}` at the last time the agent was seen.
+* **Work-limit warnings** (Stage 4 F4, `limits.rs`). While a session is `Active` the
+  network thread fetches `GET /v1/device/work-limits?exclude_session_id=<running>` at
+  start / resume and every 5 minutes. The server leaves the running session out; the
+  agent adds its own count of it (active + idle seconds of its emitted buckets plus the
+  open, not-yet-emitted minute — the same definition as the uploaded buckets) and of any
+  session started after the copy was computed. Like the server, a session counts on the
+  local day and ISO week it **started** on. At 80% and 100% of a daily or weekly limit
+  the runtime raises `Notice::LimitWarning` once per threshold and period (daily keyed
+  by `today.date`, weekly by `week.period_start`; when 100% is already reached only that
+  one shows). Offline, the last good copy is kept until its `today.date` is no longer
+  today in its `timezone`. A limit never stops or pauses anything, and nothing is
+  checked while paused. `LiveStatus::limits` carries today's / this week's progress.
+* **Reminders** (Stage 4 F3, `reminders.rs`). Employee-controlled settings (all on by
+  default; "my hours" Mon–Fri 09:00–17:30 device-local time) are changed with
+  `Command::SetReminderSettings`. `GET /v1/device/schedule-today` is fetched at startup,
+  hourly and when the local date changes. Today's window: `day_off` → none; scheduled
+  with a shift → the shift; scheduled without one → none (not a working day); not
+  scheduled, never fetched, or `404` from an older server → my hours on my workdays.
+  Reminders (`Notice::Reminder` + `LiveStatus::reminder`, at most one, answered with
+  `Command::ResolveReminder`): **start** at window start + 10 min while inside the
+  window, nothing tracking and no time tracked today ("Not today" suppresses it for the
+  day); **stop** at window end + 10 min, the first `Active` moment from then on (a
+  session started after that gets no stop reminder, its hourly check counts from its
+  start); **still tracking?** every 60 min after that while the same session stays
+  active (it follows the session past midnight). "Stop tracking" is the person's own
+  stop (`reason: user`). A paused session gets nothing, and a reminder whose condition
+  no longer holds (session started, paused or stopped; window over) is withdrawn.
+* **Local nudge state.** Outbox metadata (sealed like the rest): `work_limits` (last good
+  copy, uncounted sessions, highest warning shown per period) and `reminders` (settings,
+  today's schedule, what was shown today and the "still tracking?" cadence), so a
+  restart repeats nothing. Neither adds an event, a heartbeat field or any other request
+  body: both endpoints are plain GETs.
 * **Revocation** (`401 device_revoked` anywhere, or heartbeat `credential_status:
   "revoked"`): stop locally without an event, wipe the outbox, delete the credential and
   outbox key, mark `device.json` revoked, exit 3.
@@ -181,6 +215,8 @@ slot within the first second when the project policy enables screenshots).
   bundle id and display name — no API that returns a window title or URL is called.
   macOS capture refuses to run without Screen Recording rather than upload a
   wallpaper-only frame.
+* Work limits and reminders are local nudges: no event, no telemetry, nothing about
+  them is sent; the agent only reads its own user's limits and schedule.
 * Tray app: the session-start notice is generated from the verified policy with the
   web's wording; the web view cannot reach the network, filesystem or shell (command
   allowlist + CSP); permission prompts are shown at most once per install.
@@ -251,6 +287,21 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
   (picker from the device's project list; "Goes to your manager for approval, like any
   correction."). The popover opens near the tray icon without taking focus, so keys typed
   on returning stay in the person's app. Only the person answers (`resolve_idle`).
+* **Work limits** (F4): a "Work limit · 5h 12m of 8h today" line under Today when a
+  limit applies, and a banner at 80% / 100% — "80% of today's 8 h limit", "You've
+  reached this week's 40 h limit" — with one line, "Tracking continues — this is a
+  heads-up from your organization's work limits.", and one button, "Got it".
+* **Reminders** (F3): a card at the top of the popover — "Ready to start tracking?" /
+  "Your hours started at 09:00." with "Start tracking" (the usual start flow: project,
+  then the session-start notice) and "Not today"; "Your hours ended at 17:30" / "This
+  session is still tracking." and "Still tracking?" / "Your hours ended at 17:30." with
+  "Stop tracking" and "Keep tracking" ("shift" instead of "hours" when the
+  organization's schedule sets them). "Reminders" at the bottom opens the settings:
+  master switch, start / end / hourly switches and "My hours" (start, end, workdays),
+  or "Your organization's schedule sets these hours" when a schedule applies.
+* There are no native OS notifications (none of the existing notices use one): for an
+  idle return, a reminder or a limit warning the popover opens near the tray icon
+  without taking focus. Nothing about limits or reminders is shown while paused.
 * **Enrollment** screen (server URL + one-time code), **revocation** screen, and banners
   for licence refusal / grace, missing permissions ("Allow…" once, then "Fix in System
   Settings" — never a second prompt, `DEV-03`), work-hours pause, overlap stop, recovery.
@@ -259,7 +310,7 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
   Pause/resume, Stop, Quit). **Quit stops the session first** and waits for the bounded
   final sync. Closing the popover only hides it.
 * **Security.** The web view gets no filesystem/shell/HTTP/opener permissions: only the
-  18 app commands listed in `capabilities/main.json` (each an `allow-<command>`
+  20 app commands listed in `capabilities/main.json` (each an `allow-<command>`
   permission generated by `build.rs`) plus event listening. URLs are opened by Rust from a
   fixed allowlist (dashboard, System Settings panes). Strict CSP, no remote content, fonts
   (Inter, JetBrains Mono, OFL) and logos bundled. The device credential lives in the OS
@@ -351,6 +402,12 @@ the placeholder key never install updates.
   with members list only those members). On `404` (older servers) the tray offers
   "No project" only.
 * `dashboard_url` in the enrollment and heartbeat responses.
+* `GET /v1/device/work-limits[?exclude_session_id=]` → `{enabled: false}` or `{enabled:
+  true, as_of, timezone, daily_minutes|null, weekly_minutes|null, today: {date,
+  worked_seconds}, week: {period_start, worked_seconds}}`; `404` = no limits.
+* `GET /v1/device/schedule-today` → `{date, timezone, scheduled, shift: {start_at,
+  end_at}|null, day_off: holiday|cancelled|leave|null}` (an unknown `day_off` is still a
+  day off); `404` = no schedules, "my hours" apply.
 * Still open, optional: a device-authenticated "today" total across all of the user's devices; the
   tray currently shows this device's buckets only.
 
@@ -415,3 +472,6 @@ the placeholder key never install updates.
   emitted buckets (outbox meta `today_totals`, local calendar day).
 * `Notice::LicenseUnavailable` became a struct variant (`{ block }`) so notices serialize
   for the UI.
+* Overnight shifts: the stop / "still tracking?" reminders follow today's schedule, so a
+  shift that ends after midnight gets no stop reminder; "my hours" must end after they
+  start on the same day.

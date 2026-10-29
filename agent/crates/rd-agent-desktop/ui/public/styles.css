@@ -172,3 +172,25 @@ p { margin: 0; }
 }
 .notice .buttons.one { grid-template-columns: 1fr; }
 .notice .buttons button { padding: 0 10px; font-size: 13px; }
+
+/* ----- work limits and reminders (Stage 4 F4 / F3) --------------------------------- */
+.banner-title { font-weight: 600; font-size: 14px; color: #FFFFFF; }
+.banner.warn .banner-title { color: var(--warn-fg); }
+.banner-detail { color: #C9CDD2; }
+.banner.warn .banner-detail { color: var(--warn-fg); }
+.banner.reminder { border-color: #FFFFFF; }
+.limits { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-top: -6px; }
+.limits .label { color: var(--ink-muted); }
+.limits .value { color: #FFFFFF; display: flex; flex-direction: column; align-items: flex-end; }
+.settings { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--ink-rule); padding-top: 12px; }
+.settings .label { font: 400 11px var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-muted); }
+.toggle { display: flex; align-items: center; gap: 10px; font-size: 13px; color: #FFFFFF; cursor: pointer; }
+.toggle.disabled { color: var(--ink-muted); cursor: default; }
+.toggle input, .day input { width: 16px; height: 16px; margin: 0; flex: none; accent-color: var(--action-red); }
+.hours { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.days { border: 0; margin: 0; padding: 0; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.day {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px;
+  border: 1px solid var(--ink-line); color: #FFFFFF; cursor: pointer;
+}
+.day.on { border-color: #FFFFFF; background: var(--ink-2); }

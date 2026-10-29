@@ -19,7 +19,7 @@ use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
 use controller::{AppView, Controller};
-use view::SessionNotice;
+use view::{RemindersInput, SessionNotice};
 
 type Ctl<'a> = State<'a, Arc<Controller>>;
 
@@ -128,6 +128,34 @@ async fn resolve_idle(
 ) -> Result<AppView, String> {
     let c = ctl.inner().clone();
     blocking(move || c.resolve_idle(&id, &decision, project_id, task_id)).await?;
+    ctl.emit(&app);
+    Ok(ctl.view())
+}
+
+/// The person's answer to a start / stop / "still tracking?" reminder. Only the
+/// popover calls this, on the person's click.
+#[tauri::command]
+async fn resolve_reminder(
+    app: AppHandle,
+    ctl: Ctl<'_>,
+    id: String,
+    choice: String,
+) -> Result<AppView, String> {
+    let c = ctl.inner().clone();
+    blocking(move || c.resolve_reminder(&id, &choice)).await?;
+    ctl.emit(&app);
+    Ok(ctl.view())
+}
+
+/// The employee's reminder settings (kept on this computer only).
+#[tauri::command]
+async fn set_reminder_settings(
+    app: AppHandle,
+    ctl: Ctl<'_>,
+    settings: RemindersInput,
+) -> Result<AppView, String> {
+    let c = ctl.inner().clone();
+    blocking(move || c.set_reminders(&settings)).await?;
     ctl.emit(&app);
     Ok(ctl.view())
 }
@@ -260,6 +288,8 @@ fn main() {
             resume_session,
             stop_session,
             resolve_idle,
+            resolve_reminder,
+            set_reminder_settings,
             dismiss_banner,
             open_dashboard,
             open_permission_settings,

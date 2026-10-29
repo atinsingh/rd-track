@@ -145,6 +145,16 @@ impl ActivityAggregator {
         self.open.is_empty()
     }
 
+    /// Seconds in buckets not emitted yet that will count as tracked (active, idle or
+    /// still pending — a pending second becomes one of the two): the current partial
+    /// minute, for the work-limit count (Stage 4 F4).
+    pub fn unemitted_seconds(&self) -> u64 {
+        self.open
+            .values()
+            .map(|a| u64::from(a.active + a.idle + a.pending))
+            .sum()
+    }
+
     /// Takes the idle runs that ended with the person coming back since the last call
     /// (oldest first; at most one per [`ActivityAggregator::record`]).
     pub fn take_idle_returns(&mut self) -> Vec<IdleRun> {
