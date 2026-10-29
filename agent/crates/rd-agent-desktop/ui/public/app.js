@@ -10,6 +10,11 @@ let selectedTask = "";
 let busy = false;
 let error = null;
 let projectsRequested = false;
+// The "Reminders" settings section is open, and its last save error.
+let settingsOpen = false;
+let settingsError = null;
+// Shown under the start button when "Start tracking" needs a project first.
+let startHint = null;
 const enrollForm = { server: "", code: "", name: "" };
 // The person's pending choice on the idle-return panel (reset for each new prompt).
 const idleChoice = {
@@ -96,14 +101,56 @@ function loadProjects() {
     });
 }
 const opt = (s) => (s === "" ? null : s);
-function onStart() {
-    void run(async () => {
-        const data = await invoke("prepare_session", {
-            projectId: opt(selectedProject),
-            taskId: opt(selectedTask),
-        });
-        notice = { data, review: false };
+async function prepareStart() {
+    const data = await invoke("prepare_session", {
+        projectId: opt(selectedProject),
+        taskId: opt(selectedTask),
     });
+    notice = { data, review: false };
+}
+function onStart() {
+    startHint = null;
+    void run(prepareStart);
+}
+// A reminder's buttons. "Start tracking" continues into the same flow as the Start
+// button (project picker, then the session-start notice).
+function onReminder(r, choice) {
+    void run(async () => {
+        view = await invoke("resolve_reminder", { id: r.id, choice });
+        if (choice !== "start")
+            return;
+        if (!view.can_start)
+            return;
+        if (view.require_project && !selectedProject) {
+            startHint = "Choose a project, then start the session.";
+            return;
+        }
+        await prepareStart();
+    });
+}
+function saveReminders(change) {
+    if (!view)
+        return;
+    const r = view.reminders;
+    const settings = {
+        enabled: r.enabled,
+        start: r.start,
+        stop: r.stop,
+        still_tracking: r.still_tracking,
+        my_start: r.my_start,
+        my_end: r.my_end,
+        my_days: r.my_days,
+        ...change,
+    };
+    settingsError = null;
+    invoke("set_reminder_settings", { settings })
+        .then((v) => {
+        view = v;
+    })
+        .catch((e) => {
+        settingsError = String(e);
+    })
+        .finally(render);
 }
 function onConfirmStart() {
     if (!notice)
@@ -128,12 +175,15 @@ function onBannerAction(b) {
         else if (a.command === "install_update") {
             await invoke("install_update");
         }
+        else if (a.command === "dismiss_banner") {
+            await invoke("dismiss_banner", { id: a.arg });
+        }
         await refresh();
     });
 }
 // ----- views --------------------------------------------------------------------------
 function banners(v) {
-    return v.banners.map((b) => h("div", { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" }, h("span", {}, b.text), (b.action || b.dismissible) &&
+    return v.banners.map((b) => h("div", { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" }, b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text), b.detail && h("span", { class: "banner-detail" }, b.detail), (b.action || b.dismissible) &&
         h("div", { class: "row" }, b.dismissible &&
             h("button", {
                 class: "x",
@@ -194,6 +244,37 @@ function sessionButtons(v) {
         disabled: busy,
         onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
     }, paused ? "Resume" : "Pause"), h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, "Stop"));
+}
+// A start / stop / "still tracking?" reminder: title, one line, two buttons.
+function reminderCard(r) {
+    return h("div", { class: "banner info reminder", role: "status" }, h("strong", { class: "banner-title" }, r.title), h("span", { class: "banner-detail" }, r.detail), h("div", { class: "row" }, h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label), h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label)));
+}
+const WEEKDAYS = [[1, "Mon"], [2, "Tue"], [3, "Wed"], [4, "Thu"], [5, "Fri"], [6, "Sat"], [7, "Sun"]];
+// "Reminders": employee-controlled, kept on this computer only.
+function remindersSection(v) {
+    const r = v.reminders;
+    const toggle = (label, checked, disabled, change) => h("label", { class: `toggle${disabled ? " disabled" : ""}` }, h("input", {
+        type: "checkbox",
+        checked,
+        disabled,
+        onchange: (e) => saveReminders(change(e.target.checked)),
+    }), h("span", {}, label));
+    const off = !r.enabled;
+    const hours = r.schedule_note
+        ? [h("p", { class: "hint" }, r.schedule_note)]
+        : [
+            h("div", { class: "hours" }, h("label", { class: "field" }, "Start", h("input", { type: "time", value: r.my_start, disabled: off, onchange: (e) => saveReminders({ my_start: e.target.value }) })), h("label", { class: "field" }, "End", h("input", { type: "time", value: r.my_end, disabled: off, onchange: (e) => saveReminders({ my_end: e.target.value }) }))),
+            h("fieldset", { class: "days" }, h("legend", { class: "sr-only" }, "Workdays"), ...WEEKDAYS.map(([d, name]) => h("label", { class: `day${r.my_days.includes(d) ? " on" : ""}` }, h("input", {
+                type: "checkbox",
+                checked: r.my_days.includes(d),
+                disabled: off,
+                onchange: (e) => {
+                    const on = e.target.checked;
+                    saveReminders({ my_days: on ? [...r.my_days, d] : r.my_days.filter((x) => x !== d) });
+                },
+            }), h("span", {}, name)))),
+        ];
+    return h("section", { class: "settings", "aria-labelledby": "reminders-h" }, h("span", { class: "eyebrow", id: "reminders-h" }, "Reminders"), toggle("Reminders", r.enabled, false, (on) => ({ enabled: on })), toggle("When my hours start", r.start, off, (on) => ({ start: on })), toggle("When my hours end", r.stop, off, (on) => ({ stop: on })), toggle("Every hour after that, if still tracking", r.still_tracking, off, (on) => ({ still_tracking: on })), h("span", { class: "label" }, "My hours"), ...hours, h("p", { class: "hint" }, `${r.today}. Reminders stay on this computer; nothing is sent to your organization.`), settingsError && h("p", { class: "error", role: "alert" }, settingsError));
 }
 function onResolveIdle(iv) {
     const move = idleChoice.decision === "reassign";
@@ -263,7 +344,17 @@ function mainView(v) {
     loadProjects();
     if (v.idle)
         return idleView(v, v.idle);
-    return h("section", { class: "popover", "aria-label": "RoundDigital Track" }, header(v), ...banners(v), v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera), ...projectPickers(v), sessionButtons(v), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "today" }, h("span", { class: "label" }, "Today"), h("span", { class: "value" }, h("span", { class: "mono" }, v.today), v.activity ? " · activity " : "", v.activity ? h("span", { class: "mono" }, v.activity) : "")), h("div", { class: "foot" }, h("span", {}, v.sync), h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, "My dashboard →")), h("div", { class: "small-links" }, h("span", { class: "hint" }, `v${v.version}`), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit")));
+    return h("section", { class: "popover", "aria-label": "RoundDigital Track" }, header(v), v.reminder && reminderCard(v.reminder), ...banners(v), v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera), ...projectPickers(v), sessionButtons(v), v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "today" }, h("span", { class: "label" }, "Today"), h("span", { class: "value" }, h("span", { class: "mono" }, v.today), v.activity ? " · activity " : "", v.activity ? h("span", { class: "mono" }, v.activity) : "")), (v.limit_today || v.limit_week) &&
+        h("div", { class: "limits" }, h("span", { class: "label" }, "Work limit"), h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l) => !!l).map((l) => h("span", { class: "mono" }, l)))), h("div", { class: "foot" }, h("span", {}, v.sync), h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, "My dashboard →")), settingsOpen && remindersSection(v), h("div", { class: "small-links" }, h("span", { class: "hint" }, `v${v.version}`), h("button", {
+        class: "link",
+        type: "button",
+        "aria-expanded": String(settingsOpen),
+        onclick: () => {
+            settingsOpen = !settingsOpen;
+            settingsError = null;
+            render();
+        },
+    }, settingsOpen ? "Close reminders" : "Reminders"), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit")));
 }
 function noticeView(n, review) {
     const screenshots = (i) => i.key === "screenshots.enabled";

@@ -14,6 +14,8 @@
 //! | [`apps`] | Foreground-app samples → `app_usage` segments |
 //! | [`screenshot`] | Randomised screenshot slots and the capture/upload pipeline |
 //! | [`policy`] | Signed policy verification, typed settings, work hours |
+//! | [`limits`] | Work-limit warnings at 80% / 100% (local only) |
+//! | [`reminders`] | Start / stop / "still tracking?" reminders (local only) |
 //! | [`outbox`] | Encrypted SQLite outbox with a persistent sequence counter |
 //! | [`sync`] | Batching, per-event result handling, backoff |
 //! | [`clock`] | Wall + monotonic clock, suspend / clock-change detection |
@@ -30,9 +32,11 @@ pub mod clock;
 pub mod describe;
 pub mod events;
 pub mod identity;
+pub mod limits;
 pub mod outbox;
 pub mod platform;
 pub mod policy;
+pub mod reminders;
 pub mod runtime;
 pub mod screenshot;
 pub mod state;

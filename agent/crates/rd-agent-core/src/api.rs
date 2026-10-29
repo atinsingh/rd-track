@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -215,6 +215,90 @@ pub struct DeviceProject {
 enum DeviceProjectList {
     Bare(Vec<DeviceProject>),
     Wrapped { projects: Vec<DeviceProject> },
+}
+
+/// Time worked so far today (`GET /v1/device/work-limits`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkedToday {
+    /// The person's local date (in [`WorkLimits::timezone`]).
+    pub date: NaiveDate,
+    /// Seconds worked on that date, the running session left out when asked.
+    pub worked_seconds: u64,
+}
+
+/// Time worked so far this week (`GET /v1/device/work-limits`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkedWeek {
+    /// Monday of the ISO week.
+    pub period_start: NaiveDate,
+    /// Seconds worked in the week, the running session left out when asked.
+    pub worked_seconds: u64,
+}
+
+/// `GET /v1/device/work-limits` with `enabled: true` (Stage 4 F4): the person's daily
+/// and weekly limits and the time worked so far. Sessions count on the local day they
+/// start on. Read only by the agent, for local warnings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkLimits {
+    /// Server time of the figures.
+    #[serde(with = "crate::ts")]
+    pub as_of: DateTime<Utc>,
+    /// IANA time zone the dates are in.
+    pub timezone: String,
+    /// Daily limit (`None` = no daily limit).
+    #[serde(default)]
+    pub daily_minutes: Option<u32>,
+    /// Weekly limit (`None` = no weekly limit).
+    #[serde(default)]
+    pub weekly_minutes: Option<u32>,
+    /// Today so far.
+    pub today: WorkedToday,
+    /// This week so far.
+    pub week: WorkedWeek,
+}
+
+/// Today's shift (`GET /v1/device/schedule-today`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledShift {
+    /// Shift start.
+    #[serde(with = "crate::ts")]
+    pub start_at: DateTime<Utc>,
+    /// Shift end.
+    #[serde(with = "crate::ts")]
+    pub end_at: DateTime<Utc>,
+}
+
+/// Why today is not a working day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayOff {
+    /// An organization holiday.
+    Holiday,
+    /// Today's shift was cancelled.
+    Cancelled,
+    /// Approved full-day leave.
+    Leave,
+    /// A reason this agent does not know (still a day off).
+    #[serde(other)]
+    Other,
+}
+
+/// `GET /v1/device/schedule-today` (Stage 4 F3): the person's working hours today, so
+/// reminders stay inside them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleToday {
+    /// The person's local date.
+    pub date: NaiveDate,
+    /// IANA time zone of `date`.
+    pub timezone: String,
+    /// `false`: no schedule (the agent uses the hours the person set).
+    pub scheduled: bool,
+    /// Today's shift; `None` with `scheduled` means not a working day.
+    #[serde(default)]
+    pub shift: Option<ScheduledShift>,
+    /// A holiday, cancelled shift or full-day leave: no reminders.
+    #[serde(default)]
+    pub day_off: Option<DayOff>,
 }
 
 /// `POST /v1/ingestion/event-batches` request.
@@ -565,6 +649,29 @@ impl ApiClient {
         })
     }
 
+    /// `GET /v1/device/work-limits[?exclude_session_id=…]` — `None` when the plan has
+    /// no work limits (`enabled: false`). `exclude` is the running session, which the
+    /// agent counts itself.
+    pub fn work_limits(&self, exclude: Option<Uuid>) -> Result<Option<WorkLimits>, ApiError> {
+        let mut url = self.url("/device/work-limits");
+        if let Some(id) = exclude {
+            url.push_str("?exclude_session_id=");
+            url.push_str(&id.to_string());
+        }
+        let v: serde_json::Value = self.call(Method::Get, url, None, true)?;
+        if v.get("enabled").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Ok(None);
+        }
+        serde_json::from_value(v)
+            .map(Some)
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
+    /// `GET /v1/device/schedule-today`.
+    pub fn schedule_today(&self) -> Result<ScheduleToday, ApiError> {
+        self.call(Method::Get, self.url("/device/schedule-today"), None, true)
+    }
+
     /// Serializes a batch request.
     pub fn encode_batch(req: &EventBatchRequest) -> Result<Vec<u8>, ApiError> {
         Self::json(req)
@@ -810,6 +917,115 @@ mod tests {
                 .status,
             LicenseStatus::Inactive
         );
+    }
+
+    #[test]
+    fn work_limits_endpoint() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("http://h", t.clone()).with_credential("c");
+        t.push(
+            200,
+            json!({"enabled": true, "as_of": "2026-10-28T15:00:00.000Z", "timezone": "Europe/Riga",
+                   "daily_minutes": 480, "weekly_minutes": null,
+                   "today": {"date": "2026-10-28", "worked_seconds": 1800},
+                   "week": {"period_start": "2026-10-26", "worked_seconds": 5400}, "extra": 1}),
+        );
+        let session = Uuid::parse_str("6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b").unwrap();
+        let l = api.work_limits(Some(session)).unwrap().unwrap();
+        assert_eq!(l.daily_minutes, Some(480));
+        assert_eq!(l.weekly_minutes, None);
+        assert_eq!(l.today.date, NaiveDate::from_ymd_opt(2026, 10, 28).unwrap());
+        assert_eq!(l.week.worked_seconds, 5400);
+        assert_eq!(l.timezone, "Europe/Riga");
+        let req = t.requests().remove(0);
+        assert_eq!(req.method, Method::Get);
+        assert!(req.url.ends_with(
+            "/v1/device/work-limits?exclude_session_id=6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+        ));
+        assert!(req
+            .headers
+            .contains(&("authorization".into(), "Device c".into())));
+
+        // Plans without work limits.
+        t.push(200, json!({"enabled": false}));
+        assert_eq!(api.work_limits(None).unwrap(), None);
+        assert!(t.requests()[1].url.ends_with("/v1/device/work-limits"));
+        // `enabled: true` without the figures is a decode error (the last good copy stays).
+        t.push(200, json!({"enabled": true, "timezone": "UTC"}));
+        assert!(matches!(api.work_limits(None), Err(ApiError::Decode(_))));
+
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "x"}}),
+        );
+        assert_eq!(api.work_limits(None).unwrap_err(), ApiError::DeviceRevoked);
+        t.push(401, json!({"error": {"code": "unauthorized"}}));
+        assert!(matches!(
+            api.work_limits(None),
+            Err(ApiError::Http { status: 401, .. })
+        ));
+        t.fail_next("connection refused");
+        assert!(matches!(api.work_limits(None), Err(ApiError::Transport(_))));
+        let unenrolled = ApiClient::new("http://h", t);
+        assert_eq!(
+            unenrolled.work_limits(None).unwrap_err(),
+            ApiError::NotEnrolled
+        );
+    }
+
+    #[test]
+    fn schedule_today_endpoint() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("http://h", t.clone()).with_credential("c");
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": true,
+                   "shift": {"start_at": "2026-10-28T09:00:00.000Z", "end_at": "2026-10-28T17:00:00.000Z"},
+                   "day_off": null}),
+        );
+        let s = api.schedule_today().unwrap();
+        assert!(s.scheduled);
+        let shift = s.shift.unwrap();
+        assert_eq!(
+            shift.start_at,
+            crate::ts::parse("2026-10-28T09:00:00Z").unwrap()
+        );
+        assert_eq!(
+            shift.end_at,
+            crate::ts::parse("2026-10-28T17:00:00Z").unwrap()
+        );
+        assert_eq!(s.day_off, None);
+        assert!(t.requests()[0].url.ends_with("/v1/device/schedule-today"));
+
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": true, "shift": null, "day_off": "holiday"}),
+        );
+        assert_eq!(api.schedule_today().unwrap().day_off, Some(DayOff::Holiday));
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": false, "day_off": "sabbatical"}),
+        );
+        let s = api.schedule_today().unwrap();
+        assert_eq!(s.shift, None);
+        assert_eq!(
+            s.day_off,
+            Some(DayOff::Other),
+            "unknown reasons are still a day off"
+        );
+
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "x"}}),
+        );
+        assert_eq!(api.schedule_today().unwrap_err(), ApiError::DeviceRevoked);
+        t.push(404, json!({"error": {"code": "not_found"}}));
+        assert!(matches!(
+            api.schedule_today(),
+            Err(ApiError::Http { status: 404, .. })
+        ));
+        t.fail_next("offline");
+        assert!(matches!(api.schedule_today(), Err(ApiError::Transport(_))));
     }
 
     #[test]
