@@ -1,4 +1,4 @@
-import type { PlanId, PlatformMe, PlatformTenantDetail, PlatformTenantDTO, SupportGrantDTO, SupportSection } from '@rd/contracts';
+import type { DeletionCertificateDTO, PlanId, PlatformMe, PlatformTenantDetail, PlatformTenantDTO, SupportGrantDTO, SupportSection } from '@rd/contracts';
 import { request } from './api';
 
 /**
@@ -33,5 +33,6 @@ export const platform = {
   grants: async (signal?: AbortSignal) => (await get<{ items: SupportGrantDTO[] }>('/platform/v1/support-grants', signal)).items,
   requestSupport: (id: string, reason: string, hours: number) => post<SupportGrantDTO>(`/platform/v1/organizations/${enc(id)}/support-grants`, { reason, hours }),
   endSupport: (grantId: string) => post<SupportGrantDTO>(`/platform/v1/support-grants/${enc(grantId)}/end`),
+  certificates: async (signal?: AbortSignal) => (await get<{ items: DeletionCertificateDTO[] }>('/platform/v1/deletion-certificates', signal)).items,
   supportRead: <T>(id: string, section: SupportSection, signal?: AbortSignal) => get<T>(`/platform/v1/organizations/${enc(id)}/support/${section}`, signal),
 };

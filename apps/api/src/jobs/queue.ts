@@ -19,7 +19,9 @@ export type JobKind =
   | 'webhook.deliver'
   | 'time_off.accrue'
   | 'payroll.generate'
-  | 'budgets.check';
+  | 'budgets.check'
+  | 'data_export.generate'
+  | 'organizations.purge';
 
 export interface Job {
   id: number;

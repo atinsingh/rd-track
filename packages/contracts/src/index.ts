@@ -12,3 +12,4 @@ export * from './engine';
 export * from './identity';
 export * from './workspaces';
 export * from './platform';
+export * from './lifecycle';

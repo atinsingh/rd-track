@@ -170,6 +170,7 @@ export default function Tenants() {
                         <td>
                           <Badge tone={bucket(t) === 'attention' ? 'warn' : bucket(t) === 'active' ? 'solid' : 'outline'}>{STATUS_LABEL[t.status]}</Badge>
                           {t.status === 'trialing' && t.trial_ends_at ? <span className="small muted"> ends {formatRelative(t.trial_ends_at, tz)}</span> : null}
+                          {t.deletion_scheduled_at ? <span className="small"> · closing {formatRelative(t.deletion_scheduled_at, tz)}</span> : null}
                         </td>
                         <td className={numClass}>
                           {t.billable_seats} / {t.seats}

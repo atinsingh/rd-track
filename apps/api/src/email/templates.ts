@@ -1,4 +1,4 @@
-import { MANDATORY_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type NotificationCategory } from '@rd/contracts';
+import { MANDATORY_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type DeletionCertificateDTO, type NotificationCategory } from '@rd/contracts';
 import type { EmailMessage } from './sender';
 
 /**
@@ -113,4 +113,19 @@ ${p.notes ? `<p style="margin:16px 0 0;white-space:pre-line;color:#3f444b">${esc
 <p style="max-width:640px;margin:16px auto 0;font-size:12px;color:#53595f">Reply to this email to reach ${escape(p.orgName)}.</p>
 </td></tr></table></body></html>`;
   return { to: p.to, replyTo: p.replyTo, subject, text, html };
+}
+
+/**
+ * The certificate of deletion (slice 5b), sent to the organization's admins after its
+ * data is gone. The text is the certificate itself; the digest lets a kept copy be
+ * checked against RoundDigital's record.
+ */
+export function certificateEmail(to: string, c: DeletionCertificateDTO, certificateText: string): EmailMessage {
+  const text = `${certificateText}\n\nCertificate ${c.id} · SHA-256 ${c.digest}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,sans-serif;color:#0e1013">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:16px"><tr><td style="padding:24px 28px">
+<pre style="margin:0;white-space:pre-wrap;font:13px/1.55 ui-monospace,monospace">${escape(text)}</pre>
+</td></tr></table></td></tr></table></body></html>`;
+  return { to, subject: `Certificate of deletion — ${c.organization_name}`, text, html };
 }

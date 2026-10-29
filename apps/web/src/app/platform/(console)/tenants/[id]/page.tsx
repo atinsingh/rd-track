@@ -333,6 +333,11 @@ export default function TenantPage() {
             title={d.name}
             description={`${d.region} · created ${formatDateTime(d.created_at, TZ)} UTC`}
           />
+          {d.deletion_scheduled_at ? (
+            <Banner tone="warn" title={`Closing: everything is deleted on ${formatDateTime(d.deletion_scheduled_at, TZ)} UTC`}>
+              Their admins closed the organization and can cancel until then. A certificate of deletion is kept afterwards.
+            </Banner>
+          ) : null}
           {d.status === 'past_due' || d.status === 'grace' ? <Banner tone="warn" title={`Billing needs attention: ${d.status.replace('_', ' ')}`} /> : null}
           <Subscription key={`${d.plan}|${d.seats}|${d.status}`} t={d} onSaved={t.reload} />
           <Health t={d} />

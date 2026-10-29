@@ -54,6 +54,8 @@ export interface PlatformTenantDTO {
   last_sync_at: string | null;
   support_active: boolean;
   support_pending: boolean;
+  /** Set while the organization is closing (slice 5b). */
+  deletion_scheduled_at: string | null;
 }
 
 export interface PlatformTenantDetail extends PlatformTenantDTO {

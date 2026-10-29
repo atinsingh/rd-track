@@ -261,7 +261,7 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
 async function tenants(deps: Pick<Deps, 'now'>, q: Queryable, onlyId?: string): Promise<PlatformTenantDTO[]> {
   const rows = await many<Omit<PlatformTenantDTO, 'support_active' | 'support_pending' | 'billable_seats' | 'viewer_seats'> & { grants: { status: 'pending' | 'approved' | 'denied' | 'ended'; expires_at: string | null }[] }>(
     q,
-    `SELECT o.id, o.name, o.slug, o.region, s.plan, s.status, s.seats, s.trial_ends_at, s.grace_ends_at, o.created_at,
+    `SELECT o.id, o.name, o.slug, o.region, s.plan, s.status, s.seats, s.trial_ends_at, s.grace_ends_at, o.created_at, o.deletion_scheduled_at,
        (SELECT count(*)::int FROM users u WHERE u.organization_id = o.id AND u.status = 'active') AS people,
        (SELECT count(*)::int FROM devices d WHERE d.organization_id = o.id AND d.credential_status = 'active') AS devices,
        (SELECT max(d.last_sync_at) FROM devices d WHERE d.organization_id = o.id) AS last_sync_at,

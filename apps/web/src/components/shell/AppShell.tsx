@@ -11,6 +11,7 @@ import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { HOME_KEY, activeHref, can, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
 import { useApi } from '@/lib/useApi';
+import { ClosingBanner } from './ClosingBanner';
 import { CommandPalette } from './CommandPalette';
 import { LicenceBanner } from './LicenceBanner';
 import { NotificationBell } from './NotificationBell';
@@ -245,6 +246,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </nav>
       <main id="main" className={s.main} tabIndex={-1}>
         <LicenceBanner />
+        <ClosingBanner />
         {children}
       </main>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={groups} />

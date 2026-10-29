@@ -196,7 +196,8 @@ describe('row-level security on the engine tables', () => {
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'organization_id' AND NOT a.attisdropped
       WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
       ORDER BY 1`);
-    // signup_requests exist before their organization does; only the signup routes read them.
-    expect(r.rows.map((x) => x.relname)).toEqual(['signup_requests']);
+    // Two exceptions, neither read through a tenant session: signup_requests exist before
+    // their organization does, and deletion_certificates outlive the organization they describe.
+    expect(r.rows.map((x) => x.relname)).toEqual(['deletion_certificates', 'signup_requests']);
   });
 });

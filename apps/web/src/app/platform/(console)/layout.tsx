@@ -43,6 +43,7 @@ export default function ConsoleLayout({ children }: { children: ReactNode }) {
         <nav className={s.nav} aria-label="Operator console">
           {link('/platform', 'Organizations')}
           {link('/platform/support', 'Support access')}
+          {link('/platform/certificates', 'Deletion certificates')}
         </nav>
         <span className={s.who}>
           {me.data.display_name}

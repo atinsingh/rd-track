@@ -51,7 +51,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV — **done** | S/M | P1 |
 | G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed — **done** | S | P1 |
 | G16 | Admin | No setup checklist after signup — **done** | M | P1 |
-| G17 | Admin | No tenant export, contract-end deletion or deletion certificate | M | P1 |
+| G17 | Admin | No tenant export, contract-end deletion or deletion certificate — **done** | M | P1 |
 | G18 | Emp | Deletion requests cover screenshots only; no "download my data" | M | P1 |
 | G19 | Manager | No timesheet due dates, reminders or escalation — **done** | M | P1 |
 | G20 | Org admin | No organization-wide summary without being a manager — **done** | M | P1 |
@@ -179,8 +179,20 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    starts the clock, and either side can end it. While open, the operator can read
    people, teams, computers, policies and the audit log — never activity, apps,
    screenshots, time or money — and each section they open is written to the
-   organization's audit log as “RoundDigital support · name”. Next: 5b tenant export
-   and closing an account, 5c employee data export and erasure.
+   organization's audit log as “RoundDigital support · name”.
+
+   **5b done 2026-10-29**: Settings › Organization data exports everything an admin can
+   see as one ZIP of CSVs (people, structure, sessions, corrections, timesheets, time off,
+   shifts, money, policies and history, computers without credentials, legal holds,
+   support access, the full audit log) — never activity, app names, screenshots or
+   secrets — downloadable for 24 hours. Closing needs the exact organization name, gives
+   30 days in which any admin can cancel, and tells admins (security) and everyone else
+   (privacy, so they can take their own data). On the day, an hourly job deletes the
+   stored files and every row (one cascade from `organizations`, audit log included via
+   its purge flag), then keeps a certificate outside the tenant — what was deleted, how
+   many records and files, when backups age out (35 days), SHA-256 of the text — and
+   emails it to the admins. Operators see closing organizations and the certificates.
+   Migration 015.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on
