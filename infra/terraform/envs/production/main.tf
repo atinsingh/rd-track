@@ -39,6 +39,8 @@ module "stack" {
   stripe_price_pro             = var.stripe_price_pro
   stripe_price_standard_annual = var.stripe_price_standard_annual
   stripe_price_pro_annual      = var.stripe_price_pro_annual
+  agent_download_base_url      = var.agent_download_base_url
+  agent_version                = var.agent_version
   extra_app_environment        = var.extra_app_environment
 
   alarm_topic_arn = var.alarm_topic_arn

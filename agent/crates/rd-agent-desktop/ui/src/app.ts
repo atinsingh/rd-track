@@ -79,6 +79,7 @@ interface AppView {
   projects: Project[];
   projects_supported: boolean | null;
   server_url: string | null;
+  enroll_prefill: { server_url: string; code: string } | null;
   simulated: boolean;
   version: string;
 }
@@ -111,6 +112,23 @@ let settingsError: string | null = null;
 // Shown under the start button when "Start tracking" needs a project first.
 let startHint: string | null = null;
 const enrollForm = { server: "", code: "", name: "" };
+// The enrolment link last applied to the form, so typing over it isn't undone on the next view.
+let appliedLink = "";
+let fromLink = false;
+
+/** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
+function linkParts(text: string): { server: string; code: string } | null {
+  const t = text.trim();
+  if (!t.startsWith("rdtrack://")) return null;
+  try {
+    const u = new URL(t);
+    const server = u.searchParams.get("server") ?? "";
+    const code = u.searchParams.get("code") ?? "";
+    return u.hostname === "enroll" && server && code ? { server: server.replace(/\/$/, ""), code } : null;
+  } catch {
+    return null;
+  }
+}
 // The person's pending choice on the idle-return panel (reset for each new prompt).
 const idleChoice: { id: string; decision: IdleDecision; project: string; task: string } = {
   id: "",
@@ -697,6 +715,13 @@ function noticeButtons(review: boolean): HTMLElement[] {
 }
 
 function enrollView(v: AppView): HTMLElement {
+  const p = v.enroll_prefill;
+  if (p && `${p.server_url} ${p.code}` !== appliedLink) {
+    appliedLink = `${p.server_url} ${p.code}`;
+    enrollForm.server = p.server_url;
+    enrollForm.code = p.code;
+    fromLink = true;
+  }
   const input = (key: keyof typeof enrollForm, label: string, attrs: Record<string, unknown>): HTMLElement =>
     h(
       "label",
@@ -705,7 +730,16 @@ function enrollView(v: AppView): HTMLElement {
       h("input", {
         value: enrollForm[key],
         oninput: (e: Event) => {
-          enrollForm[key] = (e.target as HTMLInputElement).value;
+          const value = (e.target as HTMLInputElement).value;
+          const parts = key === "code" ? linkParts(value) : null;
+          if (parts) {
+            enrollForm.server = parts.server;
+            enrollForm.code = parts.code;
+            fromLink = true;
+            render();
+            return;
+          }
+          enrollForm[key] = value;
         },
         disabled: busy,
         ...attrs,
@@ -730,10 +764,11 @@ function enrollView(v: AppView): HTMLElement {
     h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
     h("span", { class: "eyebrow" }, "Set up this computer"),
     h("h1", { class: "title" }, "Connect to your organization"),
-    h("p", { class: "muted" }, "Your administrator gives you a server address and a one-time code. Nothing is recorded until you start a session."),
+    h("p", { class: "muted" }, "Use “Connect this computer” in Track on the web, or the server address and one-time code your administrator gave you. Nothing is recorded until you start a session."),
+    fromLink && h("p", { class: "hint", role: "status" }, "Filled in from a link. Check the server address is your organization’s before you connect."),
     v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
     input("server", "Server address", { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
-    input("code", "Enrollment code", { placeholder: "ABCDEFGHJK", required: true, autocomplete: "one-time-code", spellcheck: false }),
+    input("code", "Enrollment code", { placeholder: "ABCDEFGHJK, or paste the link", required: true, autocomplete: "one-time-code", spellcheck: false }),
     input("name", "Device name (optional)", { placeholder: "Defaults to this computer's name" }),
     error && h("p", { class: "error", role: "alert" }, error),
     h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")),

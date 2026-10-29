@@ -66,6 +66,27 @@ export interface MoneyOverview {
   budgets: ProjectBudgetDTO[];
 }
 
+// ───────────── getting the agent (G10, G12) ─────────────
+
+export interface AgentDownload {
+  os: 'macos' | 'windows';
+  label: string;
+  /** What kind of file, for people who care: "Disk image", "Installer", "MSI for IT". */
+  kind: string;
+  url: string;
+}
+export interface AgentDownloadsResponse {
+  available: boolean;
+  version: string | null;
+  files: AgentDownload[];
+}
+
+/** The scheme the desktop app registers; `rdtrack://enroll?server=…&code=…` fills its sign-in form. */
+export const AGENT_LINK_SCHEME = 'rdtrack';
+export function enrollmentLink(server: string, code: string): string {
+  return `${AGENT_LINK_SCHEME}://enroll?${new URLSearchParams({ server, code })}`;
+}
+
 // ───────────── auditor ─────────────
 
 export interface AuditPerson {

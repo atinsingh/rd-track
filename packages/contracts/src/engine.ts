@@ -113,7 +113,7 @@ export interface InboxCounts {
   total: number;
 }
 
-export const TODO_KINDS = ['submit_timesheet', 'resubmit_timesheet', 'allow_permission', 'open_agent'] as const;
+export const TODO_KINDS = ['submit_timesheet', 'resubmit_timesheet', 'allow_permission', 'open_agent', 'connect_computer'] as const;
 export type TodoKind = (typeof TODO_KINDS)[number];
 
 /** Something the person themselves should do; computed, so it disappears once done. */

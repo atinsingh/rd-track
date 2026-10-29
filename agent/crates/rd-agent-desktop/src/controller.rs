@@ -20,6 +20,8 @@ use rd_agent_core::runtime::{
     RuntimeDeps, RuntimeObserver,
 };
 use serde::Serialize;
+
+use crate::link::EnrollPrefill;
 use tauri::{AppHandle, Emitter};
 
 use crate::view::{
@@ -92,6 +94,8 @@ pub struct AppView {
     pub projects_supported: Option<bool>,
     /// Server the device is enrolled with.
     pub server_url: Option<String>,
+    /// Filled in from an `rdtrack://enroll` link while not enrolled.
+    pub enroll_prefill: Option<EnrollPrefill>,
     /// Simulated platform (Linux development build).
     pub simulated: bool,
     /// App version.
@@ -114,6 +118,7 @@ struct Inner {
     dashboard_url: Option<String>,
     tray: Option<(TrayState, String, Option<String>)>,
     update: Option<String>,
+    enroll_prefill: Option<EnrollPrefill>,
 }
 
 /// The agent controller (shared via Tauri state).
@@ -334,6 +339,7 @@ impl Controller {
         {
             let mut i = lock(&self.inner);
             i.server_url = Some(identity.server_url);
+            i.enroll_prefill = None;
             i.dashboard_url = identity.dashboard_url;
             i.notices.clear();
             i.dismissed.clear();
@@ -619,6 +625,17 @@ impl Controller {
         lock(&self.inner).update = version;
     }
 
+    /// Remembers what an enrolment link filled in. Ignored once this computer is enrolled:
+    /// a link never moves an enrolled computer to another server.
+    pub fn set_enroll_prefill(&self, prefill: EnrollPrefill) -> bool {
+        let mut i = lock(&self.inner);
+        if i.server_url.is_some() && !matches!(i.phase, Some(Phase::Enroll | Phase::Revoked)) {
+            return false;
+        }
+        i.enroll_prefill = Some(prefill);
+        true
+    }
+
     /// Builds the popover view.
     pub fn view(&self) -> AppView {
         let i = lock(&self.inner);
@@ -683,6 +700,7 @@ impl Controller {
             projects: i.projects.clone(),
             projects_supported: i.projects_supported,
             server_url: i.server_url.clone(),
+            enroll_prefill: i.enroll_prefill.clone(),
             simulated: self.simulated,
             version: env!("CARGO_PKG_VERSION"),
         }

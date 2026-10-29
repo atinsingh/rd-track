@@ -32,7 +32,7 @@ describe('navigation by role', () => {
   const hrefs = (m: Me) => navFor(accessFor(m)).flatMap((g) => g.items.map((i) => i.href));
 
   it('shows employees only their own pages', () => {
-    expect(hrefs(me({}))).toEqual(['/me', '/me/time', '/me/insights', '/me/privacy', '/me/settings', '/exports']);
+    expect(hrefs(me({}))).toEqual(['/me', '/me/time', '/me/insights', '/me/computers', '/me/privacy', '/me/settings', '/exports']);
   });
   it('adds team pages for managers and admin pages for admins', () => {
     expect(hrefs(me({}, ['t1']))).toContain('/approvals');

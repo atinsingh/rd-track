@@ -44,9 +44,9 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G7 | All | No notification bell or unread count; pages promise notifications that never come | M | P0 |
 | G8 | Emp / Mgr | No notification for corrections, timesheet submitted, deletion decided, device revoked or permission denied | S each | P0 |
 | G9 | Admin | Corrections from people with no manager never reached admins in the inbox — **fixed** | S | P0 |
-| G10 | Admin / Emp | No agent download in the web app; unsigned installers; updater placeholder; no autostart | M | P0 |
+| G10 | Admin / Emp | No agent download in the web app; unsigned installers; updater placeholder; no autostart — **download done**; signing, updater and autostart remain | M | P0 |
 | G11 | Buyer | No terms / DPA acceptance at signup | S | P0 |
-| G12 | Admin | Enrolment codes admin-only, one per person; no deep link; no self-enrolment | M | P1 |
+| G12 | Admin | Enrolment codes admin-only, one per person; no deep link; no self-enrolment — **done** | M | P1 |
 | G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) | M | P1 |
 | G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV — **done** | S/M | P1 |
 | G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed — **done** | S | P1 |
@@ -156,7 +156,16 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    invites row by row, creating teams by name. Teams can be renamed and archived once
    empty (creating one with the same name brings it back; migration 013); projects can
    be renamed, re-referenced, archived and restored; tasks renamed or archived; project
-   members removed. Next: 4c agent download and self-enrolment.
+   members removed.
+
+   **4c done 2026-10-29**: My computers lets anyone who tracks download the installer
+   for their system (`AGENT_DOWNLOAD_BASE_URL` and `AGENT_VERSION`), get their own
+   one-time connection code and open the app with an `rdtrack://enroll` link that fills in
+   the server and code; they still press Connect. It lists their computers and their
+   status. "Connect your computer" is a to-do until one is connected; admins can copy the
+   same link from their code dialog. Still open from G10: code-signing certificates,
+   the updater endpoint and key, and start-at-login (all need credentials or a release
+   channel decision).
 5. **Platform console and data lifecycle.** The operator console (`/platform`) with
    support grants end to end, tenant offboarding with export and deletion certificate,
    employee data export and erasure (G2, G17, G18). Then SSO / SCIM (G26).

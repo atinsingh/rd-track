@@ -95,3 +95,15 @@ variable "extra_app_environment" {
   type        = map(string)
   default     = {}
 }
+
+variable "agent_download_base_url" {
+  description = "AGENT_DOWNLOAD_BASE_URL: where agent installers are published, e.g. https://github.com/<org>/<repo>/releases/download/agent-v0.2.0. Empty: the web app says installers aren't published yet."
+  type        = string
+  default     = ""
+}
+
+variable "agent_version" {
+  description = "AGENT_VERSION: the published agent version offered for download, e.g. 0.2.0."
+  type        = string
+  default     = ""
+}

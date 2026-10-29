@@ -22,6 +22,8 @@ rd-agent = { path = "../rd-agent", features = ["keychain"] }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-updater = "2.14"
 tauri-plugin-opener = "2.7"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 chrono.workspace = true
 env_logger.workspace = true
 log.workspace = true

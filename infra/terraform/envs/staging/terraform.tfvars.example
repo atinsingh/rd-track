@@ -17,6 +17,8 @@ billing_provider      = "manual"
 # stripe_price_pro      = "price_..."
 # stripe_price_standard_annual = "price_..."
 # stripe_price_pro_annual      = "price_..."
+# agent_download_base_url      = "https://github.com/<org>/<repo>/releases/download/agent-v0.2.0"
+# agent_version                = "0.2.0"
 
 alarm_emails = ["ops@rounddigital.example"]
 # alarm_topic_arn = "arn:aws:sns:ca-central-1:111111111111:existing-topic"

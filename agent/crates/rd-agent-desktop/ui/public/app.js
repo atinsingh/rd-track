@@ -16,6 +16,24 @@ let settingsError = null;
 // Shown under the start button when "Start tracking" needs a project first.
 let startHint = null;
 const enrollForm = { server: "", code: "", name: "" };
+// The enrolment link last applied to the form, so typing over it isn't undone on the next view.
+let appliedLink = "";
+let fromLink = false;
+/** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
+function linkParts(text) {
+    const t = text.trim();
+    if (!t.startsWith("rdtrack://"))
+        return null;
+    try {
+        const u = new URL(t);
+        const server = u.searchParams.get("server") ?? "";
+        const code = u.searchParams.get("code") ?? "";
+        return u.hostname === "enroll" && server && code ? { server: server.replace(/\/$/, ""), code } : null;
+    }
+    catch {
+        return null;
+    }
+}
 // The person's pending choice on the idle-return panel (reset for each new prompt).
 const idleChoice = {
     id: "",
@@ -376,10 +394,26 @@ function noticeButtons(review) {
     ];
 }
 function enrollView(v) {
+    const p = v.enroll_prefill;
+    if (p && `${p.server_url} ${p.code}` !== appliedLink) {
+        appliedLink = `${p.server_url} ${p.code}`;
+        enrollForm.server = p.server_url;
+        enrollForm.code = p.code;
+        fromLink = true;
+    }
     const input = (key, label, attrs) => h("label", { class: "field" }, label, h("input", {
         value: enrollForm[key],
         oninput: (e) => {
-            enrollForm[key] = e.target.value;
+            const value = e.target.value;
+            const parts = key === "code" ? linkParts(value) : null;
+            if (parts) {
+                enrollForm.server = parts.server;
+                enrollForm.code = parts.code;
+                fromLink = true;
+                render();
+                return;
+            }
+            enrollForm[key] = value;
         },
         disabled: busy,
         ...attrs,
@@ -397,7 +431,7 @@ function enrollView(v) {
                 enrollForm.code = "";
             });
         },
-    }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("span", { class: "eyebrow" }, "Set up this computer"), h("h1", { class: "title" }, "Connect to your organization"), h("p", { class: "muted" }, "Your administrator gives you a server address and a one-time code. Nothing is recorded until you start a session."), v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error), input("server", "Server address", { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }), input("code", "Enrollment code", { placeholder: "ABCDEFGHJK", required: true, autocomplete: "one-time-code", spellcheck: false }), input("name", "Device name (optional)", { placeholder: "Defaults to this computer's name" }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")));
+    }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("span", { class: "eyebrow" }, "Set up this computer"), h("h1", { class: "title" }, "Connect to your organization"), h("p", { class: "muted" }, "Use “Connect this computer” in Track on the web, or the server address and one-time code your administrator gave you. Nothing is recorded until you start a session."), fromLink && h("p", { class: "hint", role: "status" }, "Filled in from a link. Check the server address is your organization’s before you connect."), v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error), input("server", "Server address", { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }), input("code", "Enrollment code", { placeholder: "ABCDEFGHJK, or paste the link", required: true, autocomplete: "one-time-code", spellcheck: false }), input("name", "Device name (optional)", { placeholder: "Defaults to this computer's name" }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")));
 }
 function revokedView() {
     return h("section", { class: "popover" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("span", { class: "eyebrow" }, "Device removed"), h("h1", { class: "title" }, "Tracking has stopped"), h("p", { class: "muted" }, "Your organization removed this computer. Nothing is recorded and data that had not been sent was erased from this computer."), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke("reenroll"); }) }, "Enroll again")), h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, "Quit")));

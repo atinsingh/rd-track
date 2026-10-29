@@ -1,6 +1,7 @@
 import type {
   AccountSecurity,
   InviteInfo,
+  AgentDownloadsResponse,
   AdminProjectDTO,
   UserImportResponse,
   AdminOverview,
@@ -405,6 +406,10 @@ export const rd = {
     directory: (signal?: AbortSignal) => get<DirectoryResponse>('/v1/me/directory', { signal }),
     insights: (r: Range, tz: string, signal?: AbortSignal) => get<PersonalInsights>('/v1/me/insights', { query: { ...r, tz }, signal }),
     todos: (signal?: AbortSignal) => get<TodosResponse>('/v1/me/todos', { signal }),
+    devices: (signal?: AbortSignal) => list<DeviceDTO>('/v1/me/devices', { signal }),
+    /** A one-time code to connect one of my own computers (self-enrolment, G12). */
+    enrollmentCode: () => post<EnrollmentCodeResponse>('/v1/me/enrollment-code', {}),
+    agentDownloads: (signal?: AbortSignal) => get<AgentDownloadsResponse>('/v1/agent/downloads', { signal }),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {

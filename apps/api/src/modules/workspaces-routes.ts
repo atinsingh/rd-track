@@ -1,12 +1,42 @@
-import { AUDIT_EXPORT_MAX_ROWS, auditQuery, type AdminOverview, type AuditPerson, type MoneyOverview } from '@rd/contracts';
+import {
+  AUDIT_EXPORT_MAX_ROWS,
+  auditQuery,
+  type AdminOverview,
+  type AgentDownloadsResponse,
+  type AuditPerson,
+  type DeviceDTO,
+  type EnrollmentCodeResponse,
+  type MoneyOverview,
+} from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
+import type { Config } from '../config';
 import type { Deps } from '../context';
-import { ADMIN_ROLES, AUDIT_ROLES, MONEY_ROLES, requireRole } from '../http';
+import { withTx } from '../db/pool';
+import { ADMIN_ROLES, AUDIT_ROLES, MONEY_ROLES, requireRole, userOf } from '../http';
 import { toCsv } from '../lib/csv';
 import { parse } from '../lib/validate';
 import { audit, listAudit } from './audit/service';
+import { createEnrollmentCode, listDevices } from './devices/service';
 import { adminOverview, auditPeople, moneyOverview } from './engine/workspaces';
 import { assertMoneyPlan } from './money/time';
+
+/**
+ * Installer links for the published agent version (G10). File names are the Tauri bundler's,
+ * as GitHub release assets store them (spaces become dots); a CDN mirrors the same names.
+ */
+export function agentDownloads(c: Config['agentDownloads']): AgentDownloadsResponse {
+  if (!c.baseUrl || !c.version) return { available: false, version: null, files: [] };
+  const file = (name: string) => `${c.baseUrl}/${encodeURIComponent(`RoundDigital.Track_${c.version}_${name}`)}`;
+  return {
+    available: true,
+    version: c.version,
+    files: [
+      { os: 'macos', label: 'macOS 12 or later (Apple silicon and Intel)', kind: 'Disk image', url: file('universal.dmg') },
+      { os: 'windows', label: 'Windows 10 or 11 (64-bit)', kind: 'Installer', url: file('x64-setup.exe') },
+      { os: 'windows', label: 'Windows, for IT deployment', kind: 'MSI', url: file('x64_en-US.msi') },
+    ],
+  };
+}
 
 /** Engine slice 4: what each role's home is built from, and the auditor's tools (G16, G20–G24). */
 export async function workspacesRoutes(app: FastifyInstance, deps: Deps) {
@@ -19,6 +49,18 @@ export async function workspacesRoutes(app: FastifyInstance, deps: Deps) {
     const a = requireRole(req, MONEY_ROLES);
     await assertMoneyPlan(deps, pool, a.organizationId);
     return moneyOverview(deps, pool, a);
+  });
+
+  // ───────── getting the agent (G10, G12) ─────────
+  app.get('/v1/agent/downloads', user, async (): Promise<AgentDownloadsResponse> => agentDownloads(deps.config.agentDownloads));
+  app.get('/v1/me/devices', user, async (req): Promise<{ items: DeviceDTO[] }> => {
+    const a = userOf(req);
+    return { items: await listDevices(pool, a.organizationId, a.userId) };
+  });
+  /** Self-enrolment: anyone who tracks gets a code for their own computer, without asking an admin. */
+  app.post('/v1/me/enrollment-code', user, async (req, reply): Promise<EnrollmentCodeResponse> => {
+    const a = userOf(req);
+    return reply.code(201).send(await withTx(pool, (tx) => createEnrollmentCode(deps, tx, a, a.userId, req.id)));
   });
 
   // ───────── audit ─────────

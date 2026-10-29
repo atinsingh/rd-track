@@ -302,6 +302,13 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
 * There are no native OS notifications (none of the existing notices use one): for an
   idle return, a reminder or a limit warning the popover opens near the tray icon
   without taking focus. Nothing about limits or reminders is shown while paused.
+* **Enrollment links.** The app registers `rdtrack://` (Tauri deep-link plugin; single
+  instance, so on Windows and Linux a second launch hands the link to the running app).
+  `rdtrack://enroll?server=…&code=…` — from My computers on the web or the admin's code
+  dialog — fills in the enrollment form and opens it; the person checks the server
+  address ("Filled in from a link…") and presses Connect. A link never enrolls on its own
+  and is ignored once the computer is connected. Pasting the link into the code field
+  works too. Parsing lives in `link.rs` (unit-tested).
 * **Enrollment** screen (server URL + one-time code), **revocation** screen, and banners
   for licence refusal / grace, missing permissions ("Allow…" once, then "Fix in System
   Settings" — never a second prompt, `DEV-03`), work-hours pause, overlap stop, recovery.

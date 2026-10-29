@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import type { DeviceDTO, EnrollmentCodeResponse, PermissionState } from '@rd/contracts';
+import { enrollmentLink, type DeviceDTO, type EnrollmentCodeResponse, type PermissionState } from '@rd/contracts';
 import { CopyButton } from '@/components/CopyButton';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
@@ -117,6 +117,7 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
         code ? (
           <>
             <CopyButton text={code.code} label="Copy code" variant="inverse" />
+            <CopyButton text={enrollmentLink(window.location.origin, code.code)} label="Copy link" variant="inverse" />
             <Button variant="quiet" onClick={close}>
               Done
             </Button>
@@ -140,6 +141,9 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
           </div>
           <p role="timer" aria-live="off">
             Single use. <Countdown expiresAt={code.expires_at} />. Shown only once — share it directly with {person?.display_name ?? 'them'}.
+          </p>
+          <p className="small" style={{ color: 'var(--ink-muted)' }}>
+            The link opens the Track app with the server address and code filled in. People who track can also get their own code under My computers.
           </p>
           <p className="small" style={{ color: 'var(--ink-muted)' }}>
             On first run the agent explains what it collects and asks for the macOS or Windows permissions it needs. It never installs or tracks silently.

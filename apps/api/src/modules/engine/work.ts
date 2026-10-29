@@ -258,6 +258,18 @@ export async function todosFor(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
     `SELECT id, name, last_seen_at, permissions FROM devices WHERE user_id = $1 AND credential_status = 'active' ORDER BY name`,
     [actor.userId],
   );
+  if (me.tracking_enabled && devices.length === 0) {
+    // Onboarding (slice 4c): someone who tracks but has no computer connected yet.
+    items.push({
+      id: 'connect_computer',
+      kind: 'connect_computer',
+      title: 'Connect your computer',
+      body: 'Install the Track app and connect it with a one-time code. Nothing is recorded until you start a session.',
+      link: '/me/computers',
+      due_at: null,
+      overdue: false,
+    });
+  }
   for (const d of devices) {
     for (const [key, label] of [['input_monitoring', 'Input Monitoring'], ['screen_recording', 'Screen Recording']] as const) {
       if (d.permissions?.[key] === 'denied') {

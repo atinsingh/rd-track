@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod controller;
+mod link;
 mod tray;
 mod view;
 
@@ -15,6 +16,7 @@ use std::sync::Arc;
 use rd_agent_core::events::StopReason;
 use rd_agent_core::runtime::Command;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::UpdaterExt;
 
@@ -45,10 +47,7 @@ async fn enroll(
     device_name: Option<String>,
 ) -> Result<AppView, String> {
     let server_url = server_url.trim().to_owned();
-    if !(server_url.starts_with("https://")
-        || server_url.starts_with("http://localhost")
-        || server_url.starts_with("http://127.0.0.1"))
-    {
+    if !link::acceptable_server(&server_url) {
         return Err("Enter the server address starting with https://".into());
     }
     let c = ctl.inner().clone();
@@ -268,12 +267,35 @@ fn check_for_updates(app: AppHandle) {
     });
 }
 
+/// An `rdtrack://enroll` link (from the web app, or forwarded by a second launch) fills in
+/// the sign-in form and shows the window. Nothing is enrolled until the person presses Connect.
+fn open_link(app: &AppHandle, raw: &str) {
+    let Some(prefill) = link::parse_enroll_link(raw) else {
+        return;
+    };
+    let ctl = app.state::<Arc<Controller>>();
+    if ctl.set_enroll_prefill(prefill) {
+        ctl.emit(app);
+        tray::show_centered(app);
+    } else {
+        log::info!("enrolment link ignored: this computer is already connected");
+    }
+}
+
 fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
     let ctl = Controller::new();
     let app = tauri::Builder::default()
+        // First, so a second launch (e.g. opening an enrolment link on Windows or Linux)
+        // hands its arguments to the running tray app instead of starting another one.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            for arg in argv.iter().skip(1) {
+                open_link(app, arg);
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(ctl.clone())
@@ -309,6 +331,23 @@ fn main() {
                 tray::show_centered(app.handle());
             }
             ctl.emit(app.handle());
+            // Development builds on Windows and Linux register the scheme at run time;
+            // installers register it themselves.
+            #[cfg(any(windows, target_os = "linux"))]
+            if let Err(e) = app.deep_link().register_all() {
+                log::info!("link scheme not registered: {e}");
+            }
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    open_link(&handle, url.as_str());
+                }
+            });
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                for url in urls {
+                    open_link(app.handle(), url.as_str());
+                }
+            }
             check_for_updates(app.handle().clone());
             Ok(())
         })

@@ -25,7 +25,11 @@ export async function createEnrollmentCode(
   if (u!.status !== 'active') throw errors.validation('User is deactivated');
   if (!u!.tracking_enabled) {
     // Viewer-only users are free seats; tracking (and its seat check) must be turned on first.
-    throw errors.validation('Turn on tracking for this user before enrolling a device (it uses a licence seat).');
+    throw errors.validation(
+      userId === actor.userId
+        ? 'Tracking is off for your account, so there is nothing to connect. An org admin can turn it on.'
+        : 'Turn on tracking for this user before enrolling a device (it uses a licence seat).',
+    );
   }
   const code = enrollmentCode();
   const expires = new Date(deps.now().getTime() + CODE_TTL_MIN * 60_000).toISOString();
@@ -146,16 +150,17 @@ export async function heartbeat(
   };
 }
 
-export async function listDevices(q: Queryable, orgId: string): Promise<DeviceDTO[]> {
+/** Every device in the organization, or only one person's (their own "My computers"). */
+export async function listDevices(q: Queryable, orgId: string, userId: string | null = null): Promise<DeviceDTO[]> {
   return many<DeviceDTO>(
     q,
     `SELECT d.id, d.user_id, u.display_name AS user_name, d.name, d.os, d.os_version, d.agent_version, d.credential_status,
             d.enrolled_at, d.revoked_at, d.last_seen_at, d.last_sync_at, d.applied_policy_revision,
             o.policy_revision AS current_policy_revision, d.permissions, d.clock_skew_detected, d.sequence_gaps
      FROM devices d JOIN users u ON u.id = d.user_id JOIN organizations o ON o.id = d.organization_id
-     WHERE d.organization_id = $1
+     WHERE d.organization_id = $1 AND ($2::uuid IS NULL OR d.user_id = $2)
      ORDER BY d.credential_status, u.display_name, d.name`,
-    [orgId],
+    [orgId, userId],
   );
 }
 

@@ -37,6 +37,8 @@ locals {
     STRIPE_PRICE_PRO_MONTHLY      = var.stripe_price_pro
     STRIPE_PRICE_STANDARD_ANNUAL  = var.stripe_price_standard_annual
     STRIPE_PRICE_PRO_ANNUAL       = var.stripe_price_pro_annual
+    AGENT_DOWNLOAD_BASE_URL       = var.agent_download_base_url
+    AGENT_VERSION                 = var.agent_version
   }, var.extra_app_environment)
 
   web_environment = {

@@ -18,6 +18,12 @@ export interface Config {
   /** Public URL of the web app, used in emails and billing redirects. */
   webUrl: string;
   email: { provider: 'console' | 'ses' | 'memory'; from: string; region: string };
+  /**
+   * Where the desktop agent's installers are published (G10): a base URL and the current
+   * version, e.g. a GitHub release (…/releases/download/agent-v0.2.0) or a CDN folder.
+   * Unset: the download page says installers aren't published yet.
+   */
+  agentDownloads: { baseUrl: string | null; version: string | null };
   billing: {
     provider: 'manual' | 'stripe';
     stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: Record<'standard' | 'pro', Record<BillingInterval, string>> };
@@ -77,6 +83,10 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     cookieSecure: env === 'production',
     authRateLimitPerMinute: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE ?? 10),
     webUrl: (process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    agentDownloads: {
+      baseUrl: process.env.AGENT_DOWNLOAD_BASE_URL?.replace(/\/$/, '') || null,
+      version: process.env.AGENT_VERSION || null,
+    },
     email: {
       provider: (process.env.EMAIL_PROVIDER as Config['email']['provider']) ?? (env === 'production' ? 'ses' : 'console'),
       from: process.env.EMAIL_FROM ?? 'RoundDigital Track <no-reply@track.example>',

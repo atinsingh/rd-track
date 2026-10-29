@@ -148,3 +148,42 @@ describe('auditor tools', () => {
     expect((await auditor.get('/v1/audit-events?action=audit.export')).body.items[0]).toMatchObject({ action: 'audit.export' });
   });
 });
+
+describe('getting the agent', () => {
+  it('lists installers only once they are published', async () => {
+    const { agentDownloads } = await import('../src/modules/workspaces-routes');
+    expect(agentDownloads({ baseUrl: null, version: null })).toEqual({ available: false, version: null, files: [] });
+    const d = agentDownloads({ baseUrl: 'https://github.com/rd/track/releases/download/agent-v0.2.0', version: '0.2.0' });
+    expect(d.files.map((f) => f.url)).toEqual([
+      'https://github.com/rd/track/releases/download/agent-v0.2.0/RoundDigital.Track_0.2.0_universal.dmg',
+      'https://github.com/rd/track/releases/download/agent-v0.2.0/RoundDigital.Track_0.2.0_x64-setup.exe',
+      'https://github.com/rd/track/releases/download/agent-v0.2.0/RoundDigital.Track_0.2.0_x64_en-US.msi',
+    ]);
+    expect((await org.users.emp!.client.get('/v1/agent/downloads')).body).toMatchObject({ available: false });
+  });
+
+  it('lets anyone who tracks enrol their own computer, and nobody else', async () => {
+    const todoKinds = async () => ((await org.users.emp2!.client.get('/v1/me/todos')).body.items as { kind: string }[]).map((t) => t.kind);
+    expect(await todoKinds()).toContain('connect_computer');
+    const mine = await org.users.emp2!.client.post('/v1/me/enrollment-code', {});
+    expect(mine.status).toBe(201);
+    expect(mine.body.user_id).toBe(org.users.emp2!.id);
+    const res = await env.app.inject({
+      method: 'POST',
+      url: '/v1/devices/enroll',
+      payload: { enrollment_code: mine.body.code, device_name: 'My laptop', os: 'macos', os_version: '15.6', agent_version: '0.1.0' },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(JSON.parse(res.body).user_id).toBe(org.users.emp2!.id);
+    expect(await todoKinds()).not.toContain('connect_computer');
+    const devices = (await org.users.emp2!.client.get('/v1/me/devices')).body.items as { name: string; user_id: string }[];
+    expect(devices.map((d) => d.name)).toEqual(['My laptop']);
+    expect((await org.users.emp!.client.get('/v1/me/devices')).body.items.every((d: { user_id: string }) => d.user_id === org.users.emp!.id)).toBe(true);
+    // Finance doesn't track here, so there is nothing to connect.
+    const none = await finance.post('/v1/me/enrollment-code', {});
+    expect(none.status).toBe(400);
+    expect(none.body.error.message).toMatch(/Tracking is off for your account/);
+    const log = (await org.admin.get(`/v1/audit-events?action=device.enrollment_code_created&actor_id=${org.users.emp2!.id}`)).body.items;
+    expect(log).toHaveLength(1);
+  });
+});
