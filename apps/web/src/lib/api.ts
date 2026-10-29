@@ -2,6 +2,7 @@ import type {
   AccountSecurity,
   InviteInfo,
   DataExportDTO,
+  ErasureRequestDTO,
   OrganizationLifecycle,
   SupportGrantDTO,
   AgentDownloadsResponse,
@@ -413,6 +414,11 @@ export const rd = {
     /** A one-time code to connect one of my own computers (self-enrolment, G12). */
     enrollmentCode: () => post<EnrollmentCodeResponse>('/v1/me/enrollment-code', {}),
     agentDownloads: (signal?: AbortSignal) => get<AgentDownloadsResponse>('/v1/agent/downloads', { signal }),
+    /** Everything Track holds about me, as a ZIP (G18). */
+    dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/me/data-exports', { signal }),
+    requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),
+    erasureRequest: (signal?: AbortSignal) => get<{ request: ErasureRequestDTO | null }>('/v1/me/erasure-request', { signal }).then((r) => r.request),
+    requestErasure: (reason?: string) => post<ErasureRequestDTO>('/v1/me/erasure-request', reason ? { reason } : {}),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {
@@ -488,6 +494,9 @@ export const rd = {
     cancelClose: () => post<OrganizationLifecycle>('/v1/admin/organization/close/cancel'),
     dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/admin/data-exports', { signal }),
     requestDataExport: () => post<DataExportDTO>('/v1/admin/data-exports'),
+    erasureRequests: (signal?: AbortSignal) => list<ErasureRequestDTO>('/v1/admin/erasure-requests', { signal }),
+    approveErasure: (id: string) => post<ErasureRequestDTO>(`/v1/admin/erasure-requests/${enc(id)}/approve`),
+    declineErasure: (id: string, reason: string) => post<ErasureRequestDTO>(`/v1/admin/erasure-requests/${enc(id)}/decline`, { reason }),
     supportGrants: (signal?: AbortSignal) => list<SupportGrantDTO>('/v1/admin/support-grants', { signal }),
     approveSupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/approve`),
     denySupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/deny`),

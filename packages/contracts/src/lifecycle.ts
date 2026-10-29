@@ -47,3 +47,23 @@ export interface DeletionCertificateDTO {
   /** SHA-256 of the certificate's canonical text, so a copy can be checked. */
   digest: string;
 }
+
+// ───────────── erasure (5c, G18) ─────────────
+
+export const erasureRequest = z.strictObject({ reason: z.string().trim().max(1000).optional() });
+export const erasureDecision = z.strictObject({ reason: z.string().trim().min(3).max(1000) });
+
+export interface ErasureRequestDTO {
+  id: string;
+  user_id: string;
+  user_name: string;
+  reason: string | null;
+  status: 'pending' | 'approved' | 'declined' | 'completed';
+  created_at: string;
+  decided_by_name: string | null;
+  decided_at: string | null;
+  decline_reason: string | null;
+  completed_at: string | null;
+  /** Counts of what was deleted, and of what a legal hold kept. */
+  result: { deleted: Record<string, number>; kept_for_legal_hold: Record<string, number> } | null;
+}

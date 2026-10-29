@@ -1,23 +1,28 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 import {
   NEVER_COLLECTED,
   describeCollection,
   type AuditEventDTO,
   type CollectionItem,
+  type ErasureRequestDTO,
   type MyPolicyResponse,
   type NotificationDTO,
 } from '@rd/contracts';
+import { DataExports } from '@/components/DataExports';
 import { Button } from '@/components/ui/Button';
-import { Empty, ErrorState, Loading, Resource } from '@/components/ui/DataState';
+import { ActionError, Empty, ErrorState, Loading, Resource } from '@/components/ui/DataState';
+import { Dialog } from '@/components/ui/Dialog';
+import { TextArea } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, dlClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { announceNotificationsChanged } from '@/lib/events';
 import { humanize } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { formatDateTime } from '@/lib/time';
-import { useApi } from '@/lib/useApi';
+import { useAction, useApi, type ApiResource } from '@/lib/useApi';
 import s from './privacy.module.css';
 
 interface Row extends CollectionItem {
@@ -72,11 +77,82 @@ const ACTION_TEXT: Record<string, string> = {
   'device.enrollment_code_created': 'Created a device enrollment code for you',
   'device.revoked': 'Revoked one of your devices',
   'legal_hold.create': 'Placed a legal hold on some of your data',
+  'support.viewed': 'Viewed your account during a support visit',
+  'erasure.declined': 'Declined your request to erase your data',
+  'erasure.approved': 'Approved your request to erase your data',
 };
 
 function describeAccess(e: AuditEventDTO): string {
   const text = ACTION_TEXT[e.action] ?? humanize(e.action);
   return e.result === 'denied' ? `${text} — access was denied` : text;
+}
+
+/** G18: ask for everything Track measured about you to be erased. Another admin decides; what a legal hold covers stays until it ends. */
+function Erasure({ res, orgName, tz }: { res: ApiResource<ErasureRequestDTO | null>; orgName: string; tz: string }) {
+  const [asking, setAsking] = useState(false);
+  const [reason, setReason] = useState('');
+  const action = useAction();
+  const close = () => {
+    setAsking(false);
+    setReason('');
+    action.reset();
+  };
+  const submit = async () => {
+    const r = await action.run(() => rd.my.requestErasure(reason.trim() || undefined));
+    if (r) {
+      res.mutate(() => r);
+      close();
+    }
+  };
+  return (
+    <>
+      <Resource {...res} label="Loading">
+        {(req) => {
+          const open = req && (req.status === 'pending' || req.status === 'approved');
+          return (
+            <>
+              {req?.status === 'pending' ? (
+                <Banner tone="ink" role="status" title={`You asked on ${formatDateTime(req.created_at, tz)}`}>
+                  An admin at {orgName} decides. You&apos;ll be told here and by email.
+                </Banner>
+              ) : req?.status === 'approved' ? (
+                <Banner tone="ink" role="status" title="Approved — your data is being erased">
+                  You&apos;ll get an email listing what was erased and what was kept.
+                </Banner>
+              ) : req?.status === 'declined' ? (
+                <Banner tone="warn" title={`${req.decided_by_name ?? 'An admin'} declined your request`}>
+                  {req.decline_reason}
+                </Banner>
+              ) : null}
+              {open ? null : (
+                <div>
+                  <Button onClick={() => setAsking(true)}>{req?.status === 'declined' ? 'Ask again' : 'Ask to erase my data'}</Button>
+                </div>
+              )}
+            </>
+          );
+        }}
+      </Resource>
+      <Dialog
+        open={asking}
+        onClose={close}
+        size="sm"
+        title="Ask to erase your data?"
+        description={`Download your data first if you want a copy. Once approved, your account at ${orgName} is closed and this can't be undone.`}
+        footer={
+          <>
+            <Button onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={submit} disabled={action.busy}>
+              {action.busy ? 'Sending…' : 'Send request'}
+            </Button>
+          </>
+        }
+      >
+        <TextArea label="Reason (optional)" rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+        <ActionError error={action.error} />
+      </Dialog>
+    </>
+  );
 }
 
 /** Unread notices about this person's data stay on this page; everything else is in the bell. */
@@ -109,6 +185,8 @@ export default function PrivacyPage() {
   const policy = useApi('me:policy', (signal) => rd.my.policy(signal));
   const log = useApi('me:access-log', (signal) => rd.my.accessLog(signal));
   const notes = useApi('me:notifications', (signal) => rd.my.notifications(signal));
+  const myExports = useApi('me:data-exports', (signal) => rd.my.dataExports(signal));
+  const erasure = useApi('me:erasure-request', (signal) => rd.my.erasureRequest(signal));
 
   const markRead = async (id: string) => {
     notes.mutate((prev) => prev && { ...prev, items: prev.items.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)) });
@@ -203,11 +281,27 @@ export default function PrivacyPage() {
         </div>
       )}
 
+      <div className="row" id="your-data">
+        <Card title="Download your data" subtitle="Everything Track holds about you, as a ZIP" className="grow">
+          <p className="small secondary">
+            Your sessions, minute-by-minute activity, app usage, screenshots, timesheets, time off and the record of who viewed your data.
+          </p>
+          <DataExports res={myExports} onRequest={() => rd.my.requestDataExport()} label="Prepare my download" tz={tz} />
+        </Card>
+        <Card title="Erase your data" className="grow">
+          <p className="small secondary">
+            Erases your activity, app usage, screenshots and notifications. Hours worked, timesheets and pay records stay, as &ldquo;Erased person&rdquo;, because{' '}
+            {me.organization.name} must keep them. Anything under a legal hold stays until the hold ends.
+          </p>
+          <Erasure res={erasure} orgName={me.organization.name} tz={tz} />
+        </Card>
+      </div>
+
       <Card
         title="Who viewed your data"
         actions={
           <span className={s.links}>
-            <Link href="/exports">Export my data →</Link>
+            <Link href="#your-data">Download my data →</Link>
             <Link href="/me/time">Request a correction →</Link>
             {me.entitlements.includes('screenshots') ? <Link href="/me/screenshots">Request screenshot deletion →</Link> : null}
           </span>

@@ -124,6 +124,8 @@ async function assertAnotherAdmin(q: Queryable, orgId: string, exceptId: string)
 export async function reactivateUser(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<UserDTO> {
   const user = await getUser(q, actor.organizationId, id);
   if (user.status === 'active') throw errors.conflict('already_active', 'This person is already active');
+  const erased = await one(q, 'SELECT 1 FROM users WHERE id = $1 AND erased_at IS NOT NULL', [id]);
+  if (erased) throw errors.conflict('erased', "This person's data was erased; invite them again as a new person");
   if (user.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
   if (user.tracking_enabled) await assertSeatAvailable(q, actor.organizationId, deps.now());
   await q.query(`UPDATE users SET status = 'active', deactivated_at = NULL WHERE organization_id = $1 AND id = $2`, [actor.organizationId, id]);

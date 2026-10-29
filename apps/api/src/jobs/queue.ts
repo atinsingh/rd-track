@@ -21,7 +21,8 @@ export type JobKind =
   | 'payroll.generate'
   | 'budgets.check'
   | 'data_export.generate'
-  | 'organizations.purge';
+  | 'organizations.purge'
+  | 'person.erase';
 
 export interface Job {
   id: number;

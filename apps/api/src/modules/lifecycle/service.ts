@@ -10,12 +10,13 @@ import {
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { enqueue } from '../../jobs/queue';
-import { toCsv } from '../../lib/csv';
 import { errors } from '../../lib/errors';
 import { zip } from '../../lib/zip';
 import { audit } from '../audit/service';
 import { notify } from '../engine/notify';
 import { orgAdmins } from '../engine/events';
+import { personFiles } from './person';
+import { tableCsv } from './tables';
 
 /**
  * Data lifecycle (slice 5b, G17): an organization's own export, closing it, and the
@@ -60,15 +61,6 @@ const ORG_TABLES: { table: string; drop?: string[] }[] = [
   { table: 'support_access_grants' },
   { table: 'audit_logs' },
 ];
-
-const cell = (v: unknown) => (v !== null && typeof v === 'object' ? JSON.stringify(v) : v);
-
-/** Every row of a table for one organization, as CSV with its real column names. */
-export async function tableCsv(q: Queryable, table: string, where: string, args: unknown[], drop: string[] = []): Promise<{ csv: string; rows: number }> {
-  const r = await q.query(`SELECT * FROM ${table} WHERE ${where} ORDER BY 1`, args);
-  const cols = r.fields.map((f) => f.name).filter((c) => !drop.includes(c));
-  return { csv: toCsv(cols, r.rows.map((row: Record<string, unknown>) => cols.map((c) => cell(row[c])))), rows: r.rowCount ?? 0 };
-}
 
 // ───────────── exports ─────────────
 
@@ -125,9 +117,6 @@ export async function listDataExports(deps: Deps, q: Queryable, actor: UserActor
   return Promise.all(rows.map((r) => toDto(deps, r, name)));
 }
 
-/** Files for one export; `person` exports are built in 5c (`personFiles`). */
-export type ExportFiles = (deps: Deps, q: Queryable, orgId: string, subjectUserId: string | null) => Promise<{ name: string; data: Buffer | string }[]>;
-
 async function organizationFiles(deps: Deps, q: Queryable, orgId: string): Promise<{ name: string; data: Buffer | string }[]> {
   const org = await one<{ name: string; slug: string; region: string; created_at: string }>(q, 'SELECT name, slug, region, created_at FROM organizations WHERE id = $1', [orgId]);
   const sub = await one(q, 'SELECT plan, status, seats, billing_interval, trial_ends_at, current_period_end FROM subscriptions WHERE organization_id = $1', [orgId]);
@@ -165,12 +154,6 @@ async function organizationFiles(deps: Deps, q: Queryable, orgId: string): Promi
   return files;
 }
 
-let personFiles: ExportFiles | null = null;
-/** 5c registers how a person's own export is built. */
-export function registerPersonExport(fn: ExportFiles) {
-  personFiles = fn;
-}
-
 export async function generateDataExport(deps: Deps, q: Queryable, id: string): Promise<void> {
   const job = await one<{ id: string; organization_id: string; kind: 'organization' | 'person'; subject_user_id: string | null; requested_by: string }>(
     q,
@@ -182,7 +165,7 @@ export async function generateDataExport(deps: Deps, q: Queryable, id: string): 
   const files =
     job.kind === 'organization'
       ? await organizationFiles(deps, q, job.organization_id)
-      : await personFiles!(deps, q, job.organization_id, job.subject_user_id);
+      : await personFiles(deps, q, job.organization_id, job.subject_user_id!);
   const body = zip(files, deps.now());
   const key = `data-exports/${job.organization_id}/${job.id}.zip`;
   await deps.store.put(key, body, 'application/zip');

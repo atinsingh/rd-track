@@ -8,6 +8,7 @@ import { sendNotificationEmail } from '../modules/engine/notify';
 import { runDeviceHealth, runTimesheetRules } from '../modules/engine/work';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
+import { erasePerson } from '../modules/lifecycle/person';
 import { certificateText, dueForDeletion, generateDataExport, purgeOrganization } from '../modules/lifecycle/service';
 import { checkAllBudgets } from '../modules/money/budgets';
 import { generatePayrollExport } from '../modules/money/payroll';
@@ -81,6 +82,12 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'data_export.generate':
       await withTx(deps.pool, (tx) => generateDataExport(deps, tx, p.data_export_id!));
       return;
+    case 'person.erase': {
+      // The confirmation goes to the address captured before it was replaced, after commit.
+      const mail = await withTx(deps.pool, (tx) => erasePerson(deps, tx, p.erasure_request_id!));
+      if (mail) await deps.email.send(mail);
+      return;
+    }
     case 'organizations.purge':
       await purgeDue(deps);
       return;

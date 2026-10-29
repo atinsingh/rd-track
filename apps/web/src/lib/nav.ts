@@ -160,7 +160,7 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
       { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff', keywords: 'leave accrual' },
       { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits', keywords: 'overtime daily weekly timesheet deadline reminder due' },
-      { href: '/admin/requests', label: 'Deletion requests', capability: 'admin', keywords: 'privacy' },
+      { href: '/admin/requests', label: 'Data requests', capability: 'admin', keywords: 'privacy deletion erasure erase' },
     ],
   },
   {

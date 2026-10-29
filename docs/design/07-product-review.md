@@ -52,7 +52,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed — **done** | S | P1 |
 | G16 | Admin | No setup checklist after signup — **done** | M | P1 |
 | G17 | Admin | No tenant export, contract-end deletion or deletion certificate — **done** | M | P1 |
-| G18 | Emp | Deletion requests cover screenshots only; no "download my data" | M | P1 |
+| G18 | Emp | Deletion requests cover screenshots only; no "download my data" — **done** | M | P1 |
 | G19 | Manager | No timesheet due dates, reminders or escalation — **done** | M | P1 |
 | G20 | Org admin | No organization-wide summary without being a manager — **done** | M | P1 |
 | G21 | Finance | No finance role; Money needs full `org_admin` — **done** | M | P1 |
@@ -193,6 +193,18 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    many records and files, when backups age out (35 days), SHA-256 of the text — and
    emails it to the admins. Operators see closing organizations and the certificates.
    Migration 015.
+
+   **5c done 2026-10-29**: What's collected › Your data. Anyone can download everything
+   Track holds about them as a ZIP (sessions, activity, app usage, screenshots with their
+   images, corrections, timesheets, time off, shifts, computers, notifications and every
+   audit entry about them, including who viewed their data). Anyone can ask for their
+   data to be erased; another admin decides under Settings › Data requests (nobody
+   decides their own, and declining needs a reason the person sees). Approval closes the
+   account at once; a job then deletes activity, app usage, idle decisions, data gaps
+   and screenshots outside any legal hold, plus notifications, sign-in tokens and their
+   own exports, and replaces name and email with "Erased person". Hours, timesheets and
+   pay stay under that name. The person is emailed what was erased and what a hold kept;
+   erased accounts can't be reactivated. Migration 016.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on
