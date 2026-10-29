@@ -1,6 +1,7 @@
 import { userImportRow, type AdminProjectDTO, type ProjectDTO, type UserDTO, type UserImportResponse, type UserImportResult } from '@rd/contracts';
-import type { Deps, UserActor } from '../../context';
+import type { Deps, OrgActor, UserActor } from '../../context';
 import { many, one, withTx, type Queryable } from '../../db/pool';
+import { existsAnywhere } from '../../db/tenant-scope';
 import type { EmailMessage } from '../../email/sender';
 import { hashPassword } from '../../lib/crypto';
 import { AppError, errors } from '../../lib/errors';
@@ -44,7 +45,8 @@ export async function createUser(
 ): Promise<{ user: UserDTO; invite: EmailMessage | null }> {
   if (input.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
   if (input.tracking_enabled) await assertSeatAvailable(q, actor.organizationId, deps.now());
-  const exists = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
+  // Addresses are unique across organizations, so look beyond this one.
+  const exists = await existsAnywhere(deps.pool, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
   if (exists) throw errors.conflict('email_taken', 'A user with this email already exists');
   // No password: the person is invited and chooses their own.
   const r = await one<{ id: string }>(
@@ -107,7 +109,7 @@ export async function updateUser(
   return getUser(q, actor.organizationId, id);
 }
 
-async function assertAnotherAdmin(q: Queryable, orgId: string, exceptId: string) {
+export async function assertAnotherAdmin(q: Queryable, orgId: string, exceptId: string) {
   const r = await one<{ n: number }>(
     q,
     `SELECT count(*)::int AS n FROM users WHERE organization_id = $1 AND id <> $2 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')`,
@@ -124,13 +126,18 @@ async function assertAnotherAdmin(q: Queryable, orgId: string, exceptId: string)
 export async function reactivateUser(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<UserDTO> {
   const user = await getUser(q, actor.organizationId, id);
   if (user.status === 'active') throw errors.conflict('already_active', 'This person is already active');
+  if (user.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
+  await restoreAccess(deps, q, actor, id, user.tracking_enabled, requestId);
+  return getUser(q, actor.organizationId, id);
+}
+
+/** Reactivation itself, shared with the directory (SCIM `active: true`). */
+export async function restoreAccess(deps: Deps, q: Queryable, actor: OrgActor, id: string, tracking: boolean, requestId?: string): Promise<void> {
   const erased = await one(q, 'SELECT 1 FROM users WHERE id = $1 AND erased_at IS NOT NULL', [id]);
   if (erased) throw errors.conflict('erased', "This person's data was erased; invite them again as a new person");
-  if (user.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
-  if (user.tracking_enabled) await assertSeatAvailable(q, actor.organizationId, deps.now());
+  if (tracking) await assertSeatAvailable(q, actor.organizationId, deps.now());
   await q.query(`UPDATE users SET status = 'active', deactivated_at = NULL WHERE organization_id = $1 AND id = $2`, [actor.organizationId, id]);
   await audit(q, { organizationId: actor.organizationId, actor, action: 'user.reactivate', targetType: 'user', targetId: id, targetUserId: id, requestId });
-  return getUser(q, actor.organizationId, id);
 }
 
 /** IAM-05: deactivation ends sessions, revokes devices and stops open work sessions immediately. */
@@ -138,6 +145,12 @@ export async function deactivateUser(deps: Deps, q: Queryable, actor: UserActor,
   const user = await getUser(q, actor.organizationId, id);
   if (id === actor.userId) throw errors.validation('You cannot deactivate yourself');
   if (user.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
+  await endAccess(deps, q, actor, id, requestId);
+  return getUser(q, actor.organizationId, id);
+}
+
+/** Deactivation itself, shared with the directory (SCIM `active: false`). */
+export async function endAccess(deps: Deps, q: Queryable, actor: OrgActor, id: string, requestId?: string): Promise<void> {
   const now = deps.now().toISOString();
   await q.query(`UPDATE users SET status = 'deactivated', deactivated_at = $3 WHERE organization_id = $1 AND id = $2`, [
     actor.organizationId,
@@ -173,8 +186,7 @@ export async function deactivateUser(deps: Deps, q: Queryable, actor: UserActor,
     requestId,
     metadata: { stopped_sessions: open.length },
   });
-  await publish(q, { organizationId: actor.organizationId, type: 'user.deactivated', subjectUserId: id, actorUserId: actor.userId });
-  return getUser(q, actor.organizationId, id);
+  await publish(q, { organizationId: actor.organizationId, type: 'user.deactivated', subjectUserId: id, actorUserId: actor.kind === 'user' ? actor.userId : null });
 }
 
 // ───────────── teams ─────────────
@@ -200,7 +212,7 @@ export async function listTeams(q: Queryable, orgId: string): Promise<AdminTeam[
   );
 }
 
-export async function createTeam(q: Queryable, actor: UserActor, name: string, requestId?: string) {
+export async function createTeam(q: Queryable, actor: OrgActor, name: string, requestId?: string) {
   const r = await one<{ id: string }>(
     q,
     `INSERT INTO teams (organization_id, name) VALUES ($1, $2)
@@ -228,7 +240,7 @@ async function activeTeam(q: Queryable, orgId: string, teamId: string) {
   return t;
 }
 
-export async function renameTeam(q: Queryable, actor: UserActor, teamId: string, name: string, requestId?: string) {
+export async function renameTeam(q: Queryable, actor: OrgActor, teamId: string, name: string, requestId?: string) {
   const t = await activeTeam(q, actor.organizationId, teamId);
   if (t.name === name) return { id: teamId, name };
   if (await one(q, 'SELECT 1 FROM teams WHERE organization_id = $1 AND name = $2', [actor.organizationId, name])) {
@@ -240,7 +252,7 @@ export async function renameTeam(q: Queryable, actor: UserActor, teamId: string,
 }
 
 /** Only an empty team can be archived, so nobody silently loses their manager or their access. */
-export async function archiveTeam(deps: Pick<Deps, 'now'>, q: Queryable, actor: UserActor, teamId: string, requestId?: string) {
+export async function archiveTeam(deps: Pick<Deps, 'now'>, q: Queryable, actor: OrgActor, teamId: string, requestId?: string) {
   await activeTeam(q, actor.organizationId, teamId);
   const n = await one<{ n: number }>(q, 'SELECT count(*)::int AS n FROM team_memberships WHERE team_id = $1 AND valid_to IS NULL', [teamId]);
   if (n?.n) throw errors.conflict('team_not_empty', 'Move or remove everyone in this team first');
@@ -252,7 +264,7 @@ export async function archiveTeam(deps: Pick<Deps, 'now'>, q: Queryable, actor: 
 /** Adds or changes a membership; a role change closes the old row and opens a new one (IAM-07). */
 export async function setTeamMember(
   q: Queryable,
-  actor: UserActor,
+  actor: OrgActor,
   teamId: string,
   userId: string,
   role: 'member' | 'manager',
@@ -285,7 +297,7 @@ export async function setTeamMember(
   });
 }
 
-export async function removeTeamMember(q: Queryable, actor: UserActor, teamId: string, userId: string, requestId?: string) {
+export async function removeTeamMember(q: Queryable, actor: OrgActor, teamId: string, userId: string, requestId?: string) {
   await assertInOrg(q, actor.organizationId, 'teams', teamId, 'Team');
   await q.query('UPDATE team_memberships SET valid_to = now() WHERE team_id = $1 AND user_id = $2 AND valid_to IS NULL', [
     teamId,

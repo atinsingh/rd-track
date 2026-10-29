@@ -238,6 +238,8 @@ Response and request types live in `packages/contracts/src/api.ts`. Lists return
 | People and structure | `PATCH /v1/admin/users/{id}`, `POST /v1/admin/users/{id}/reactivate`, `POST /v1/admin/users/import` (`dry_run`), `PATCH /v1/admin/teams/{id}`, `POST /v1/admin/teams/{id}/archive`, `PATCH /v1/admin/projects/{id}`, `PATCH /v1/admin/projects/{id}/tasks/{taskId}`, `DELETE /v1/admin/projects/{id}/members/{userId}` (org admin) |
 | Organization data | `GET /v1/admin/organization`, `POST /v1/admin/organization/close` (`confirm_name`), `POST …/close/cancel`, `GET|POST /v1/admin/data-exports` (org admin); `GET /platform/v1/deletion-certificates` (operator) |
 | Your data and erasure | `GET|POST /v1/me/data-exports` (a ZIP of everything about me), `GET|POST /v1/me/erasure-request` (`reason?`; `409 erasure_pending`); `GET /v1/admin/erasure-requests`, `POST …/{id}/approve`, `POST …/{id}/decline` (`reason`) (org admin, never their own) |
+| Single sign-on | Public: `POST /v1/auth/sso/discover` (`email`) → `SsoDiscoverResponse`, `POST /v1/auth/sso/start` (`email`, `return_to?`) → `{redirect_url}`, `GET /v1/auth/sso/callback`. Org admin: `GET /v1/admin/sso` → `SsoSettings`, `PUT|DELETE /v1/admin/sso/connection`, `PATCH /v1/admin/sso` (`active`, `enforced`, `jit_provisioning`), `POST /v1/admin/sso/test`, `POST /v1/admin/sso/domains`, `POST …/domains/{id}/verify`, `DELETE …/domains/{id}`, `POST /v1/admin/scim-tokens`, `DELETE /v1/admin/scim-tokens/{id}`. Login with a password returns `403 sso_required` when single sign-on is required |
+| Directory (SCIM 2.0) | `Authorization: Bearer rdscim_…`: `GET /scim/v2/ServiceProviderConfig|ResourceTypes|Schemas`, `GET|POST /scim/v2/Users` (`filter=userName eq "…"`), `GET|PUT|PATCH|DELETE /scim/v2/Users/{id}`, `GET|POST /scim/v2/Groups`, `GET|PUT|PATCH|DELETE /scim/v2/Groups/{id}`; RFC 7644 errors |
 | Support access | Operator: `POST /platform/v1/organizations/{id}/support-grants`, `POST /platform/v1/support-grants/{id}/end`, `GET /platform/v1/organizations/{id}/support/{people,teams,devices,policies,audit}` (active grant only, audited). Tenant: `GET /v1/admin/support-grants`, `POST …/{id}/approve|deny|end` (org admin) |
 | Audit | `GET /v1/audit-events?from&to&action&actor_id&subject_id&cursor` → `Page<AuditEventDTO>`; `GET /v1/audit-events/export` (CSV, up to 10,000 rows, audited); `GET /v1/audit-events/people` (auditor, org admin) |
 
@@ -503,7 +505,7 @@ exports, retention, audit), worker, web dashboards (employee, manager, admin), a
 with simulated platform, CI.
 
 **Next increments:** native Windows/macOS collectors and the Tauri UI shell; signed
-installers and staged auto-update (`DEV-02`); SSO/SCIM (`IAM-06`); app/domain categories
+installers and staged auto-update (`DEV-02`); SSO/SCIM (`IAM-06`, done in slice 6); app/domain categories
 (`ACT-07`); scheduled reports and PDF (`RPT-06`); aggregate-only executive views with
 minimum group size (`RPT-07`); SQS adapter if/when the Postgres queue is outgrown;
 Terraform for AWS (ECS/Fargate, RDS, S3, KMS).

@@ -12,8 +12,9 @@ import {
   verifyPassword,
   verifyTotp,
 } from '../../lib/crypto';
-import { errors } from '../../lib/errors';
+import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { ssoRequiredFor } from '../sso/service';
 import { issueRecoveryCodes } from './identity';
 
 interface UserRow {
@@ -40,6 +41,10 @@ export async function login(
   requestId?: string,
 ): Promise<{ token: string; response: LoginResponse }> {
   const user = await one<UserRow>(q, `SELECT * FROM users WHERE lower(email) = lower($1)`, [email]);
+  // Single sign-on required (slice 6a): the password isn't even checked. Org admins keep it.
+  if (user?.status === 'active' && (await ssoRequiredFor(deps, q, user.organization_id, user.org_role))) {
+    throw new AppError(403, 'sso_required', "Sign in with your organization's single sign-on");
+  }
   const ok = await verifyPassword(password, user?.password_hash ?? null);
   if (!user || !ok || user.status !== 'active') {
     if (user) {
@@ -57,12 +62,7 @@ export async function login(
     throw errors.unauthenticated('Email or password is incorrect');
   }
   const needsMfa = mustUseMfa(deps, user.org_role, user.mfa_enabled);
-  const token = randomToken();
-  const expires = new Date(deps.now().getTime() + deps.config.sessionTtlHours * 3600_000);
-  await q.query(
-    `INSERT INTO user_sessions (user_id, organization_id, token_hash, mfa_verified, expires_at) VALUES ($1, $2, $3, $4, $5)`,
-    [user.id, user.organization_id, sha256Hex(token), !needsMfa, expires.toISOString()],
-  );
+  const token = await createSession(deps, q, user.id, user.organization_id, !needsMfa);
   await audit(q, {
     organizationId: user.organization_id,
     actor: { kind: 'system' },
@@ -73,6 +73,17 @@ export async function login(
     metadata: { mfa_pending: needsMfa },
   });
   return { token, response: { mfa_required: needsMfa, mfa_enrolled: user.mfa_enabled } };
+}
+
+/** A new browser session; returns the cookie value (only its hash is stored). */
+export async function createSession(deps: Deps, q: Queryable, userId: string, orgId: string, mfaVerified: boolean): Promise<string> {
+  const token = randomToken();
+  const expires = new Date(deps.now().getTime() + deps.config.sessionTtlHours * 3600_000);
+  await q.query(
+    `INSERT INTO user_sessions (user_id, organization_id, token_hash, mfa_verified, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+    [userId, orgId, sha256Hex(token), mfaVerified, expires.toISOString()],
+  );
+  return token;
 }
 
 export async function authenticateUser(deps: Deps, q: Queryable, token: string): Promise<UserActor | null> {

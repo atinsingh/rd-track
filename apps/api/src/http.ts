@@ -1,9 +1,9 @@
 import type { OrgRole } from '@rd/contracts';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { DeviceActor, PlatformActor, UserActor } from './context';
+import type { DeviceActor, DirectoryActor, PlatformActor, UserActor } from './context';
 import { errors } from './lib/errors';
 
-export type AuthMode = 'user' | 'device' | 'platform' | 'public';
+export type AuthMode = 'user' | 'device' | 'platform' | 'directory' | 'public';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -16,6 +16,7 @@ declare module 'fastify' {
     user?: UserActor;
     device?: DeviceActor;
     platform?: PlatformActor;
+    directory?: DirectoryActor;
   }
 }
 
@@ -35,6 +36,11 @@ export function deviceOf(req: FastifyRequest): DeviceActor {
 export function platformOf(req: FastifyRequest): PlatformActor {
   if (!req.platform) throw errors.unauthenticated();
   return req.platform;
+}
+
+export function directoryOf(req: FastifyRequest): DirectoryActor {
+  if (!req.directory) throw errors.unauthenticated();
+  return req.directory;
 }
 
 export function requireRole(req: FastifyRequest, roles: readonly OrgRole[]): UserActor {

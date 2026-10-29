@@ -15,6 +15,8 @@ const nextConfig: NextConfig = {
       { source: '/v1/:path*', destination: `${apiUrl}/v1/:path*` },
       // The operator realm (separate cookie and login), for the /platform console.
       { source: '/platform/v1/:path*', destination: `${apiUrl}/platform/v1/:path*` },
+      // Directory sync (SCIM) for identity providers; production routes /scim/* at the load balancer.
+      { source: '/scim/:path*', destination: `${apiUrl}/scim/:path*` },
     ];
   },
   async headers() {

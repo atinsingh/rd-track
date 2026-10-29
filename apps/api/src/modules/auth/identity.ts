@@ -15,6 +15,7 @@ import { actionEmail } from '../../email/templates';
 import { hashPassword, randomToken, sha256Hex, verifyPassword } from '../../lib/crypto';
 import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { ssoRequiredFor } from '../sso/service';
 import { publish } from '../engine/events';
 import { notify } from '../engine/notify';
 import { isValidTimeZone } from '../scheduling/tz';
@@ -173,12 +174,14 @@ export async function acceptInvite(
  * again; an unknown or deactivated address gets nothing.
  */
 export async function requestPasswordReset(deps: Deps, q: Queryable, email: string, requestId?: string): Promise<EmailMessage | null> {
-  const u = await one<{ id: string; organization_id: string; email: string; password_hash: string | null }>(
+  const u = await one<{ id: string; organization_id: string; email: string; password_hash: string | null; org_role: string }>(
     q,
-    `SELECT id, organization_id, email, password_hash FROM users WHERE lower(email) = lower($1) AND status = 'active'`,
+    `SELECT id, organization_id, email, password_hash, org_role FROM users WHERE lower(email) = lower($1) AND status = 'active'`,
     [email],
   );
   if (!u) return null;
+  // People who must use single sign-on have no Track password to reset.
+  if (await ssoRequiredFor(deps, q, u.organization_id, u.org_role)) return null;
   if (!u.password_hash) return inviteUser(deps, q, { orgId: u.organization_id, userId: u.id, invitedBy: null, requestId });
   const raw = await issueToken(q, { orgId: u.organization_id, userId: u.id, purpose: 'password_reset', ttlMs: PASSWORD_RESET_TTL_MINUTES * 60_000, now: deps.now() });
   await audit(q, { organizationId: u.organization_id, actor: { kind: 'system' }, action: 'auth.password_reset_requested', targetType: 'user', targetId: u.id, targetUserId: u.id, requestId });

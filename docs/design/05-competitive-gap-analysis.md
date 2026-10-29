@@ -41,7 +41,7 @@ people more closely. Declined items are listed so sales can explain the choice.
 | Outbound webhooks / API | ✓ | REST API (Pro) | **Adopt — Stage 3** webhooks (INT-03) |
 | Mobile apps, GPS, geofencing | ✓ | ✗ | Out of scope (requirements non-goal); revisit for field teams |
 | Kanban task tool (Hubstaff Tasks) | Add-on | ✗ | Decline — integrate with existing tools instead |
-| SSO / SCIM | Enterprise | Planned | Stage 4 (IAM-06) |
+| SSO / SCIM | Enterprise | OIDC SSO + SCIM 2.0 (Pro) | **Done** — slice 6 (IAM-06, G26) |
 
 ## Stage 3 scope ("Workforce operations")
 

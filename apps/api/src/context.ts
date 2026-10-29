@@ -13,6 +13,8 @@ export interface Deps {
   now: () => Date;
   /** Outbound HTTP for webhooks; tests substitute a fake. */
   fetch?: typeof fetch;
+  /** DNS TXT lookups for SSO domain verification; tests substitute a fake. */
+  resolveTxt?: (name: string) => Promise<string[][]>;
 }
 
 export interface UserActor {
@@ -38,7 +40,17 @@ export interface PlatformActor {
   mfaVerified: boolean;
 }
 
-export type Actor = UserActor | DeviceActor | PlatformActor;
+/** The organization's directory (SCIM), acting through one of its tokens. */
+export interface DirectoryActor {
+  kind: 'directory';
+  tokenId: string;
+  organizationId: string;
+}
+
+export type Actor = UserActor | DeviceActor | PlatformActor | DirectoryActor;
+
+/** Someone changing an organization's people and teams: an admin, or its directory. */
+export type OrgActor = UserActor | DirectoryActor;
 
 /** Roles that must use MFA when it is required for admins: they reach pay rates or everyone's data. */
 export const PRIVILEGED_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'finance'];

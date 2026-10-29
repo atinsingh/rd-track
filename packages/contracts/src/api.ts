@@ -503,7 +503,7 @@ export interface MyPolicyResponse {
 
 export interface AuditEventDTO {
   id: string;
-  actor_type: 'user' | 'device' | 'system' | 'platform';
+  actor_type: 'user' | 'device' | 'system' | 'platform' | 'directory';
   actor_id: string | null;
   actor_name: string | null;
   action: string;

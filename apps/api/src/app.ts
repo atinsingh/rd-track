@@ -13,6 +13,9 @@ import { insightsRoutes } from './modules/insights-routes';
 import { approvalsRoutes } from './modules/approvals-routes';
 import { workspacesRoutes } from './modules/workspaces-routes';
 import { lifecycleRoutes } from './modules/lifecycle-routes';
+import { authenticateDirectory } from './modules/scim/service';
+import { scimRoutes } from './modules/scim-routes';
+import { ssoRoutes } from './modules/sso-routes';
 import { moneyRoutes } from './modules/money-routes';
 import { authRoutes } from './modules/auth/routes';
 import { authenticateDevice, authenticateUser } from './modules/auth/service';
@@ -84,6 +87,16 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       return;
     }
 
+    if (mode === 'directory') {
+      const m = /^Bearer\s+(\S{20,300})$/i.exec(req.headers.authorization ?? '');
+      const d = m ? await authenticateDirectory(deps, deps.pool, m[1]!) : null;
+      if (d === 'not_entitled') throw new AppError(403, 'forbidden', 'Directory sync is part of the Pro plan');
+      if (!d) throw new AppError(401, 'unauthenticated', 'A valid directory token is required');
+      req.directory = d;
+      narrowScope(d.organizationId);
+      return;
+    }
+
     if (mode === 'platform') {
       const token = req.cookies[PLATFORM_COOKIE];
       const p = token ? await authenticatePlatform(deps, deps.pool, token) : null;
@@ -143,6 +156,8 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => approvalsRoutes(s, deps));
   await app.register(async (s) => workspacesRoutes(s, deps));
   await app.register(async (s) => lifecycleRoutes(s, deps));
+  await app.register(async (s) => ssoRoutes(s, deps));
+  await app.register(async (s) => scimRoutes(s, deps));
   await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));

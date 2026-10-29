@@ -60,7 +60,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G23 | Finance | Invoices have no paid state and no send-to-client — **done** | S/M | P1 |
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
-| G26 | Admin | SSO / SCIM (P1), MDM packages and tenant logo (P2) promised but missing | L | P1/P2 |
+| G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) promised but missing | L | P1/P2 |
 | G27 | All | Hard-coded English; mixed date and money formats | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler | S | P2 |
@@ -205,6 +205,31 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    own exports, and replaces name and email with "Erased person". Hours, timesheets and
    pay stay under that name. The person is emailed what was erased and what a hold kept;
    erased accounts can't be reactivated. Migration 016.
+
+   **6 done 2026-10-29 (G26, Pro)**: Settings › Single sign-on.
+   - *Single sign-on* through any OpenID Connect provider (Entra ID, Google Workspace,
+     Okta, OneLogin, JumpCloud): authorization code flow with PKCE, ID tokens verified
+     against the provider's published keys (RS/PS/ES algorithms, issuer, audience,
+     expiry, nonce) with Node's crypto only. A sign-in is single use, expires in ten
+     minutes and only completes in the browser that started it. The connection stays a
+     draft until an admin signs in through it as themselves; changing it makes it a
+     draft again. The login page asks for the email first and offers the provider when
+     the address uses one. "Require single sign-on" turns passwords off for everyone but
+     org admins (password + authenticator code stays as the way back in). People are
+     matched by the provider's subject, then by email within the organization. A
+     sign-in through the provider counts as multi-factor (the provider's own MFA policy
+     applies), so admins aren't asked for Track's authenticator code on top.
+   - *Domains* are verified with a DNS TXT record (`_rd-track.<domain>`); one
+     organization per domain. With "Create accounts on first sign-in", someone at a
+     verified domain joins as an employee with tracking off.
+   - *Directory sync (SCIM 2.0)* at `/scim/v2` with bearer tokens an admin creates
+     (shown once, revocable). Users are people (new ones are tracked while a seat is
+     free and invited unless single sign-on is on); deleting or deactivating one
+     deactivates them, never deletes, and the last admin can't be. Groups are teams
+     (an existing team of the same name is claimed; managers keep their role). The
+     directory's changes are audited as "Directory sync". Migration 017; the load
+     balancer routes `/scim/*` to the API.
+   - Still open: SAML (OIDC covers the main providers), MDM packages and tenant logo (P2).
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

@@ -26,6 +26,8 @@ function actorFields(a: AuditEntry['actor']): [string, string | null] {
       return ['device', a.deviceId];
     case 'platform':
       return ['platform', a.platformAdminId];
+    case 'directory':
+      return ['directory', a.tokenId];
     case 'system':
       return ['system', null];
   }
@@ -58,7 +60,8 @@ const SELECT = `
   SELECT a.id::text, a.actor_type, a.actor_id, a.action, a.target_type, a.target_id, a.target_user_id,
          a.result, a.request_id, a.metadata, a.created_at,
          CASE a.actor_type WHEN 'user' THEN u.display_name WHEN 'device' THEN d.name
-           WHEN 'platform' THEN 'RoundDigital support · ' || pa.display_name ELSE NULL END AS actor_name
+           WHEN 'platform' THEN 'RoundDigital support · ' || pa.display_name
+           WHEN 'directory' THEN 'Directory sync' ELSE NULL END AS actor_name
   FROM audit_logs a
   LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
   LEFT JOIN devices d ON a.actor_type = 'device' AND d.id = a.actor_id
