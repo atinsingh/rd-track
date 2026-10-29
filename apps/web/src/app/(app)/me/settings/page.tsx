@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { NOTIFICATION_CATEGORY_LABELS, type NotificationCategory, type NotificationPreference } from '@rd/contracts';
+import { ApiTokens } from '@/components/developers/ApiTokens';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
@@ -51,6 +52,11 @@ export default function SettingsPage() {
       />
       <ProfileCard />
       <SecurityCard />
+      {access.entitlements.includes('api_access') ? (
+        <div id="api-tokens">
+          <ApiTokens mode="personal" />
+        </div>
+      ) : null}
       <Card title="Notifications" subtitle="In-app notices appear under the bell in the menu. Emails carry a link, never your activity.">
         {prefs.error ? <ErrorState error={prefs.error} onRetry={prefs.reload} /> : null}
         {!prefs.data && !prefs.error ? <Loading label="Loading your notification settings" /> : null}

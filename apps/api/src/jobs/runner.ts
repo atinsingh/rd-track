@@ -1,4 +1,5 @@
 import type { Deps } from '../context';
+import { remindExpiringTokens } from '../modules/api-tokens/service';
 import { withTx } from '../db/pool';
 import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
 import { certificateEmail } from '../email/templates';
@@ -94,6 +95,7 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'rules.run':
       await runTimesheetRules(deps);
       await runDeviceHealth(deps);
+      await remindExpiringTokens(deps);
       return;
     default:
       throw new Error(`Unknown job kind ${job.kind}`);

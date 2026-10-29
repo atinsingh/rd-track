@@ -14,6 +14,11 @@ import { approvalsRoutes } from './modules/approvals-routes';
 import { workspacesRoutes } from './modules/workspaces-routes';
 import { lifecycleRoutes } from './modules/lifecycle-routes';
 import { authenticateDirectory } from './modules/scim/service';
+import { authenticateToken } from './modules/api-tokens/service';
+import { apiEndpoint } from './modules/api-tokens/surface';
+import { developerRoutes } from './modules/developer-routes';
+import { audit } from './modules/audit/service';
+import { withScope } from './db/tenant-scope';
 import { scimRoutes } from './modules/scim-routes';
 import { ssoRoutes } from './modules/sso-routes';
 import { moneyRoutes } from './modules/money-routes';
@@ -108,6 +113,23 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       return;
     }
 
+    // API tokens (F5): `Authorization: Bearer rdt_…`, only on the routes in the API reference.
+    const bearer = /^Bearer\s+(rdt_(?:org|pat)_[A-Za-z0-9_-]{20,200})$/.exec(req.headers.authorization ?? '');
+    if (bearer) {
+      const t = await authenticateToken(deps, deps.pool, bearer[1]!);
+      if (t === 'not_entitled') throw new AppError(403, 'plan_upgrade_required', 'The API is part of the Pro plan');
+      if (!t) throw new AppError(401, 'invalid_token', 'This API token is unknown, revoked or expired');
+      req.apiCaller = t;
+      const endpoint = apiEndpoint(req.method, req.routeOptions.url);
+      if (!endpoint) throw new AppError(403, 'not_in_api', 'API tokens can only call the endpoints in the API reference (/v1/docs)');
+      if (t.token!.kind === 'personal' && !endpoint.personal) throw new AppError(403, 'insufficient_scope', 'Personal tokens read only your own data');
+      const missing = endpoint.scopes.filter((sc) => !t.token!.scopes.includes(sc));
+      if (missing.length) throw new AppError(403, 'insufficient_scope', `This token needs the ${missing.join(' and ')} scope`);
+      req.user = t;
+      narrowScope(t.organizationId);
+      return;
+    }
+
     const token = req.cookies[SESSION_COOKIE];
     const u = token ? await authenticateUser(deps, deps.pool, token) : null;
     if (!u) throw new AppError(401, 'unauthenticated', 'Sign in required');
@@ -118,6 +140,25 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
     if (!u.mfaVerified && !cfg.allowWithoutMfa) throw new AppError(403, 'mfa_required', 'Multi-factor authentication is required');
     req.user = u;
     narrowScope(u.organizationId);
+  });
+
+  // Every call made with an API token is in the audit log under the token, allowed or not.
+  app.addHook('onResponse', async (req, reply) => {
+    const caller = req.apiCaller;
+    if (!caller) return;
+    const status = reply.statusCode;
+    await withScope(caller.organizationId, () =>
+      audit(deps.pool, {
+        organizationId: caller.organizationId,
+        actor: caller,
+        action: 'api.request',
+        targetType: 'api_token',
+        targetId: caller.token!.id,
+        result: status < 400 ? 'success' : status === 401 || status === 403 ? 'denied' : 'error',
+        requestId: req.id,
+        metadata: { method: req.method, route: req.routeOptions.url ?? null, status },
+      }),
+    ).catch((e) => req.log.error({ err: { message: (e as Error).message } }, 'api audit failed'));
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -158,6 +199,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => lifecycleRoutes(s, deps));
   await app.register(async (s) => ssoRoutes(s, deps));
   await app.register(async (s) => scimRoutes(s, deps));
+  await app.register(async (s) => developerRoutes(s, deps));
   await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));

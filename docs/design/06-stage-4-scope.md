@@ -86,9 +86,24 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
    - a folded Team group still shows the approvals count;
    - ⌘K / Ctrl K palette over pages, the people in teams you manage and your projects (`GET /v1/me/directory`, names only, not audited as a data view);
    - solid glass applied through tokens (`--glass*`, `--ink-glass*`, `--radius-*`).
-   - *Settings → Developers* is still labelled *Webhooks* until F5 adds tokens to it.
+   - *Settings → Developers* replaces *Webhooks* now that F5 adds tokens to it.
 4. F4 + F3 agent notices
-5. F5 API tokens
+5. F5 API tokens — **done 2026-10-29** (migration 018):
+   - organization tokens (`rdt_org_…`, org admins, `read` + optional `write` and `payroll`,
+     up to a year) and personal tokens (`rdt_pat_…`, anyone, read-only, own data, up to 90
+     days); shown once, stored as a hash, last used, revocable by an admin or the owner;
+   - a token acts as its creator as they are now (role, status, plan), so it never sees
+     more than they could: an admin's token reads someone's hours only for a team the
+     admin manages, as in the app;
+   - it only works on the endpoints in the API surface (`apps/api/src/modules/api-tokens/surface.ts`),
+     which also generates the reference at `/v1/docs` and `/v1/docs/openapi.json`; sign-in,
+     passwords and MFA, tokens, single sign-on, support access, closing the organization and
+     screenshot images answer `403 not_in_api`;
+   - every call is audited (`api.request`, refused ones too), and changes it makes are
+     audited as "API token · name" on behalf of the creator; people see token reads of
+     their data in "Who viewed your data";
+   - owners are told a week before a token expires; Settings › Developers has tabs for API
+     tokens, webhooks and the reference; personal tokens are in My account › Settings.
 6. F6 expected hours
 7. F7 expenses → F8 payroll adjustments
 8. F9 polish items

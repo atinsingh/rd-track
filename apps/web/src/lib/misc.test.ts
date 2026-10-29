@@ -41,9 +41,9 @@ describe('navigation by role', () => {
     expect(admin).toContain('/admin/policies');
     expect(admin).toContain('/audit');
     expect(admin).not.toContain('/team');
-    // Webhooks are a Pro feature.
-    expect(admin).not.toContain('/admin/webhooks');
-    expect(navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['webhooks'] })).flatMap((g) => g.items.map((i) => i.href))).toContain('/admin/webhooks');
+    // Developers (API tokens, webhooks) is there for every admin; the page says what needs Pro.
+    expect(admin).toContain('/admin/developers');
+    expect(hrefs(me({}))).not.toContain('/admin/developers');
   });
   it('gives auditors the audit log only, under Settings', () => {
     const groups = navFor(accessFor(me({ org_role: 'auditor' })));

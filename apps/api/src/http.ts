@@ -17,6 +17,8 @@ declare module 'fastify' {
     device?: DeviceActor;
     platform?: PlatformActor;
     directory?: DirectoryActor;
+    /** The API token's caller (F5), set as soon as the token is recognised, for the audit. */
+    apiCaller?: UserActor;
   }
 }
 

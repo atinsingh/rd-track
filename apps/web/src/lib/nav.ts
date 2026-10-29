@@ -12,6 +12,7 @@ export type Capability =
   | 'audit'
   | 'exports'
   | 'webhooks'
+  | 'developers'
   | 'schedule'
   | 'teamSchedule'
   | 'adminSchedules'
@@ -71,6 +72,8 @@ export function can(a: Access, c: Capability): boolean {
       return a.isAdmin;
     case 'webhooks':
       return a.isAdmin && a.entitlements.includes('webhooks');
+    case 'developers':
+      return a.isAdmin;
     case 'work_limits':
       return a.isAdmin && a.entitlements.includes('timesheets');
     case 'audit':
@@ -171,7 +174,7 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/data', label: 'Organization data', capability: 'admin', keywords: 'export download close delete account offboarding' },
       { href: '/admin/sso', label: 'Single sign-on', capability: 'admin', keywords: 'sso oidc saml okta entra azure google scim directory provisioning' },
       { href: '/admin/support', label: 'Support access', capability: 'admin', keywords: 'rounddigital help grant operator' },
-      { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks', keywords: 'developers integrations api' },
+      { href: '/admin/developers', label: 'Developers', capability: 'developers', keywords: 'api tokens webhooks integrations rest' },
       { href: '/audit', label: 'Audit log', capability: 'audit', keywords: 'history security' },
     ],
   },

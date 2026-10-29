@@ -2,6 +2,9 @@ import type {
   AccountSecurity,
   InviteInfo,
   DataExportDTO,
+  ApiTokenCreated,
+  ApiTokenDTO,
+  ApiTokenRequest,
   ScimTokenDTO,
   SsoDiscoverResponse,
   SsoDomainDTO,
@@ -428,6 +431,12 @@ export const rd = {
     requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),
     erasureRequest: (signal?: AbortSignal) => get<{ request: ErasureRequestDTO | null }>('/v1/me/erasure-request', { signal }).then((r) => r.request),
     requestErasure: (reason?: string) => post<ErasureRequestDTO>('/v1/me/erasure-request', reason ? { reason } : {}),
+  },
+  /** API tokens (F5): admins see every token, others their own. */
+  apiTokens: {
+    list: (signal?: AbortSignal) => list<ApiTokenDTO>('/v1/api-tokens', { signal }),
+    create: (body: ApiTokenRequest) => post<ApiTokenCreated>('/v1/api-tokens', body),
+    revoke: (id: string) => ok(post(`/v1/api-tokens/${enc(id)}/revoke`)),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {

@@ -25,6 +25,8 @@ export interface UserActor {
   displayName: string;
   sessionId: string;
   mfaVerified: boolean;
+  /** Set when the call came with an API token (F5): the user is the token's creator. */
+  token?: { id: string; name: string; kind: 'organization' | 'personal'; scopes: string[] };
 }
 
 export interface DeviceActor {

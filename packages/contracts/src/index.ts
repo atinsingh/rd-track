@@ -14,3 +14,4 @@ export * from './workspaces';
 export * from './platform';
 export * from './lifecycle';
 export * from './sso';
+export * from './developers';

@@ -21,7 +21,8 @@ export interface AuditEntry {
 function actorFields(a: AuditEntry['actor']): [string, string | null] {
   switch (a.kind) {
     case 'user':
-      return ['user', a.userId];
+      // A call with an API token is the token's doing, on behalf of its creator.
+      return a.token ? ['api_token', a.token.id] : ['user', a.userId];
     case 'device':
       return ['device', a.deviceId];
     case 'platform':
@@ -37,6 +38,7 @@ export async function audit(q: Queryable, e: AuditEntry): Promise<void> {
   const [actorType, actorId] = actorFields(e.actor);
   const metadata = { ...(e.metadata ?? {}) };
   if (e.actor.kind === 'user') metadata.actor_role = e.actor.orgRole;
+  if (e.actor.kind === 'user' && e.actor.token) metadata.on_behalf_of = e.actor.userId;
   await q.query(
     `INSERT INTO audit_logs
        (organization_id, actor_type, actor_id, action, target_type, target_id, target_user_id, result, request_id, metadata)
@@ -61,11 +63,13 @@ const SELECT = `
          a.result, a.request_id, a.metadata, a.created_at,
          CASE a.actor_type WHEN 'user' THEN u.display_name WHEN 'device' THEN d.name
            WHEN 'platform' THEN 'RoundDigital support · ' || pa.display_name
-           WHEN 'directory' THEN 'Directory sync' ELSE NULL END AS actor_name
+           WHEN 'directory' THEN 'Directory sync'
+           WHEN 'api_token' THEN 'API token · ' || tk.name ELSE NULL END AS actor_name
   FROM audit_logs a
   LEFT JOIN users u ON a.actor_type = 'user' AND u.id = a.actor_id
   LEFT JOIN devices d ON a.actor_type = 'device' AND d.id = a.actor_id
-  LEFT JOIN platform_admins pa ON a.actor_type = 'platform' AND pa.id = a.actor_id`;
+  LEFT JOIN platform_admins pa ON a.actor_type = 'platform' AND pa.id = a.actor_id
+  LEFT JOIN api_tokens tk ON a.actor_type = 'api_token' AND tk.id = a.actor_id`;
 
 export async function listAudit(
   q: Queryable,
@@ -98,6 +102,7 @@ export async function accessLogFor(q: Queryable, orgId: string, userId: string):
     `${SELECT}
      WHERE a.organization_id = $1 AND a.target_user_id = $2
        AND NOT (a.actor_type = 'user' AND a.actor_id = $2)
+       AND NOT (a.actor_type = 'api_token' AND a.metadata->>'on_behalf_of' = $2::text)
      ORDER BY a.id DESC LIMIT 200`,
     [orgId, userId],
   );
