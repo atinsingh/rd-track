@@ -16,7 +16,7 @@ import { hashPassword, randomToken, sha256Hex, verifyPassword } from '../../lib/
 import { AppError, errors } from '../../lib/errors';
 import { projectReport } from '../activity/queries';
 import { audit } from '../audit/service';
-import { logoUrl } from '../branding/service';
+import { logoUrl, orgLocale } from '../branding/service';
 import { listBudgets } from '../money/budgets';
 import { getInvoice } from '../money/invoices';
 import { hasMoneyPlan } from '../money/time';
@@ -220,7 +220,7 @@ export async function portalMe(deps: Pick<Deps, 'store'>, q: Queryable, actor: C
   return {
     contact: { id: actor.contactId, display_name: actor.displayName, email: r!.email },
     client: { id: actor.clientId, name: r!.client_name, currency: r!.currency, show_people: r!.show_people },
-    organization: { name: r!.org_name, logo_url: await logoUrl(deps, q, actor.organizationId) },
+    organization: { name: r!.org_name, logo_url: await logoUrl(deps, q, actor.organizationId), locale: await orgLocale(q, actor.organizationId) },
   };
 }
 
@@ -294,5 +294,5 @@ export async function portalInvoice(deps: Pick<Deps, 'store'>, q: Queryable, act
   const inv = await getInvoice(q, actor.organizationId, id).catch(() => null);
   if (!inv || inv.client_id !== actor.clientId || inv.status === 'draft') throw errors.notFound('Invoice');
   const { sent_at: _a, sent_to: _b, payment_note: _c, unrated_seconds: _d, created_at: _e, ...rest } = inv;
-  return { ...rest, organization_logo_url: await logoUrl(deps, q, actor.organizationId) };
+  return { ...rest, organization_logo_url: await logoUrl(deps, q, actor.organizationId), organization_locale: await orgLocale(q, actor.organizationId) };
 }

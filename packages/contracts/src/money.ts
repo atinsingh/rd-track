@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { uuid } from './events';
+import type { AppLocale } from './locale';
 
 /**
  * Stage 3 "Money": clients, pay and bill rates, project budgets, invoices and payroll
@@ -265,6 +266,8 @@ export interface InvoiceDTO extends InvoiceSummaryDTO {
   lines: InvoiceLineDTO[];
   /** The organization's logo for the printed invoice (G26), a short-lived link. */
   organization_logo_url?: string | null;
+  /** The agency's language and formats, which its invoices are written in (G27). */
+  organization_locale?: AppLocale | null;
   /** Draft only: time in the period that had no bill rate in the invoice currency. */
   unrated_seconds: number;
 }

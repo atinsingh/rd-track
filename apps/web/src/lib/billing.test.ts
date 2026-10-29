@@ -3,9 +3,9 @@ import { annualSavingPercent, invoiceCents, seatPriceText } from './billing';
 
 describe('billing terms', () => {
   it('prices Standard and Pro by term', () => {
-    expect(seatPriceText(250, 'year')).toBe('$2.50 per user / month, billed annually');
-    expect(seatPriceText(500, 'month')).toBe('$5 per user / month');
-    expect(seatPriceText(0, 'month')).toBe('$0');
+    expect(seatPriceText(250, 'year')).toBe('US$2.50 per user / month, billed annually');
+    expect(seatPriceText(500, 'month')).toBe('US$5 per user / month');
+    expect(seatPriceText(0, 'month')).toBe('US$0');
   });
   it('invoices an annual term 12 months at a time', () => {
     expect(invoiceCents('standard', 'year', 4)).toBe(12_000);

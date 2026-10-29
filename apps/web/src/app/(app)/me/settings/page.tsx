@@ -1,16 +1,20 @@
 'use client';
 
 import { useState } from 'react';
-import { NOTIFICATION_CATEGORY_LABELS, type NotificationCategory, type NotificationPreference } from '@rd/contracts';
+import { type NotificationCategory, type NotificationPreference } from '@rd/contracts';
 import { ApiTokens } from '@/components/developers/ApiTokens';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { can, type Access } from '@/lib/nav';
+import { t, type MessageKey } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { useAction, useApi } from '@/lib/useApi';
-import { ProfileCard, SecurityCard } from './AccountCards';
+import { LanguageCard, ProfileCard, SecurityCard } from './AccountCards';
 import s from './settings.module.css';
+
+/** A category's name and what it covers, in the reader's language. */
+const categoryLabel = (c: NotificationCategory) => ({ label: t(`prefs.cat.${c}.label` as MessageKey), hint: t(`prefs.cat.${c}.hint` as MessageKey) });
 
 /** Categories that can concern this person; the rest never reach them. */
 function relevant(c: NotificationCategory, a: Access): boolean {
@@ -39,38 +43,39 @@ export default function SettingsPage() {
     const r = await save.run(() => rd.my.setNotificationPreferences([next]));
     if (r) {
       prefs.mutate(() => r);
-      setSaved(`${NOTIFICATION_CATEGORY_LABELS[p.category].label}: saved`);
+      setSaved(t('prefs.saved', { label: categoryLabel(p.category).label }));
     } else prefs.reload();
   };
 
   return (
     <>
       <PageHeader
-        eyebrow="Me · Settings"
-        title="Settings"
-        description={`Signed in as ${me.user.email}. Your profile, how you sign in, and how Track tells you about things.`}
+        eyebrow={t('settings.eyebrow')}
+        title={t('settings.title')}
+        description={t('settings.description', { email: me.user.email })}
       />
       <ProfileCard />
+      <LanguageCard />
       <SecurityCard />
       {access.entitlements.includes('api_access') ? (
         <div id="api-tokens">
           <ApiTokens mode="personal" />
         </div>
       ) : null}
-      <Card title="Notifications" subtitle="In-app notices appear under the bell in the menu. Emails carry a link, never your activity.">
+      <Card title={t('prefs.title')} subtitle={t('prefs.subtitle')}>
         {prefs.error ? <ErrorState error={prefs.error} onRetry={prefs.reload} /> : null}
-        {!prefs.data && !prefs.error ? <Loading label="Loading your notification settings" /> : null}
+        {!prefs.data && !prefs.error ? <Loading label={t('prefs.loading')} /> : null}
         {prefs.data ? (
-          <TableBox label="Notification settings">
+          <TableBox label={t('prefs.table')}>
             <table className={tableClass}>
               <thead>
                 <tr>
-                  <th scope="col">About</th>
+                  <th scope="col">{t('prefs.about')}</th>
                   <th scope="col" className={s.center}>
-                    In app
+                    {t('prefs.inApp')}
                   </th>
                   <th scope="col" className={s.center}>
-                    Email
+                    {t('prefs.email')}
                   </th>
                 </tr>
               </thead>
@@ -78,12 +83,12 @@ export default function SettingsPage() {
                 {prefs.data.items
                   .filter((p) => relevant(p.category, access))
                   .map((p) => {
-                    const l = NOTIFICATION_CATEGORY_LABELS[p.category];
+                    const l = categoryLabel(p.category);
                     return (
                       <tr key={p.category}>
                         <th scope="row" className={s.about}>
                           <span className={s.label}>{l.label}</span>
-                          <span className={s.hint}>{p.mandatory ? `${l.hint}. Always on.` : l.hint}</span>
+                          <span className={s.hint}>{p.mandatory ? t('prefs.alwaysOn', { hint: l.hint }) : l.hint}</span>
                         </th>
                         {(['in_app', 'email'] as const).map((channel) => (
                           <td key={channel} className={s.center}>
@@ -92,7 +97,7 @@ export default function SettingsPage() {
                               className={s.check}
                               checked={p[channel]}
                               disabled={p.mandatory || save.busy}
-                              aria-label={`${channel === 'in_app' ? 'In app' : 'Email'}: ${l.label}${p.mandatory ? ' (always on)' : ''}`}
+                              aria-label={`${channel === 'in_app' ? t('prefs.inApp') : t('prefs.email')}: ${l.label}${p.mandatory ? t('prefs.alwaysOnSuffix') : ''}`}
                               onChange={(e) => void toggle(p, channel, e.target.checked)}
                             />
                           </td>

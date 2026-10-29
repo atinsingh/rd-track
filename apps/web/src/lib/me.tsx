@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import type { Me } from '@rd/contracts';
 import { accessFor, type Access } from './nav';
+import { announceLocale, resolveLocale, setLocale } from './locale';
 import { browserTimeZone, isValidTimeZone } from './time';
 
 export interface MeContextValue {
@@ -16,6 +17,10 @@ export interface MeContextValue {
 const MeContext = createContext<MeContextValue | null>(null);
 
 export function MeProvider({ me, reload, children }: { me: Me; reload: () => void; children: ReactNode }) {
+  // Before anything below renders, so every label and date is in the person's language (G27).
+  const locale = resolveLocale(me.user.locale, me.organization.locale);
+  setLocale(locale, false);
+  useEffect(() => announceLocale(), [locale]);
   const value = useMemo<MeContextValue>(
     () => ({
       me,

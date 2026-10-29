@@ -11,7 +11,7 @@ import { byName } from '@/lib/format';
 import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { sched, shiftTimesLabel, weekdaysLabel } from '@/lib/scheduling';
-import { WEEKDAY_SHORT, addDays, formatShortDay, timeZoneOptions, todayInTz } from '@/lib/time';
+import { addDays, formatShortDay, timeZoneOptions, todayInTz, weekdaysShort } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 
@@ -108,7 +108,7 @@ function ShiftForm({ users, onCreated }: { users: UserDTO[]; onCreated: (s: Shif
       </div>
       <fieldset className={s.weekdayPicks}>
         <legend>Days</legend>
-        {WEEKDAY_SHORT.map((label, i) => (
+        {weekdaysShort().map((label, i) => (
           <label key={label}>
             <input type="checkbox" checked={days.includes(i + 1)} onChange={() => toggle(i + 1)} />
             {label}

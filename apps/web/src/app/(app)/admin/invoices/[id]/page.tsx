@@ -10,9 +10,9 @@ import { Dialog } from '@/components/ui/Dialog';
 import { TextArea, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridClass, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { formatDuration, formatMoney } from '@/lib/format';
+import { formatDuration, formatMoney, formatNumber } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { centsToInput, formatPercentBp, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
+import { centsToInput, decimalToInput, formatPercentBp, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
 import { formatDateTime, formatDayLabel, todayInTz } from '@/lib/time';
 import { INVOICE_STATE_LABEL, invoiceState } from '@/lib/workspaces';
 import { useAction, useApi } from '@/lib/useApi';
@@ -36,7 +36,7 @@ const toDraft = (inv: InvoiceDTO): DraftLine[] =>
     project_id: l.project_id,
     user_id: l.user_id,
     description: l.description,
-    hours: l.hours.toFixed(2),
+    hours: decimalToInput(l.hours, 2),
     rate: centsToInput(l.rate_cents),
     expense_id: l.expense_id,
   }));
@@ -376,7 +376,7 @@ function InvoiceContent({ id }: { id: string }) {
                   {inv.lines.map((l) => (
                     <tr key={l.id}>
                       <td>{l.description}</td>
-                      <td className={numClass}>{l.hours.toFixed(2)}</td>
+                      <td className={numClass}>{formatNumber(l.hours, 2)}</td>
                       <td className={numClass}>{formatMoney(l.rate_cents, inv.currency)}</td>
                       <td className={numClass}>{formatMoney(l.amount_cents, inv.currency)}</td>
                     </tr>

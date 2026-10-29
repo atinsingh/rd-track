@@ -10,7 +10,7 @@ import { TextArea } from '@/components/ui/Field';
 import { Badge, Banner, Card, TableBox, formActionsClass, numClass, tableClass } from '@/components/ui/Layout';
 import { cx } from '@/lib/cx';
 import { durationOrDash, formatDuration } from '@/lib/format';
-import { WEEKDAY_SHORT, formatDateTime, formatDayMonth } from '@/lib/time';
+import { formatDateTime, formatDayMonth, weekdayShort } from '@/lib/time';
 import { STATUS_LABEL, countedTotals, limitsSummary, overtimeText, reviewActions, statusTone, timesheetGrid, timesheetsApi } from '@/lib/timesheets';
 import { useAction } from '@/lib/useApi';
 import s from './timesheet.module.css';
@@ -63,7 +63,7 @@ export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; labe
             <th scope="col">Project</th>
             {totals.days.map((day, i) => (
               <th key={day.date} scope="col" className={cx(numClass, i >= 5 && s.weekend)}>
-                {WEEKDAY_SHORT[i]} {formatDayMonth(day.date)}
+                {weekdayShort(i + 1)} {formatDayMonth(day.date)}
               </th>
             ))}
             <th scope="col" className={numClass}>

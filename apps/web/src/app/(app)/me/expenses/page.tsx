@@ -8,7 +8,7 @@ import { Checkbox, InlineSelect, SelectField, TextArea, TextField } from '@/comp
 import { Badge, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { claimMeta, claimStatus, claimsFrom, receiptProblem, totalCount, totalText, type ClaimRange } from '@/lib/expenses';
-import { formatMoney } from '@/lib/format';
+import { formatBytes, formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { CURRENCIES, parseMoneyInput } from '@/lib/money';
 import { can } from '@/lib/nav';
@@ -122,7 +122,7 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
           </svg>
           <span className={s.dropTitle}>{file ? file.name : 'Add a receipt'}</span>
           <span className={s.dropHint}>
-            {file ? `${(file.size / 1024 / 1024).toFixed(1)} MB · choose another to replace it` : 'Photo or PDF, up to 10 MB · only you, your manager and payroll admins can open it'}
+            {file ? `${formatBytes(file.size)} · choose another to replace it` : 'Photo or PDF, up to 10 MB · only you, your manager and payroll admins can open it'}
           </span>
           <input
             key={inputKey}

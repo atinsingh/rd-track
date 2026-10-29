@@ -3,6 +3,7 @@ import { timestamp, uuid } from './events';
 import { partialPolicySettingsSchema, type FieldSource, type PolicySettings, type ScopeType } from './policy';
 import type { CollectionChange } from './policy';
 import { BILLING_INTERVALS, type BillingInterval, type Entitlement, type LicenseState, type PlanId, type SubscriptionStatus } from './plans';
+import type { AppLocale } from './locale';
 
 /**
  * Web/API request schemas and response shapes (system design §5.4).
@@ -45,12 +46,16 @@ export interface Me {
     timezone: string;
     tracking_enabled: boolean;
     mfa_enabled: boolean;
+    /** The person's language and formats (G27); null follows the organization's. */
+    locale: AppLocale | null;
   };
   organization: {
     id: string;
     name: string;
     plan: PlanId;
     license: LicenseState;
+    /** The organization's default language and formats; null follows each browser. */
+    locale: AppLocale | null;
     /** The organization's own logo (G26), a short-lived link; null when none is set. */
     logo_url: string | null;
   };

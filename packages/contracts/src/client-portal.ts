@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { BudgetKind, BudgetStatus, InvoiceDTO, InvoiceSummaryDTO } from './money';
+import type { AppLocale } from './locale';
 
 // Client portal (Stage 4 F9, Pro): a read-only view for an agency's clients. Contacts sign
 // in on their own (not as users of the organization) and see only their own projects'
@@ -43,7 +44,8 @@ export interface ClientLinkInfo {
 export interface ClientPortalMe {
   contact: { id: string; display_name: string; email: string };
   client: { id: string; name: string; currency: string; show_people: boolean };
-  organization: { name: string; logo_url: string | null };
+  /** `locale`: the agency's language and formats, which the portal and its invoices use. */
+  organization: { name: string; logo_url: string | null; locale: AppLocale | null };
 }
 
 export interface ClientPortalProject {

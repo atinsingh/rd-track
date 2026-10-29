@@ -1,6 +1,6 @@
 import { EXPENSE_CATEGORY_LABELS, RECEIPT_CONTENT_TYPES, RECEIPT_MAX_BYTES, type ExpenseDTO, type MoneyTotal } from '@rd/contracts';
 import { formatMoney, plural } from './format';
-import { addDays, daysInMonth, formatDayMonth, startOfMonth } from './time';
+import { addDays, daysInMonth, formatDayMonth, formatMonth, startOfMonth } from './time';
 
 /** How a claim's status reads in "Your claims" (Stage 4 F7). Never red: these are people's own claims. */
 export interface ClaimStatus {
@@ -10,12 +10,10 @@ export interface ClaimStatus {
   note: string | null;
 }
 
-const MONTH = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', month: 'long' });
-
 /** "October payroll" for a whole calendar month, else "payroll 1 Oct – 15 Oct". */
 export function payrollPeriodLabel(p: { from: string; to: string }): string {
   const wholeMonth = p.from === startOfMonth(p.from) && p.to === addDays(p.from, daysInMonth(p.from) - 1);
-  if (wholeMonth) return `${MONTH.format(new Date(`${p.from}T00:00:00Z`))} payroll`;
+  if (wholeMonth) return `${formatMonth(p.from)} payroll`;
   return `payroll ${formatDayMonth(p.from)} – ${formatDayMonth(p.to)}`;
 }
 

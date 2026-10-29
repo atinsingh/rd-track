@@ -7,7 +7,7 @@ import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataSta
 import { SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, formGridClass, tableClass } from '@/components/ui/Layout';
 import { rd, toApiError, type ApiError, type AuditQuery } from '@/lib/api';
-import { humanize } from '@/lib/format';
+import { formatNumber, humanize } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, dayRange, formatDateTime, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
@@ -113,7 +113,7 @@ export default function AuditPage() {
             Download CSV
           </a>
         }
-        subtitle={`The CSV holds up to ${AUDIT_EXPORT_MAX_ROWS.toLocaleString('en')} events with these filters. Downloading it is recorded here too.`}
+        subtitle={`The CSV holds up to ${formatNumber(AUDIT_EXPORT_MAX_ROWS, 0)} events with these filters. Downloading it is recorded here too.`}
       >
         {first.error ? (
           <ErrorState error={first.error} onRetry={first.reload} />

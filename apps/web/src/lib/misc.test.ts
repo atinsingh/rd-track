@@ -22,8 +22,8 @@ describe('api helpers', () => {
 
 describe('navigation by role', () => {
   const me = (over: Partial<Me['user']>, teams: string[] = [], projects: string[] = []): Me => ({
-    user: { id: 'u', email: 'e', display_name: 'D', org_role: 'employee', timezone: 'UTC', tracking_enabled: true, mfa_enabled: false, ...over },
-    organization: { id: 'o', name: 'Org', plan: 'standard', license: 'active', logo_url: null },
+    user: { id: 'u', email: 'e', display_name: 'D', org_role: 'employee', timezone: 'UTC', tracking_enabled: true, mfa_enabled: false, locale: null, ...over },
+    organization: { id: 'o', name: 'Org', plan: 'standard', license: 'active', locale: null, logo_url: null },
     mfa_verified: false,
     managed_team_ids: teams,
     managed_project_ids: projects,

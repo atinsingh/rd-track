@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useMemo, useState, type FormEvent } from 'react';
+import { LOCALE_LABELS, LOCALES, type AppLocale } from '@rd/contracts';
 import { RecoveryCodes } from '@/components/auth/RecoveryCodes';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
@@ -10,6 +11,8 @@ import { SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Card, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { announceNotificationsChanged } from '@/lib/events';
+import { t } from '@/lib/i18n';
+import { browserLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
 import { timeZoneOptions } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
@@ -33,11 +36,11 @@ export function ProfileCard() {
     }
   };
   return (
-    <Card title="Profile" subtitle="Your time zone decides where your days and weeks start, in reports and timesheets.">
+    <Card title={t('profile.title')} subtitle={t('profile.subtitle')}>
       <form onSubmit={submit} className={s.form} noValidate>
         <div className={formGridClass}>
-          <TextField label="Name" required value={name} onChange={(e) => setName(e.target.value)} error={name.trim() ? null : 'Enter your name.'} />
-          <SelectField label="Time zone" value={tz} onChange={(e) => setTz(e.target.value)}>
+          <TextField label={t('profile.name')} required value={name} onChange={(e) => setName(e.target.value)} error={name.trim() ? null : t('profile.nameMissing')} />
+          <SelectField label={t('profile.timeZone')} value={tz} onChange={(e) => setTz(e.target.value)}>
             {zones.map((z) => (
               <option key={z} value={z}>
                 {z}
@@ -48,10 +51,66 @@ export function ProfileCard() {
         <ActionError error={action.error} />
         <div className={formActionsClass}>
           <span role="status" className="small secondary">
-            {saved && !dirty ? 'Saved.' : ''}
+            {saved && !dirty ? t('profile.saved') : ''}
           </span>
           <Button type="submit" variant="primary" disabled={!dirty || !name.trim() || action.busy}>
-            {action.busy ? 'Saving…' : 'Save profile'}
+            {action.busy ? t('common.saving') : t('profile.save')}
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/** The local currency, so the preview shows money the way people there usually see it. */
+const PREVIEW_CURRENCY: Record<AppLocale, string> = { 'en-US': 'USD', 'en-CA': 'CAD', 'en-GB': 'GBP', 'en-AU': 'AUD', 'en-IN': 'INR', 'fr-CA': 'CAD', 'fr-FR': 'EUR' };
+
+/** A date, time, amount and number written the way `locale` writes them. */
+function localePreview(locale: AppLocale): Record<'date' | 'time' | 'money' | 'number', string> {
+  const d = new Date();
+  return {
+    date: new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(d),
+    time: new Intl.DateTimeFormat(locale, { hour: 'numeric', minute: '2-digit' }).format(d),
+    money: new Intl.NumberFormat(locale, { style: 'currency', currency: PREVIEW_CURRENCY[locale] }).format(1234.5),
+    number: new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(7.25),
+  };
+}
+
+/** The person's language and formats (G27); empty follows the organization, then the browser. */
+export function LanguageCard() {
+  const { me } = useMe();
+  const [choice, setChoice] = useState<AppLocale | ''>(me.user.locale ?? '');
+  const action = useAction();
+  const fallback = me.organization.locale ?? browserLocale();
+  const effective = choice || fallback;
+  const p = localePreview(effective);
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    // Every label and date on the page changes, so start the page again in the new language.
+    if (await action.run(() => rd.account.update({ locale: choice || null }))) window.location.reload();
+  };
+  return (
+    <Card title={t('language.title')} subtitle={t('language.subtitle')}>
+      <form onSubmit={save} className={s.form} noValidate>
+        <SelectField label={t('language.label')} value={choice} onChange={(e) => setChoice(e.target.value as AppLocale | '')}>
+          <option value="">
+            {me.organization.locale ? t('language.followOrg', { name: LOCALE_LABELS[fallback] }) : t('language.followBrowser', { name: LOCALE_LABELS[fallback] })}
+          </option>
+          {LOCALES.map((l) => (
+            <option key={l} value={l} lang={l}>
+              {LOCALE_LABELS[l]}
+            </option>
+          ))}
+        </SelectField>
+        <p className="small secondary" lang={effective}>
+          {t('language.preview', p)}
+        </p>
+        {effective.startsWith('fr') ? <p className="small secondary">{t('language.partial')}</p> : null}
+        <ActionError error={action.error} />
+        <div className={formActionsClass}>
+          <span />
+          <Button type="submit" variant="primary" disabled={(choice || null) === me.user.locale || action.busy}>
+            {action.busy ? t('common.saving') : t('language.save')}
           </Button>
         </div>
       </form>
@@ -75,29 +134,29 @@ function PasswordForm({ onDone }: { onDone: () => void }) {
   return (
     <form onSubmit={submit} className={s.form} noValidate>
       <div className={formGridClass}>
-        <TextField label="Current password" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
+        <TextField label={t('password.current')} type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} />
         <TextField
-          label="New password"
+          label={t('password.new')}
           type="password"
           autoComplete="new-password"
           value={next}
           onChange={(e) => setNext(e.target.value)}
-          error={next.length > 0 && next.length < 12 ? 'Use at least 12 characters.' : null}
+          error={next.length > 0 && next.length < 12 ? t('password.tooShort') : null}
         />
         <TextField
-          label="New password again"
+          label={t('password.again')}
           type="password"
           autoComplete="new-password"
           value={again}
           onChange={(e) => setAgain(e.target.value)}
-          error={again.length > 0 && again !== next ? 'The passwords don’t match.' : null}
+          error={again.length > 0 && again !== next ? t('password.mismatch') : null}
         />
       </div>
       <ActionError error={action.error} />
       <div className={formActionsClass}>
-        <Button onClick={onDone}>Cancel</Button>
+        <Button onClick={onDone}>{t('common.cancel')}</Button>
         <Button type="submit" variant="primary" disabled={!valid || action.busy}>
-          {action.busy ? 'Saving…' : 'Change password'}
+          {action.busy ? t('common.saving') : t('security.changePassword')}
         </Button>
       </div>
     </form>
@@ -115,14 +174,14 @@ function EmailForm({ onDone }: { onDone: (to: string) => void }) {
   return (
     <form onSubmit={submit} className={s.form} noValidate>
       <div className={formGridClass}>
-        <TextField label="New email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        <TextField label="Current password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
+        <TextField label={t('email.new')} type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        <TextField label={t('password.current')} type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />
       </div>
       <ActionError error={action.error} />
       <div className={formActionsClass}>
-        <Button onClick={() => onDone('')}>Cancel</Button>
+        <Button onClick={() => onDone('')}>{t('common.cancel')}</Button>
         <Button type="submit" variant="primary" disabled={!email.includes('@') || !password || action.busy}>
-          {action.busy ? 'Sending…' : 'Send confirmation'}
+          {action.busy ? t('email.sending') : t('email.send')}
         </Button>
       </div>
     </form>
@@ -145,9 +204,9 @@ export function SecurityCard() {
   };
 
   return (
-    <Card title="Sign-in and security" subtitle="Changes here send you a security notice by email, so you know if it wasn’t you.">
+    <Card title={t('security.title')} subtitle={t('security.subtitle')}>
       {sec.error ? <ErrorState error={sec.error} onRetry={sec.reload} /> : null}
-      {!sec.data && !sec.error ? <Loading label="Loading your sign-in settings" /> : null}
+      {!sec.data && !sec.error ? <Loading label={t('security.loading')} /> : null}
       {note ? (
         <p role="status" className={s.note}>
           {note}
@@ -156,15 +215,15 @@ export function SecurityCard() {
       {sec.data ? (
         <dl className={s.rows}>
           <div className={s.row}>
-            <dt>Email</dt>
+            <dt>{t('security.email')}</dt>
             <dd>
               <span>{me.user.email}</span>
-              {sec.data.pending_email ? <span className="small secondary"> · waiting for {sec.data.pending_email} to confirm</span> : null}
+              {sec.data.pending_email ? <span className="small secondary">{t('security.pendingEmail', { email: sec.data.pending_email })}</span> : null}
             </dd>
             <dd className={s.rowAction}>
               {open !== 'email' ? (
                 <Button size="sm" variant="quiet" onClick={() => setOpen('email')}>
-                  Change email
+                  {t('security.changeEmail')}
                 </Button>
               ) : null}
             </dd>
@@ -174,19 +233,19 @@ export function SecurityCard() {
               onDone={(to) => {
                 setOpen(null);
                 if (to) {
-                  setNote(`Check ${to} for a confirmation link. Your email doesn’t change until you open it.`);
+                  setNote(t('security.checkEmail', { email: to }));
                   sec.reload();
                 }
               }}
             />
           ) : null}
           <div className={s.row}>
-            <dt>Password</dt>
-            <dd className="secondary">Choose a long one you don’t use anywhere else.</dd>
+            <dt>{t('security.password')}</dt>
+            <dd className="secondary">{t('security.passwordHint')}</dd>
             <dd className={s.rowAction}>
               {open !== 'password' ? (
                 <Button size="sm" variant="quiet" onClick={() => setOpen('password')}>
-                  Change password
+                  {t('security.changePassword')}
                 </Button>
               ) : null}
             </dd>
@@ -200,34 +259,37 @@ export function SecurityCard() {
             />
           ) : null}
           <div className={s.row}>
-            <dt>Two-step sign-in</dt>
+            <dt>{t('security.twoStep')}</dt>
             <dd>
               {sec.data.mfa_enabled ? (
                 <>
-                  <Badge tone="solid">On</Badge>{' '}
+                  <Badge tone="solid">{t('security.on')}</Badge>{' '}
                   <span className="small secondary">
-                    {sec.data.recovery_codes_left} of 10 recovery codes left{sec.data.recovery_codes_left <= 3 ? ' — create new ones soon' : ''}
+                    {t('security.codesLeft', { n: sec.data.recovery_codes_left })}
+                    {sec.data.recovery_codes_left <= 3 ? t('security.codesSoon') : ''}
                   </span>
                 </>
               ) : (
-                <span className="secondary">Off — a code from an authenticator app keeps your account safe even if your password leaks.</span>
+                <span className="secondary">{t('security.off')}</span>
               )}
             </dd>
             <dd className={s.rowAction}>
               {sec.data.mfa_enabled ? (
                 <Button size="sm" variant="quiet" disabled={codesAction.busy} onClick={() => void newCodes()}>
-                  New recovery codes
+                  {t('security.newCodes')}
                 </Button>
               ) : (
-                <Link href="/login/mfa?enroll=1&reason=choice&next=%2Fme%2Fsettings">Set up →</Link>
+                <Link href="/login/mfa?enroll=1&reason=choice&next=%2Fme%2Fsettings">{t('security.setUp')}</Link>
               )}
             </dd>
           </div>
           <ActionError error={codesAction.error} />
           <div className={s.row}>
-            <dt>Other sign-ins</dt>
+            <dt>{t('security.others')}</dt>
             <dd className="secondary">
-              {sec.data.other_sessions === 0 ? 'Only this browser.' : `${sec.data.other_sessions} other ${sec.data.other_sessions === 1 ? 'browser or computer' : 'browsers or computers'}.`}
+              {sec.data.other_sessions === 0
+                ? t('security.onlyThis')
+                : t(sec.data.other_sessions === 1 ? 'security.otherCount.one' : 'security.otherCount.other', { n: sec.data.other_sessions })}
             </dd>
             <dd className={s.rowAction}>
               {sec.data.other_sessions > 0 ? (
@@ -238,12 +300,12 @@ export function SecurityCard() {
                   onClick={async () => {
                     const r = await others.run(() => rd.account.signOutOthers());
                     if (r) {
-                      setNote(`Signed out of ${r.signed_out} other ${r.signed_out === 1 ? 'session' : 'sessions'}.`);
+                      setNote(t(r.signed_out === 1 ? 'security.signedOut.one' : 'security.signedOut.other', { n: r.signed_out }));
                       sec.reload();
                     }
                   }}
                 >
-                  Sign out everywhere else
+                  {t('security.signOutOthers')}
                 </Button>
               ) : null}
             </dd>
@@ -251,11 +313,11 @@ export function SecurityCard() {
           <ActionError error={others.error} />
         </dl>
       ) : null}
-      <Dialog open={codes !== null} onClose={() => setCodes(null)} title="Your new recovery codes" description="The old codes no longer work.">
+      <Dialog open={codes !== null} onClose={() => setCodes(null)} title={t('security.newCodesTitle')} description={t('security.oldCodes')}>
         {codes ? (
           <RecoveryCodes
             codes={codes}
-            doneLabel="Done"
+            doneLabel={t('security.done')}
             onDone={() => {
               setCodes(null);
               sec.reload();

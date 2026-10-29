@@ -8,6 +8,7 @@ import { ActionError } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { Banner } from '@/components/ui/Layout';
 import { ApiError, rd } from '@/lib/api';
+import { ssoErrorText, useT } from '@/lib/i18n';
 import { useAction } from '@/lib/useApi';
 import { AuthFrame, safeNext } from './AuthFrame';
 import s from './login.module.css';
@@ -25,6 +26,7 @@ function LoginForm() {
   const [route, setRoute] = useState<{ email: string; r: SsoDiscoverResponse } | null>(null);
   const [usePassword, setUsePassword] = useState(false);
   const action = useAction();
+  const t = useT();
 
   const typed = email.trim().toLowerCase();
   useEffect(() => {
@@ -76,15 +78,15 @@ function LoginForm() {
 
   return (
     <form className={s.form} onSubmit={submit} noValidate>
-      <span className="eyebrow">Track · Sign in</span>
-      <h1 style={{ fontSize: 28 }}>Sign in</h1>
+      <span className="eyebrow">{t('login.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('login.title')}</h1>
       {ssoError && SSO_ERRORS[ssoError] ? (
-        <Banner tone="warn" role="alert" title="Single sign-on didn't work">
-          {SSO_ERRORS[ssoError]}
+        <Banner tone="warn" role="alert" title={t('login.ssoFailed')}>
+          {ssoErrorText(t, ssoError)}
         </Banner>
       ) : null}
       <TextField
-        label="Work email"
+        label={t('login.email')}
         type="email"
         name="email"
         autoComplete="username"
@@ -97,7 +99,7 @@ function LoginForm() {
       />
       {showPassword ? (
         <TextField
-          label="Password"
+          label={t('login.password')}
           type="password"
           name="password"
           autoComplete="current-password"
@@ -106,36 +108,36 @@ function LoginForm() {
           onChange={(e) => setPassword(e.target.value)}
         />
       ) : (
-        <p className="small secondary">Your organization signs in with its own identity provider. You&apos;ll come straight back here.</p>
+        <p className="small secondary">{t('login.ssoNote')}</p>
       )}
       <ActionError error={action.error} />
       {showPassword ? (
         <Button type="submit" variant="primary" disabled={action.busy || !email || !password}>
-          {action.busy ? 'Signing in…' : 'Sign in →'}
+          {action.busy ? t('login.signingIn') : t('login.submit')}
         </Button>
       ) : (
         <Button type="submit" variant="primary" disabled={action.busy}>
-          {action.busy ? 'Opening…' : 'Continue with single sign-on →'}
+          {action.busy ? t('login.opening') : t('login.ssoSubmit')}
         </Button>
       )}
       {sso?.password_allowed ? (
         <p className={s.fine}>
           <Button variant="link" onClick={() => setUsePassword((v) => !v)}>
-            {usePassword ? 'Use single sign-on instead' : 'Use my password instead'}
+            {usePassword ? t('login.useSso') : t('login.usePassword')}
           </Button>
         </p>
       ) : null}
       {showPassword ? (
         <p className={s.fine}>
-          <a href="/reset">Forgot your password?</a>
+          <a href="/reset">{t('login.forgot')}</a>
         </p>
       ) : null}
-      <p className={s.fine}>Admins and finance confirm a 6-digit code from an authenticator app next.</p>
+      <p className={s.fine}>{t('login.mfaNote')}</p>
       <p className={s.fine}>
-        New to Track? <a href="/signup">Create an organization</a> — free for up to 2 people, 14-day Pro trial.
+        {t('login.newPrefix')} <a href="/signup">{t('login.newLink')}</a> {t('login.newSuffix')}
       </p>
       <p className={s.fine}>
-        A client of an agency that uses Track? <a href="/client/login">Sign in to the client portal</a>.
+        {t('login.clientPrefix')} <a href="/client/login">{t('login.clientLink')}</a>.
       </p>
     </form>
   );

@@ -2,63 +2,71 @@
 
 import type { ClientPortalInvoice } from '@rd/contracts';
 import { OrgLogo } from '@/components/OrgLogo';
-import { formatMoney } from '@/lib/format';
-import { formatPercentBp } from '@/lib/money';
-import { formatDayLabel } from '@/lib/time';
+import { formatMoney, formatNumber, formatPercent } from '@/lib/format';
+import { tFor } from '@/lib/i18n';
+import { currentLocale } from '@/lib/locale';
 import s from './invoiceSheet.module.css';
 
 export { s as invoiceSheetStyles };
 
-/** An invoice as the client receives it: the print page and the client portal (F9) both show this. */
+/**
+ * An invoice as the client receives it: the print page and the client portal (F9) both show
+ * this. It is the agency's document, so it is in the agency's language and formats (G27),
+ * whoever opens it; without one set, in the reader's.
+ */
 export function InvoiceSheet({ inv }: { inv: ClientPortalInvoice }) {
-  const day = (d: string | null) => (d ? formatDayLabel(d) : '—');
+  const locale = inv.organization_locale ?? currentLocale();
+  const t = tFor(locale);
+  const money = (cents: number) => formatMoney(cents, inv.currency, locale);
+  const dayFmt = new Intl.DateTimeFormat(locale, { timeZone: 'UTC', day: 'numeric', month: 'short', year: 'numeric' });
+  const day = (d: string | null) => (d ? dayFmt.format(new Date(`${d}T12:00:00Z`)) : '—');
   const issuedDay = inv.issued_at ? inv.issued_at.slice(0, 10) : null;
   return (
-    <article className={s.sheet} aria-label={`Invoice ${inv.number ?? 'draft'}`}>
+    <article className={s.sheet} lang={locale} aria-label={inv.number ? t('invoice.number', { number: inv.number }) : t('invoice.draft')}>
       <header className={s.head}>
         <div>
           <OrgLogo url={inv.organization_logo_url ?? null} name={inv.organization_name} plain />
           <span className={s.label}>{inv.organization_name}</span>
-          <h1 className={s.title}>{inv.number ? `Invoice ${inv.number}` : 'Draft invoice'}</h1>
+          <h1 className={s.title}>{inv.number ? t('invoice.number', { number: inv.number }) : t('invoice.draft')}</h1>
         </div>
         <dl className={s.meta}>
-          <dt>Issued</dt>
+          <dt>{t('invoice.issued')}</dt>
           <dd>{day(issuedDay)}</dd>
-          <dt>Due</dt>
+          <dt>{t('invoice.due')}</dt>
           <dd>{day(inv.due_date)}</dd>
-          <dt>Period</dt>
+          <dt>{t('invoice.period')}</dt>
           <dd>
             {day(inv.period_from)} – {day(inv.period_to)}
           </dd>
-          <dt>Currency</dt>
+          <dt>{t('invoice.currency')}</dt>
           <dd>{inv.currency}</dd>
         </dl>
       </header>
-      {inv.status !== 'issued' ? <span className={s.stamp}>{inv.status === 'void' ? 'Void' : 'Draft — not issued'}</span> : null}
+      {inv.status !== 'issued' ? <span className={s.stamp}>{inv.status === 'void' ? t('invoice.void') : t('invoice.notIssued')}</span> : null}
       <section className={s.parties}>
         <div>
-          <span className={s.label}>Bill to</span>
+          <span className={s.label}>{t('invoice.billTo')}</span>
           <strong>{inv.client.name}</strong>
           {inv.client.address ? <div className={s.address}>{inv.client.address}</div> : null}
           {inv.client.contact_email ? <div>{inv.client.contact_email}</div> : null}
         </div>
         <div>
-          <span className={s.label}>From</span>
+          <span className={s.label}>{t('invoice.from')}</span>
           <strong>{inv.organization_name}</strong>
         </div>
       </section>
       <table className={s.lines}>
         <thead>
           <tr>
-            <th scope="col">Description</th>
+            <th scope="col">{t('invoice.description')}</th>
             <th scope="col" className={s.num}>
-              Hours
+              {t('invoice.hours')}
             </th>
             <th scope="col" className={s.num}>
-              Rate
+              {t('invoice.rate')}
             </th>
             <th scope="col" className={s.num}>
-              Amount
+              {t('invoice.amount')}
             </th>
           </tr>
         </thead>
@@ -66,20 +74,20 @@ export function InvoiceSheet({ inv }: { inv: ClientPortalInvoice }) {
           {inv.lines.map((l) => (
             <tr key={l.id}>
               <td>{l.description}</td>
-              <td className={s.num}>{l.hours.toFixed(2)}</td>
-              <td className={s.num}>{formatMoney(l.rate_cents, inv.currency)}</td>
-              <td className={s.num}>{formatMoney(l.amount_cents, inv.currency)}</td>
+              <td className={s.num}>{formatNumber(l.hours, 2, locale)}</td>
+              <td className={s.num}>{money(l.rate_cents)}</td>
+              <td className={s.num}>{money(l.amount_cents)}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <dl className={s.totals}>
-        <dt>Subtotal</dt>
-        <dd>{formatMoney(inv.subtotal_cents, inv.currency)}</dd>
-        <dt>Tax ({formatPercentBp(inv.tax_rate_bp)})</dt>
-        <dd>{formatMoney(inv.tax_cents, inv.currency)}</dd>
-        <dt className={s.grand}>Total due</dt>
-        <dd className={s.grand}>{formatMoney(inv.total_cents, inv.currency)}</dd>
+        <dt>{t('invoice.subtotal')}</dt>
+        <dd>{money(inv.subtotal_cents)}</dd>
+        <dt>{t('invoice.tax', { rate: formatPercent(inv.tax_rate_bp / 100, inv.tax_rate_bp % 100 === 0 ? 0 : 2, locale) })}</dt>
+        <dd>{money(inv.tax_cents)}</dd>
+        <dt className={s.grand}>{t('invoice.total')}</dt>
+        <dd className={s.grand}>{money(inv.total_cents)}</dd>
       </dl>
       {inv.notes ? <p className={s.notes}>{inv.notes}</p> : null}
     </article>

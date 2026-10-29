@@ -19,7 +19,7 @@ import {
   type TimeOffAccrualDay,
 } from '@rd/contracts';
 import { request, unwrapList } from './api';
-import { formatDayMonth, formatShortDay, formatTime, WEEKDAY_SHORT } from './time';
+import { formatDayMonth, formatShortDay, formatTime, weekdayShort } from './time';
 
 /**
  * Client and display helpers for schedules, attendance and time off (Stage 3).
@@ -118,8 +118,8 @@ export function weekdaysLabel(days: readonly number[]): string {
   if (sorted.length === 7) return 'Every day';
   if (sorted.length === 0) return '—';
   const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1]! + 1);
-  if (contiguous && sorted.length >= 3) return `${WEEKDAY_SHORT[sorted[0]! - 1]}–${WEEKDAY_SHORT[sorted[sorted.length - 1]! - 1]}`;
-  return sorted.map((d) => WEEKDAY_SHORT[d - 1]).join(', ');
+  if (contiguous && sorted.length >= 3) return `${weekdayShort(sorted[0]!)}–${weekdayShort(sorted[sorted.length - 1]!)}`;
+  return sorted.map((d) => weekdayShort(d)).join(', ');
 }
 
 /** "09:00–17:00" or "22:00–06:00 (+1)" for overnight shifts. */

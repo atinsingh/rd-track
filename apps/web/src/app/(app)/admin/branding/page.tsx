@@ -1,17 +1,49 @@
 'use client';
 
 import { useState } from 'react';
-import { LOGO_CONTENT_TYPES } from '@rd/contracts';
+import { LOCALE_LABELS, LOCALES, LOGO_CONTENT_TYPES, type AppLocale, type BrandingDTO } from '@rd/contracts';
 import { OrgLogo } from '@/components/OrgLogo';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Resource } from '@/components/ui/DataState';
+import { SelectField } from '@/components/ui/Field';
 import { Card, PageHeader } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { logoProblem } from '@/lib/branding';
+import { t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { formatDateTime } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
+
+/** The organization's default language and formats (G27), which its invoices and client portal use too. */
+function OrgLanguage({ b, onSaved }: { b: BrandingDTO; onSaved: (b: BrandingDTO) => void }) {
+  const action = useAction();
+  const [saved, setSaved] = useState(false);
+  const change = async (value: AppLocale | '') => {
+    setSaved(false);
+    const r = await action.run(() => rd.admin.setOrgLocale(value || null));
+    if (r) {
+      onSaved(r);
+      setSaved(true);
+    }
+  };
+  return (
+    <Card title={t('language.orgTitle')} subtitle={t('language.orgSubtitle')}>
+      <SelectField label={t('language.label')} value={b.locale ?? ''} disabled={action.busy} onChange={(e) => void change(e.target.value as AppLocale | '')}>
+        <option value="">{t('language.orgFollowBrowser')}</option>
+        {LOCALES.map((l) => (
+          <option key={l} value={l} lang={l}>
+            {LOCALE_LABELS[l]}
+          </option>
+        ))}
+      </SelectField>
+      <p role="status" className="small secondary">
+        {saved ? t('language.orgSaved') : ''}
+      </p>
+      <ActionError error={action.error} />
+    </Card>
+  );
+}
 
 /** The organization's own logo (G26), shown beside the product mark, in the client portal and on invoices. */
 export default function BrandingPage() {
@@ -54,7 +86,7 @@ export default function BrandingPage() {
     <>
       <PageHeader
         eyebrow="Admin · Settings"
-        title="Logo"
+        title={t('nav.branding')}
         description={`${me.organization.name}'s own logo, shown beside the RoundDigital Track mark in the menu, in the client portal and on invoices.`}
       />
       <Card title="Your logo">
@@ -107,6 +139,7 @@ export default function BrandingPage() {
           )}
         </Resource>
       </Card>
+      {branding.data ? <OrgLanguage b={branding.data} onSaved={(r) => branding.mutate(() => r)} /> : null}
     </>
   );
 }

@@ -23,7 +23,7 @@ import {
   type FieldMeta,
   type PolicyForm,
 } from '@/lib/policyForm';
-import { WEEKDAY_SHORT, formatDateTime, timeZoneOptions } from '@/lib/time';
+import { formatDateTime, timeZoneOptions, weekdaysShort } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from './policies.module.css';
@@ -248,7 +248,7 @@ function FieldControl({
         <>
           <fieldset className={s.days} disabled={disabled} style={{ border: 0, padding: 0, margin: 0 }}>
             <legend className="visually-hidden">Work days</legend>
-            {WEEKDAY_SHORT.map((label, i) => {
+            {weekdaysShort().map((label, i) => {
               const d = i + 1;
               return (
                 <label key={label}>

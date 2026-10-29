@@ -1,4 +1,4 @@
-import { deploymentKeyCreateRequest, emailCodeRequest, logoSetRequest, logoUploadRequest } from '@rd/contracts';
+import { deploymentKeyCreateRequest, emailCodeRequest, localeSetRequest, logoSetRequest, logoUploadRequest } from '@rd/contracts';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../context';
@@ -7,7 +7,7 @@ import { ADMIN_ROLES, requireRole } from '../http';
 import { parse } from '../lib/validate';
 import * as b from './branding/service';
 
-/** G26 (P2): the organization's logo, and deployment keys for MDM. */
+/** G26 (P2): the organization's logo and language (G27), and deployment keys for MDM. */
 export async function brandingRoutes(app: FastifyInstance, deps: Deps) {
   const { pool } = deps;
   const user = { config: { auth: 'user' as const } };
@@ -23,6 +23,11 @@ export async function brandingRoutes(app: FastifyInstance, deps: Deps) {
     const a = requireRole(req, ADMIN_ROLES);
     const { upload_id } = parse(logoSetRequest, req.body);
     return withTx(pool, (tx) => b.setLogo(deps, tx, a, upload_id, req.id));
+  });
+  app.put('/v1/admin/branding/locale', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    const { locale } = parse(localeSetRequest, req.body);
+    return withTx(pool, (tx) => b.setOrgLocale(deps, tx, a, locale, req.id));
   });
   app.delete('/v1/admin/branding/logo', user, async (req) => withTx(pool, (tx) => b.removeLogo(deps, tx, requireRole(req, ADMIN_ROLES), req.id)));
 

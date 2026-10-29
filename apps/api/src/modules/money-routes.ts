@@ -28,7 +28,7 @@ import * as cr from './money/clients-rates';
 import * as inv from './money/invoices';
 import * as adj from './money/adjustments';
 import { createPayrollExport, getPayrollExport, listPayrollExports } from './money/payroll';
-import { logoUrl } from './branding/service';
+import { logoUrl, orgLocale } from './branding/service';
 import { assertMoneyPlan } from './money/time';
 
 /**
@@ -133,7 +133,7 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get<{ Params: { id: string } }>('/v1/admin/invoices/:id', user, async (req) => {
     const orgId = (await admin(req)).organizationId;
-    return { ...(await inv.getInvoice(pool, orgId, id(req))), organization_logo_url: await logoUrl(deps, pool, orgId) };
+    return { ...(await inv.getInvoice(pool, orgId, id(req))), organization_logo_url: await logoUrl(deps, pool, orgId), organization_locale: await orgLocale(pool, orgId) };
   });
   app.patch<{ Params: { id: string } }>('/v1/admin/invoices/:id', user, async (req) => {
     const a = await admin(req);

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { BrandingDTO, DeploymentKeyCreated, DeploymentKeyDTO, LogoUploadResponse } from '@rd/contracts';
+import type { AppLocale, BrandingDTO, DeploymentKeyCreated, DeploymentKeyDTO, LogoUploadResponse } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { SYSTEM_SCOPE, withScope } from '../../db/tenant-scope';
@@ -32,8 +32,19 @@ export async function logoUrl(deps: Pick<Deps, 'store'>, q: Queryable, orgId: st
 }
 
 export async function branding(deps: Pick<Deps, 'store'>, q: Queryable, orgId: string): Promise<BrandingDTO> {
-  const o = await one<{ logo_updated_at: string | null }>(q, 'SELECT logo_updated_at FROM organizations WHERE id = $1', [orgId]);
-  return { logo_url: await logoUrl(deps, q, orgId), logo_updated_at: o!.logo_updated_at };
+  const o = await one<{ logo_updated_at: string | null; locale: AppLocale | null }>(q, 'SELECT logo_updated_at, locale FROM organizations WHERE id = $1', [orgId]);
+  return { logo_url: await logoUrl(deps, q, orgId), logo_updated_at: o!.logo_updated_at, locale: o!.locale };
+}
+
+/** The organization's language and formats (G27): the default for everyone who hasn't chosen their own, and for its invoices and client portal. */
+export async function orgLocale(q: Queryable, orgId: string): Promise<AppLocale | null> {
+  return (await one<{ locale: AppLocale | null }>(q, 'SELECT locale FROM organizations WHERE id = $1', [orgId]))?.locale ?? null;
+}
+
+export async function setOrgLocale(deps: Pick<Deps, 'store'>, q: Queryable, actor: UserActor, locale: AppLocale | null, requestId?: string): Promise<BrandingDTO> {
+  await q.query('UPDATE organizations SET locale = $2 WHERE id = $1', [actor.organizationId, locale]);
+  await audit(q, { organizationId: actor.organizationId, actor, action: 'organization.locale_changed', targetType: 'organization', targetId: actor.organizationId, requestId, metadata: { locale } });
+  return branding(deps, q, actor.organizationId);
 }
 
 export async function logoUpload(deps: Deps, actor: UserActor, contentType: string): Promise<LogoUploadResponse> {

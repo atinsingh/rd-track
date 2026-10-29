@@ -8,9 +8,11 @@ import { Badge, TableBox, tableClass } from '@/components/ui/Layout';
 import type { ApiResource } from '@/lib/useApi';
 import { formatDateTime } from '@/lib/time';
 import { useAction } from '@/lib/useApi';
+import { formatBytes } from '@/lib/format';
+import { t } from '@/lib/i18n';
 
-const STATUS: Record<DataExportDTO['status'], string> = { queued: 'Queued', running: 'Preparing', ready: 'Ready', failed: 'Failed', expired: 'Expired' };
-const size = (n: number | null) => (n === null ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+const statusText = (st: DataExportDTO['status']) => t(`exports.status.${st}`);
+const size = (n: number | null) => (n === null ? '' : formatBytes(n));
 
 /** Request a ZIP and download it while it lasts; used for the organization's export and for "My data". */
 export function DataExports({ res, onRequest, label, tz }: { res: ApiResource<DataExportDTO[]>; onRequest: () => Promise<DataExportDTO>; label: string; tz: string }) {
@@ -30,24 +32,24 @@ export function DataExports({ res, onRequest, label, tz }: { res: ApiResource<Da
     <>
       <div>
         <Button variant="primary" onClick={request} disabled={action.busy || busy}>
-          {busy ? 'Preparing…' : label}
+          {busy ? t('exports.preparing') : label}
         </Button>
       </div>
       <ActionError error={action.error} />
-      <Resource {...res} label="Loading exports">
+      <Resource {...res} label={t('exports.loading')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No exports yet">{`Files can be downloaded for ${DATA_EXPORT_HOURS} hours.`}</Empty>
+            <Empty title={t('exports.none')}>{t('exports.noneBody', { hours: DATA_EXPORT_HOURS })}</Empty>
           ) : (
-            <TableBox label="Exports">
+            <TableBox label={t('exports.table')}>
               <table className={tableClass}>
                 <thead>
                   <tr>
-                    <th scope="col">Requested</th>
-                    <th scope="col">State</th>
-                    <th scope="col">File</th>
+                    <th scope="col">{t('exports.requested')}</th>
+                    <th scope="col">{t('exports.state')}</th>
+                    <th scope="col">{t('exports.file')}</th>
                     <th scope="col">
-                      <span className="visually-hidden">Download</span>
+                      <span className="visually-hidden">{t('exports.download')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -56,13 +58,13 @@ export function DataExports({ res, onRequest, label, tz }: { res: ApiResource<Da
                     <tr key={e.id}>
                       <td className="small">{formatDateTime(e.created_at, tz)}</td>
                       <td>
-                        <Badge tone={e.status === 'ready' ? 'solid' : e.status === 'failed' ? 'warn' : 'outline'}>{STATUS[e.status]}</Badge>
+                        <Badge tone={e.status === 'ready' ? 'solid' : e.status === 'failed' ? 'warn' : 'outline'}>{statusText(e.status)}</Badge>
                       </td>
                       <td className="small">
-                        {e.file_count ? `${e.file_count} files · ${size(e.size_bytes)}` : '—'}
-                        {e.status === 'ready' && e.expires_at ? ` · until ${formatDateTime(e.expires_at, tz)}` : ''}
+                        {e.file_count ? t('exports.files', { n: e.file_count, size: size(e.size_bytes) }) : '—'}
+                        {e.status === 'ready' && e.expires_at ? t('exports.until', { when: formatDateTime(e.expires_at, tz) }) : ''}
                       </td>
-                      <td style={{ textAlign: 'right' }}>{e.download_url ? <a href={e.download_url}>Download ZIP</a> : null}</td>
+                      <td style={{ textAlign: 'right' }}>{e.download_url ? <a href={e.download_url}>{t('exports.downloadZip')}</a> : null}</td>
                     </tr>
                   ))}
                 </tbody>

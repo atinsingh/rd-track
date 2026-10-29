@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { cx } from '@/lib/cx';
+import { useT } from '@/lib/i18n';
 import s from './dialog.module.css';
 
 /**
@@ -32,6 +33,7 @@ export function Dialog({
   size?: 'sm' | 'md' | 'lg';
   eyebrow?: ReactNode;
 }) {
+  const t = useT();
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
   const titleId = useId();
@@ -80,7 +82,7 @@ export function Dialog({
                 </p>
               ) : null}
             </div>
-            <button type="button" className={s.close} onClick={onClose} aria-label="Close">
+            <button type="button" className={s.close} onClick={onClose} aria-label={t('common.close')}>
               <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M3 3l10 10M13 3L3 13" stroke="currentColor" strokeWidth="1.6" />
               </svg>

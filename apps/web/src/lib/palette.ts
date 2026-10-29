@@ -1,4 +1,5 @@
 import type { DirectoryResponse } from '@rd/contracts';
+import { t } from './i18n';
 import type { NavGroup } from './nav';
 
 /** One thing the ⌘K palette can jump to. */
@@ -12,10 +13,10 @@ export interface PaletteItem {
   keywords: string;
 }
 
-export const PALETTE_SECTIONS: { kind: PaletteItem['kind']; label: string }[] = [
-  { kind: 'page', label: 'Pages' },
-  { kind: 'person', label: 'People' },
-  { kind: 'project', label: 'Projects' },
+export const paletteSections = (): { kind: PaletteItem['kind']; label: string }[] => [
+  { kind: 'page', label: t('palette.pages') },
+  { kind: 'person', label: t('palette.people') },
+  { kind: 'project', label: t('palette.projects') },
 ];
 
 /** Pages from the user's own navigation, plus the people and projects they manage. */
@@ -35,7 +36,7 @@ export function paletteItems(groups: NavGroup[], directory?: DirectoryResponse |
     id: `project:${p.id}`,
     kind: 'project',
     label: p.name,
-    hint: 'Project',
+    hint: t('palette.project'),
     href: `/projects?${new URLSearchParams({ project: p.id }).toString()}`,
     keywords: '',
   }));

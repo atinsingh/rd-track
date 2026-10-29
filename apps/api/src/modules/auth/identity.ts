@@ -5,6 +5,7 @@ import {
   PASSWORD_RESET_TTL_MINUTES,
   RECOVERY_CODE_COUNT,
   type AccountSecurity,
+  type AppLocale,
   type InviteInfo,
   type OrgRole,
 } from '@rd/contracts';
@@ -299,13 +300,18 @@ export async function adminResetMfa(deps: Deps, q: Queryable, actor: UserActor, 
 
 // ───────────── my account (G13) ─────────────
 
-export async function updateMe(q: Queryable, actor: UserActor, patch: { display_name?: string; timezone?: string }, requestId?: string): Promise<void> {
+export async function updateMe(
+  q: Queryable,
+  actor: UserActor,
+  patch: { display_name?: string; timezone?: string; locale?: AppLocale | null },
+  requestId?: string,
+): Promise<void> {
   if (patch.timezone && !isValidTimeZone(patch.timezone)) throw errors.validation('Unknown time zone');
-  await q.query('UPDATE users SET display_name = COALESCE($2, display_name), timezone = COALESCE($3, timezone) WHERE id = $1', [
-    actor.userId,
-    patch.display_name ?? null,
-    patch.timezone ?? null,
-  ]);
+  await q.query(
+    `UPDATE users SET display_name = COALESCE($2, display_name), timezone = COALESCE($3, timezone),
+       locale = CASE WHEN $4 THEN $5 ELSE locale END WHERE id = $1`,
+    [actor.userId, patch.display_name ?? null, patch.timezone ?? null, patch.locale !== undefined, patch.locale ?? null],
+  );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'user.update_self', targetType: 'user', targetId: actor.userId, targetUserId: actor.userId, requestId, metadata: { fields: Object.keys(patch) } });
 }
 

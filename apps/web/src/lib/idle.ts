@@ -1,5 +1,6 @@
 import type { SessionDTO } from '@rd/contracts';
 import { formatTime } from './time';
+import { t } from './i18n';
 
 /**
  * What the person chose for idle runs in this session (Stage 4 F1), in words that
@@ -7,24 +8,24 @@ import { formatTime } from './time';
  */
 export function idleNotes(x: SessionDTO, tz: string): string[] {
   return (x.idle_adjustments ?? []).map((a) => {
-    const span = `${Math.max(1, Math.round(a.seconds / 60))} min away (${formatTime(a.idle_started_at, tz)}–${formatTime(a.idle_ended_at, tz)})`;
-    const target = a.project_name ?? 'another project';
+    const span = t('idle.away', { n: Math.max(1, Math.round(a.seconds / 60)), from: formatTime(a.idle_started_at, tz), to: formatTime(a.idle_ended_at, tz) });
+    const target = a.project_name ?? t('idle.anotherProject');
     if (a.decision === 'discard') {
-      return a.status === 'rejected' ? `${span} — couldn't be removed: ${rejectReason(a.status_reason)}` : `${span} removed on return`;
+      return a.status === 'rejected' ? t('idle.notRemoved', { span, reason: rejectReason(a.status_reason) }) : t('idle.removed', { span });
     }
-    if (a.status === 'pending') return `${span} → ${target} · waiting for approval`;
-    if (a.status === 'applied') return `${span} moved to ${target}`;
-    return `${span} — move to ${target} ${a.status_reason ? `failed: ${rejectReason(a.status_reason)}` : 'not approved, kept here'}`;
+    if (a.status === 'pending') return t('idle.waiting', { span, target });
+    if (a.status === 'applied') return t('idle.moved', { span, target });
+    return a.status_reason ? t('idle.moveFailed', { span, target, reason: rejectReason(a.status_reason) }) : t('idle.moveRejected', { span, target });
   });
 }
 
 function rejectReason(code: string | null): string {
   switch (code) {
     case 'week_locked':
-      return 'that week is approved and locked';
+      return t('idle.weekLocked');
     case 'unknown_project':
-      return 'the project is no longer active';
+      return t('idle.unknownProject');
     default:
-      return 'not applied';
+      return t('idle.notApplied');
   }
 }

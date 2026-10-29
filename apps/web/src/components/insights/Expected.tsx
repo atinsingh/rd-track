@@ -1,5 +1,5 @@
 import type { ExpectedDay, ExpectedHours } from '@rd/contracts';
-import { formatDuration } from '@/lib/format';
+import { formatDuration, formatNumber } from '@/lib/format';
 import { addDays, formatDayMonth, formatShortDay } from '@/lib/time';
 import s from './expected.module.css';
 
@@ -10,7 +10,7 @@ import s from './expected.module.css';
 
 const hours = (sec: number) => {
   const h = Math.round((sec / 3600) * 10) / 10;
-  return `${Number.isInteger(h) ? h.toFixed(0) : h}h`;
+  return `${formatNumber(h, Number.isInteger(h) ? 0 : 1)}h`;
 };
 
 /** Where the expectation comes from, in one sentence. */

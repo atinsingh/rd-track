@@ -4,9 +4,10 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
+import { useT } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import type { NavGroup } from '@/lib/nav';
-import { PALETTE_SECTIONS, paletteItems, searchPalette } from '@/lib/palette';
+import { paletteItems, paletteSections, searchPalette } from '@/lib/palette';
 import { useApi } from '@/lib/useApi';
 import s from './palette.module.css';
 
@@ -20,6 +21,7 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
   const ref = useRef<HTMLDialogElement>(null);
   const opener = useRef<Element | null>(null);
   const listId = useId();
+  const t = useT();
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   // Fetched the first time the palette opens, then kept.
@@ -31,8 +33,8 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
   const items = useMemo(() => paletteItems(groups, directory.data), [groups, directory.data]);
   const results = useMemo(() => searchPalette(items, query), [items, query]);
   // Options in display order, so arrow keys follow what is on screen.
-  const ordered = PALETTE_SECTIONS.flatMap((sec) => results.filter((r) => r.kind === sec.kind));
-  const sections = PALETTE_SECTIONS.map((sec) => ({
+  const ordered = paletteSections().flatMap((sec) => results.filter((r) => r.kind === sec.kind));
+  const sections = paletteSections().map((sec) => ({
     ...sec,
     items: ordered.map((item, i) => ({ item, i })).filter(({ item }) => item.kind === sec.kind),
   })).filter((sec) => sec.items.length > 0);
@@ -93,7 +95,7 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
     <dialog
       ref={ref}
       className={s.palette}
-      aria-label="Jump to a page, person or project"
+      aria-label={t('shell.jumpLabel')}
       onClose={() => {
         if (open) close();
       }}
@@ -115,8 +117,8 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
               aria-controls={listId}
               aria-autocomplete="list"
               aria-activedescendant={ordered.length ? optionId(current) : undefined}
-              aria-label="Search pages, people and projects"
-              placeholder={needsDirectory ? 'Search pages, people and projects' : 'Search pages'}
+              aria-label={t('palette.searchAll')}
+              placeholder={needsDirectory ? t('palette.searchAll') : t('palette.searchPages')}
               value={query}
               autoFocus
               spellCheck={false}
@@ -129,7 +131,7 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
             />
             <kbd className={s.esc}>Esc</kbd>
           </div>
-          <div id={listId} role="listbox" aria-label="Results" className={s.list}>
+          <div id={listId} role="listbox" aria-label={t('palette.results')} className={s.list}>
             {sections.map((sec) => (
               <div key={sec.kind} role="group" aria-labelledby={`${listId}-${sec.kind}`} className={s.section}>
                 <div id={`${listId}-${sec.kind}`} className={s.sectionLabel} role="presentation">
@@ -158,24 +160,23 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
           </div>
           {ordered.length === 0 ? (
             <p className={s.empty}>
-              Nothing matches “{query.trim()}”.{' '}
-              {needsDirectory ? 'People appear here when they are in a team you manage.' : 'Only pages you can open are listed.'}
+              {t('palette.nothing', { query: query.trim() })} {needsDirectory ? t('palette.peopleHint') : t('palette.pagesHint')}
             </p>
           ) : null}
-          {directory.error ? <p className={s.note}>People and projects couldn’t be loaded; pages still work.</p> : null}
+          {directory.error ? <p className={s.note}>{t('palette.directoryFailed')}</p> : null}
           <p className="visually-hidden" aria-live="polite">
-            {query.trim() ? `${ordered.length} ${ordered.length === 1 ? 'result' : 'results'}` : ''}
+            {query.trim() ? t(ordered.length === 1 ? 'palette.count.one' : 'palette.count.other', { n: ordered.length }) : ''}
           </p>
           <div className={s.foot} aria-hidden="true">
             <span>
               <kbd>↑</kbd>
-              <kbd>↓</kbd> move
+              <kbd>↓</kbd> {t('palette.move')}
             </span>
             <span>
-              <kbd>↵</kbd> open
+              <kbd>↵</kbd> {t('palette.open')}
             </span>
             <span>
-              <kbd>Esc</kbd> close
+              <kbd>Esc</kbd> {t('palette.close')}
             </span>
           </div>
         </div>

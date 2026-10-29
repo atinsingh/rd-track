@@ -9,6 +9,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
 import { announceNotificationsChanged, onApprovalsChanged, onNotificationsChanged } from '@/lib/events';
+import { useT } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { ago, bellLabel, groupNotifications } from '@/lib/notifications';
 import { useApi } from '@/lib/useApi';
@@ -19,6 +20,7 @@ const POLL_MS = 60_000;
 /** The engine's in-app channel: an unread count in the rail and a panel of recent notifications. */
 export function NotificationBell() {
   const { timezone: tz } = useMe();
+  const t = useT();
   const [open, setOpen] = useState(false);
   // "12 min ago" is measured from when the panel opened.
   const [openedAt, setOpenedAt] = useState(0);
@@ -91,23 +93,23 @@ export function NotificationBell() {
         open={open}
         onClose={() => setOpen(false)}
         variant="sheet"
-        title="Notifications"
-        description={unread ? `${unread} unread` : 'You’re all caught up.'}
+        title={t('notifications.title')}
+        description={unread ? t('notifications.unread', { n: unread }) : t('notifications.caughtUp')}
         footer={
           <>
             <Link href="/me/settings" className={s.settings} onClick={() => setOpen(false)}>
-              Notification settings
+              {t('notifications.settings')}
             </Link>
             <Button size="sm" disabled={!unread} onClick={() => void readAll()}>
-              Mark all as read
+              {t('notifications.markAll')}
             </Button>
           </>
         }
       >
         {list.error ? <ErrorState error={list.error} onRetry={list.reload} /> : null}
-        {!list.data && !list.error ? <Loading label="Loading notifications" /> : null}
+        {!list.data && !list.error ? <Loading label={t('notifications.loading')} /> : null}
         {list.data && list.data.items.length === 0 ? (
-          <p className="secondary">Nothing yet. Approvals, decisions on your requests and anything about your data will show up here.</p>
+          <p className="secondary">{t('notifications.empty')}</p>
         ) : null}
         {list.data
           ? groupNotifications(list.data.items).map((g) => (
@@ -121,7 +123,7 @@ export function NotificationBell() {
                         <span className={s.body}>{n.body}</span>
                         <span className={s.when}>
                           <time dateTime={n.created_at}>{ago(n.created_at, openedAt, tz)}</time>
-                          {!n.read_at ? <span className="visually-hidden">, unread</span> : null}
+                          {!n.read_at ? <span className="visually-hidden">{t('notifications.unreadSuffix')}</span> : null}
                         </span>
                       </>
                     );

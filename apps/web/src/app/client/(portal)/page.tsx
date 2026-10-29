@@ -6,15 +6,13 @@ import type { ClientPortalProject } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { Empty, Resource } from '@/components/ui/DataState';
 import { Badge, Card, Meter, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
-import { formatDuration, formatMoney } from '@/lib/format';
+import { formatDuration, formatMoney, formatPercent } from '@/lib/format';
 import { BUDGET_STATUS_LABEL } from '@/lib/money';
 import { clientPortal } from '@/lib/portal';
-import { addDays, browserTimeZone, daysInMonth, daysRange, formatDayLabel, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
+import { addDays, browserTimeZone, daysInMonth, daysRange, formatDayLabel, formatDayMonth, formatMonthYear, startOfWeek, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
 import { usePortalMe } from './PortalMe';
 import s from './portal.module.css';
-
-const MONTH = new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', month: 'long', year: 'numeric' });
 
 function shiftMonth(month: string, n: number): string {
   const [y, m] = month.split('-').map(Number) as [number, number];
@@ -27,7 +25,7 @@ function Budget({ b }: { b: NonNullable<ClientPortalProject['budget']> }) {
   const used = hours ? b.used_seconds : (b.used_cents ?? 0);
   const limit = hours ? (b.limit_hours ?? 0) * 3600 : (b.limit_cents ?? 0);
   const fmt = (n: number) => (hours ? formatDuration(n) : formatMoney(n, b.currency ?? 'USD'));
-  const label = `${fmt(used)} of ${fmt(limit)} used (${b.used_percent.toFixed(0)}%)`;
+  const label = `${fmt(used)} of ${fmt(limit)} used (${formatPercent(b.used_percent)})`;
   return (
     <div className="stack" style={{ gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
@@ -151,7 +149,7 @@ export default function ClientPortalHome() {
             <Button size="sm" onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
               ←
             </Button>
-            <strong style={{ minWidth: 140, textAlign: 'center' }}>{MONTH.format(new Date(`${first}T00:00:00Z`))}</strong>
+            <strong style={{ minWidth: 140, textAlign: 'center' }}>{formatMonthYear(first)}</strong>
             <Button size="sm" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= thisMonth} aria-label="Next month">
               →
             </Button>

@@ -7,6 +7,7 @@ import { useEffect, type ReactNode } from 'react';
 import { OrgLogo } from '@/components/OrgLogo';
 import { ErrorState, Loading } from '@/components/ui/DataState';
 import { clientPortal } from '@/lib/portal';
+import { announceLocale, resolveLocale, setLocale } from '@/lib/locale';
 import { useApi } from '@/lib/useApi';
 import { PortalMe } from './PortalMe';
 import s from './portal.module.css';
@@ -19,6 +20,12 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (signedOut) router.replace('/client/login');
   }, [signedOut, router]);
+  // The agency's language and formats, else the browser's (G27).
+  const locale = me.data ? resolveLocale(null, me.data.organization.locale) : null;
+  if (locale) setLocale(locale, false);
+  useEffect(() => {
+    if (locale) announceLocale();
+  }, [locale]);
 
   if (me.error && !signedOut)
     return (

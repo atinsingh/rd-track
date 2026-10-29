@@ -24,6 +24,7 @@ import { Badge, Banner, Card, PageHeader, TableBox, dlClass, formActionsClass, f
 import { platform } from '@/lib/platform';
 import { formatDateTime, formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { centsToInput } from '@/lib/money';
 
 const TZ = 'UTC';
 const STATE_LABEL: Record<SupportGrantDTO['state'], string> = { pending: 'Waiting for the organization', active: 'Open', expired: 'Expired', denied: 'Declined', ended: 'Ended' };
@@ -33,7 +34,7 @@ function Subscription({ t, onSaved }: { t: PlatformTenantDetail; onSaved: () => 
   const [plan, setPlan] = useState<PlanId>(t.plan);
   const [seats, setSeats] = useState(String(t.seats));
   const [status, setStatus] = useState(t.status);
-  const [price, setPrice] = useState(t.price_per_seat_cents === null ? '' : (t.price_per_seat_cents / 100).toFixed(2));
+  const [price, setPrice] = useState(t.price_per_seat_cents === null ? '' : centsToInput(t.price_per_seat_cents));
   const action = useAction();
   const submit = async (e: FormEvent) => {
     e.preventDefault();

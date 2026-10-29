@@ -10,6 +10,7 @@ import { cx } from '@/lib/cx';
 import { onApprovalsChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
+import { useT } from '@/lib/i18n';
 import { HOME_KEY, activeHref, can, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
 import { useApi } from '@/lib/useApi';
 import { ClosingBanner } from './ClosingBanner';
@@ -42,6 +43,7 @@ const isMac = () => typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(n
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { me, access } = useMe();
+  const t = useT();
   const pathname = usePathname() ?? '/';
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuOpen = menuFor === pathname;
@@ -89,11 +91,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className={s.app}>
       <a className={s.skip} href="#main">
-        Skip to content
+        {t('shell.skip')}
       </a>
-      <nav className={s.rail} aria-label="Main">
+      <nav className={s.rail} aria-label={t('shell.mainNav')}>
         <div className={s.bar}>
-          <Link href="/" className={s.brand} aria-label="RoundDigital Track, home">
+          <Link href="/" className={s.brand} aria-label={t('shell.home')}>
             <Image src="/brand/rd-logo-reversed.png" alt="" width={112} height={24} priority />
             <span className={s.product} aria-hidden="true">
               TRACK
@@ -108,7 +110,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               aria-controls="rail-drawer"
               onClick={() => setMenuFor(menuOpen ? null : pathname)}
             >
-              {menuOpen ? 'Close' : 'Menu'}
+              {menuOpen ? t('shell.close') : t('shell.menu')}
             </button>
           </div>
         </div>
@@ -121,14 +123,14 @@ export function AppShell({ children }: { children: ReactNode }) {
               setMenuFor(null);
               setPaletteOpen(true);
             }}
-            aria-label="Jump to a page, person or project"
+            aria-label={t('shell.jumpLabel')}
             aria-keyshortcuts={mac ? 'Meta+K' : 'Control+K'}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
               <circle cx="11" cy="11" r="7" />
               <path d="M20 20l-3.5-3.5" />
             </svg>
-            <span className={s.searchText}>Jump to…</span>
+            <span className={s.searchText}>{t('shell.jump')}</span>
             <kbd className={s.kbd} aria-hidden="true">
               {shortcut}
             </kbd>
@@ -136,7 +138,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {homes.length > 1 ? (
             <div className={s.view}>
               <label htmlFor="rail-view" className={s.viewLabel}>
-                View
+                {t('shell.view')}
               </label>
               <select
                 id="rail-view"
@@ -154,7 +156,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 }}
               >
                 <option value="" disabled>
-                  Choose a view
+                  {t('shell.chooseView')}
                 </option>
                 {homes.map((h) => (
                   <option key={h.href} value={h.href}>
@@ -179,7 +181,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                     aria-expanded={open}
                     aria-controls={listId}
                     aria-disabled={holdsCurrent || undefined}
-                    title={holdsCurrent ? 'Holds the page you are on' : undefined}
+                    title={holdsCurrent ? t('shell.holdsCurrent') : undefined}
                     onClick={() => {
                       if (!holdsCurrent) toggleGroup(g.key);
                     }}
@@ -191,12 +193,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                           {badge ? (
                             <>
                               {pendingCount}
-                              <span className="visually-hidden"> pending approvals</span>
+                              <span className="visually-hidden">{t('shell.pendingApprovals')}</span>
                             </>
                           ) : (
                             <>
                               {g.items.length}
-                              <span className="visually-hidden"> pages</span>
+                              <span className="visually-hidden">{t('shell.pages')}</span>
                             </>
                           )}
                         </span>
@@ -219,7 +221,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                           {i.badge === 'approvals' && pendingCount > 0 ? (
                             <span className={s.count}>
                               {pendingCount}
-                              <span className="visually-hidden"> pending</span>
+                              <span className="visually-hidden">{t('shell.pending')}</span>
                             </span>
                           ) : null}
                         </Link>
@@ -241,7 +243,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </div>
             </div>
             <button type="button" className={s.signOut} onClick={signOut}>
-              Sign out
+              {t('shell.signOut')}
             </button>
           </div>
         </div>

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { InvoiceSummaryDTO, ProjectBudgetDTO } from './money';
+import type { AppLocale } from './locale';
 
 // Role workspaces (engine slice 4, docs/design/07-product-review.md §4): what each role's
 // home is assembled from. Counts and totals only; no activity levels anywhere.
@@ -121,6 +122,8 @@ export const logoSetRequest = z.strictObject({ upload_id: z.uuid() });
 export interface BrandingDTO {
   logo_url: string | null;
   logo_updated_at: string | null;
+  /** Default language and formats for everyone who hasn't chosen their own (G27). */
+  locale: AppLocale | null;
 }
 
 /** A key for the deployment file IT puts on managed computers (Pro, `mdm`). */

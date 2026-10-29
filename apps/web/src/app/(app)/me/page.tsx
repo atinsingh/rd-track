@@ -13,6 +13,7 @@ import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { formatDayLabel, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 export default function MyDayPage() {
   const { me, timezone } = useMe();
@@ -30,21 +31,21 @@ export default function MyDayPage() {
   return (
     <>
       <PageHeader
-        eyebrow={`Employee · ${formatDayLabel(date)}`}
-        title="My day"
-        description="Exactly what your manager can see about you — and nothing more."
+        eyebrow={t('day.eyebrow', { date: formatDayLabel(date) })}
+        title={t('day.title')}
+        description={t('day.description')}
         actions={<DateSwitcher date={date} onDate={setDate} tz={tz} onTz={setTz} max={todayInTz(tz)} />}
       />
       {!me.user.tracking_enabled ? (
-        <Banner tag="NOTE" title="Tracking is off for your account">
-          You can&apos;t start work sessions, so nothing new is collected about you. Older records stay visible here.
+        <Banner tag="NOTE" title={t('day.trackingOffTitle')}>
+          {t('day.trackingOffBody')}
         </Banner>
       ) : null}
       <ScheduleNote date={date} tz={tz} />
       <TodoList />
       {notice ? (
-        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
-          Track its status in <a href="/me/time">My time</a>.
+        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>{t('common.dismiss')}</Button>}>
+          {t('day.noticeBody')} <a href="/me/time">{t('nav.myTime')}</a>.
         </Banner>
       ) : null}
       <DayView
@@ -54,7 +55,7 @@ export default function MyDayPage() {
         policy={policy.data}
         sessionAction={
           <Button size="sm" onClick={() => setSheet(true)}>
-            + Add manual time
+            {t('day.addManual')}
           </Button>
         }
       />
@@ -66,7 +67,7 @@ export default function MyDayPage() {
         defaultDate={date}
         onSubmitted={() => {
           setSheet(false);
-          setNotice('Manual time submitted for approval');
+          setNotice(t('day.manualSubmitted'));
         }}
       />
     </>

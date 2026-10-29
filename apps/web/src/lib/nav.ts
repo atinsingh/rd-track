@@ -1,4 +1,5 @@
 import type { Entitlement, Me, OrgRole } from '@rd/contracts';
+import { t, type MessageKey } from './i18n';
 
 export type Capability =
   | 'me'
@@ -115,79 +116,84 @@ export interface NavGroup {
   items: NavItem[];
 }
 
+/** As written below: labels are catalogue keys, translated when the menu is built (G27). */
+type NavGroupDef = Omit<NavGroup, 'label' | 'items'> & { label: MessageKey; items: (Omit<NavItem, 'label'> & { label: MessageKey })[] };
+
 /** Five groups (Stage 4 IA): your own pages, the people you manage, money, organisation admin, settings. */
-const GROUPS: NavGroup[] = [
+const GROUPS: NavGroupDef[] = [
   {
     key: 'me',
-    label: 'Me',
+    label: 'nav.group.me',
     items: [
-      { href: '/me', label: 'My day', capability: 'tracking', keywords: 'today timeline home' },
-      { href: '/me/time', label: 'My time', capability: 'tracking', keywords: 'timesheet week corrections manual' },
-      { href: '/me/insights', label: 'Insights', capability: 'tracking', keywords: 'focus apps trends' },
-      { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
-      { href: '/me/expenses', label: 'Expenses', capability: 'expenses', keywords: 'claim receipt reimbursement' },
-      { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
-      { href: '/me/computers', label: 'My computers', capability: 'tracking', keywords: 'download install app agent enrol connect code' },
-      { href: '/me/privacy', label: "What's collected", capability: 'me', keywords: 'privacy data deletion' },
-      { href: '/me/settings', label: 'Settings', capability: 'me', keywords: 'notifications email preferences account' },
-      { href: '/exports', label: 'Exports', capability: 'exports', keywords: 'csv download payroll' },
+      { href: '/me', label: 'nav.myDay', capability: 'tracking', keywords: 'today timeline home' },
+      { href: '/me/time', label: 'nav.myTime', capability: 'tracking', keywords: 'timesheet week corrections manual' },
+      { href: '/me/insights', label: 'nav.insights', capability: 'tracking', keywords: 'focus apps trends' },
+      { href: '/me/schedule', label: 'nav.schedule', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
+      { href: '/me/expenses', label: 'nav.expenses', capability: 'expenses', keywords: 'claim receipt reimbursement' },
+      { href: '/me/screenshots', label: 'nav.screenshots', capability: 'screenshots' },
+      { href: '/me/computers', label: 'nav.computers', capability: 'tracking', keywords: 'download install app agent enrol connect code' },
+      { href: '/me/privacy', label: 'nav.privacy', capability: 'me', keywords: 'privacy data deletion' },
+      { href: '/me/settings', label: 'nav.settings', capability: 'me', keywords: 'notifications email preferences account' },
+      { href: '/exports', label: 'nav.exports', capability: 'exports', keywords: 'csv download payroll' },
     ],
   },
   {
     key: 'team',
-    label: 'Team',
+    label: 'nav.group.team',
     items: [
-      { href: '/team', label: 'Team', capability: 'team', keywords: 'people reports' },
-      { href: '/approvals', label: 'Approvals', capability: 'approvals', badge: 'approvals', keywords: 'inbox review corrections timesheets time off' },
-      { href: '/team/attendance', label: 'Attendance and calendar', capability: 'teamSchedule', keywords: 'leave late absent' },
-      { href: '/projects', label: 'Projects', capability: 'projects', keywords: 'budget report' },
+      { href: '/team', label: 'nav.team', capability: 'team', keywords: 'people reports' },
+      { href: '/approvals', label: 'nav.approvals', capability: 'approvals', badge: 'approvals', keywords: 'inbox review corrections timesheets time off' },
+      { href: '/team/attendance', label: 'nav.attendance', capability: 'teamSchedule', keywords: 'leave late absent' },
+      { href: '/projects', label: 'nav.projects', capability: 'projects', keywords: 'budget report' },
     ],
   },
   {
     key: 'money',
-    label: 'Money',
+    label: 'nav.group.money',
     items: [
-      { href: '/money', label: 'Period close', capability: 'finance', keywords: 'home payroll unpaid invoices unbilled' },
-      { href: '/admin/clients', label: 'Clients', capability: 'money' },
-      { href: '/admin/invoices', label: 'Invoices', capability: 'money', keywords: 'billing clients' },
-      { href: '/admin/rates', label: 'Rates and budgets', capability: 'money', keywords: 'pay bill rate cost' },
+      { href: '/money', label: 'nav.periodClose', capability: 'finance', keywords: 'home payroll unpaid invoices unbilled' },
+      { href: '/admin/clients', label: 'nav.clients', capability: 'money' },
+      { href: '/admin/invoices', label: 'nav.invoices', capability: 'money', keywords: 'billing clients' },
+      { href: '/admin/rates', label: 'nav.rates', capability: 'money', keywords: 'pay bill rate cost' },
     ],
   },
   {
     key: 'admin',
-    label: 'Admin',
+    label: 'nav.group.admin',
     items: [
-      { href: '/admin', label: 'Setup and health', capability: 'admin', keywords: 'home checklist overview seats summary' },
-      { href: '/admin/users', label: 'People', capability: 'admin', keywords: 'users invite deactivate' },
-      { href: '/admin/teams', label: 'Teams and projects', capability: 'admin', keywords: 'members managers tasks' },
-      { href: '/admin/devices', label: 'Devices', capability: 'admin', keywords: 'agent enrol computers' },
-      { href: '/admin/policies', label: 'Policies', capability: 'admin', keywords: 'idle screenshots tracking settings' },
-      { href: '/admin/apps', label: 'Work apps', capability: 'admin', keywords: 'categories' },
-      { href: '/admin/schedules', label: 'Schedules', capability: 'adminSchedules', keywords: 'shifts hours' },
-      { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
-      { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff', keywords: 'leave accrual' },
-      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits', keywords: 'overtime daily weekly timesheet deadline reminder due' },
-      { href: '/admin/requests', label: 'Data requests', capability: 'admin', keywords: 'privacy deletion erasure erase' },
+      { href: '/admin', label: 'nav.setup', capability: 'admin', keywords: 'home checklist overview seats summary' },
+      { href: '/admin/users', label: 'nav.people', capability: 'admin', keywords: 'users invite deactivate' },
+      { href: '/admin/teams', label: 'nav.teams', capability: 'admin', keywords: 'members managers tasks' },
+      { href: '/admin/devices', label: 'nav.devices', capability: 'admin', keywords: 'agent enrol computers' },
+      { href: '/admin/policies', label: 'nav.policies', capability: 'admin', keywords: 'idle screenshots tracking settings' },
+      { href: '/admin/apps', label: 'nav.workApps', capability: 'admin', keywords: 'categories' },
+      { href: '/admin/schedules', label: 'nav.schedules', capability: 'adminSchedules', keywords: 'shifts hours' },
+      { href: '/admin/holidays', label: 'nav.holidays', capability: 'adminHolidays' },
+      { href: '/admin/time-off', label: 'nav.timeOff', capability: 'adminTimeOff', keywords: 'leave accrual' },
+      { href: '/admin/work-limits', label: 'nav.workLimits', capability: 'work_limits', keywords: 'overtime daily weekly timesheet deadline reminder due' },
+      { href: '/admin/requests', label: 'nav.dataRequests', capability: 'admin', keywords: 'privacy deletion erasure erase' },
     ],
   },
   {
     key: 'settings',
-    label: 'Settings',
+    label: 'nav.group.settings',
     items: [
-      { href: '/admin/billing', label: 'Plan and billing', capability: 'admin', keywords: 'seats subscription upgrade' },
-      { href: '/admin/data', label: 'Organization data', capability: 'admin', keywords: 'export download close delete account offboarding' },
-      { href: '/admin/branding', label: 'Logo', capability: 'admin', keywords: 'branding brand logo image' },
-      { href: '/admin/sso', label: 'Single sign-on', capability: 'admin', keywords: 'sso oidc saml okta entra azure google scim directory provisioning' },
-      { href: '/admin/support', label: 'Support access', capability: 'admin', keywords: 'rounddigital help grant operator' },
-      { href: '/admin/developers', label: 'Developers', capability: 'developers', keywords: 'api tokens webhooks integrations rest' },
-      { href: '/audit', label: 'Audit log', capability: 'audit', keywords: 'history security' },
+      { href: '/admin/billing', label: 'nav.billing', capability: 'admin', keywords: 'seats subscription upgrade' },
+      { href: '/admin/data', label: 'nav.orgData', capability: 'admin', keywords: 'export download close delete account offboarding' },
+      { href: '/admin/branding', label: 'nav.branding', capability: 'admin', keywords: 'branding brand logo image' },
+      { href: '/admin/sso', label: 'nav.sso', capability: 'admin', keywords: 'sso oidc saml okta entra azure google scim directory provisioning' },
+      { href: '/admin/support', label: 'nav.support', capability: 'admin', keywords: 'rounddigital help grant operator' },
+      { href: '/admin/developers', label: 'nav.developers', capability: 'developers', keywords: 'api tokens webhooks integrations rest' },
+      { href: '/audit', label: 'nav.audit', capability: 'audit', keywords: 'history security' },
     ],
   },
 ];
 
 /** Navigation filtered to what the signed-in user's roles allow. */
 export function navFor(a: Access): NavGroup[] {
-  return GROUPS.map((g) => ({ ...g, items: g.items.filter((i) => can(a, i.capability)) })).filter((g) => g.items.length > 0);
+  return GROUPS.map((g) => ({ ...g, label: t(g.label), items: g.items.filter((i) => can(a, i.capability)).map((i) => ({ ...i, label: t(i.label) })) })).filter(
+    (g) => g.items.length > 0,
+  );
 }
 
 /** The group holding the current page, which always stays open. */
@@ -210,24 +216,24 @@ export function roleLabel(me: Me): string {
   const parts: string[] = [];
   switch (me.user.org_role) {
     case 'org_admin':
-      parts.push('Org admin');
+      parts.push(t('role.orgAdmin'));
       break;
     case 'super_admin':
-      parts.push('Super admin');
+      parts.push(t('role.superAdmin'));
       break;
     case 'auditor':
-      parts.push('Auditor');
+      parts.push(t('role.auditor'));
       break;
     case 'finance':
-      parts.push('Finance');
+      parts.push(t('role.finance'));
       break;
     default:
-      parts.push('Employee');
+      parts.push(t('role.employee'));
   }
-  if (me.managed_team_ids.length) parts.push('Team manager');
-  else if (me.managed_project_ids.length) parts.push('Project manager');
+  if (me.managed_team_ids.length) parts.push(t('role.teamManager'));
+  else if (me.managed_project_ids.length) parts.push(t('role.projectManager'));
   if ((me.user.org_role === 'org_admin' || me.user.org_role === 'super_admin' || me.user.org_role === 'finance') && me.mfa_verified)
-    parts.push('MFA verified');
+    parts.push(t('role.mfaVerified'));
   return parts.join(' · ');
 }
 
@@ -245,11 +251,11 @@ export interface Home {
  */
 export function homesFor(a: Access): Home[] {
   const homes: Home[] = [];
-  if (a.isAdmin) homes.push({ href: '/admin', label: 'Setup and health' });
-  if (can(a, 'finance')) homes.push({ href: '/money', label: 'Period close' });
-  if (a.isAuditor) homes.push({ href: '/audit', label: 'Audit log' });
-  if (a.managesTeams) homes.push({ href: '/team', label: 'Team today' });
-  if (a.tracks || homes.length === 0) homes.push({ href: '/me', label: 'My day' });
+  if (a.isAdmin) homes.push({ href: '/admin', label: t('nav.setup') });
+  if (can(a, 'finance')) homes.push({ href: '/money', label: t('nav.periodClose') });
+  if (a.isAuditor) homes.push({ href: '/audit', label: t('nav.audit') });
+  if (a.managesTeams) homes.push({ href: '/team', label: t('nav.teamToday') });
+  if (a.tracks || homes.length === 0) homes.push({ href: '/me', label: t('nav.myDay') });
   return homes;
 }
 

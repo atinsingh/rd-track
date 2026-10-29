@@ -1,6 +1,6 @@
 import type { ProjectBudgetDTO } from '@rd/contracts';
 import { Badge, Meter } from '@/components/ui/Layout';
-import { formatDuration, formatMoney } from '@/lib/format';
+import { formatDuration, formatMoney, formatPercent } from '@/lib/format';
 import { BUDGET_STATUS_LABEL } from '@/lib/money';
 import { formatDayMonth } from '@/lib/time';
 
@@ -9,7 +9,7 @@ export function budgetSummary(b: ProjectBudgetDTO): string {
   const used = b.kind === 'hours' ? formatDuration(b.used_seconds) : formatMoney(b.used_cents ?? 0, b.currency ?? 'USD');
   const limit = b.kind === 'hours' ? formatDuration((b.limit_hours ?? 0) * 3600) : formatMoney(b.limit_cents ?? 0, b.currency ?? 'USD');
   const when = b.resets === 'monthly' ? ' this month' : '';
-  return `${used} of ${limit} used${when} (${b.used_percent.toFixed(1)}%)`;
+  return `${used} of ${limit} used${when} (${formatPercent(b.used_percent, 1)})`;
 }
 
 /**
@@ -41,7 +41,7 @@ export function BudgetMeter({ budget: b }: { budget: ProjectBudgetDTO }) {
         scale={['0', over ? fmt(used) : fmt(limit)]}
       />
       <span>
-        <strong style={{ fontFamily: 'var(--font-mono)' }}>{fmt(used)}</strong> of {fmt(limit)} used ({b.used_percent.toFixed(1)}%)
+        <strong style={{ fontFamily: 'var(--font-mono)' }}>{fmt(used)}</strong> of {fmt(limit)} used ({formatPercent(b.used_percent, 1)})
       </span>
       <span className="small muted">
         Alerts at {b.alert_thresholds.length ? b.alert_thresholds.map((t) => `${t}%`).join(', ') : 'no thresholds'}.{' '}

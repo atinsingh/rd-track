@@ -1,25 +1,46 @@
 import type { BudgetStatus, InvoiceStatus, PayrollAdjustmentDTO } from '@rd/contracts';
-import { formatMoney } from './format';
+import { formatMoney, formatNumber, formatPercent } from './format';
+import { currentLocale } from './locale';
 import { formatDayLabel } from './time';
 
 /** Common ISO 4217 codes offered in pickers; the API accepts any three-letter code. */
 export const CURRENCIES = ['USD', 'CAD', 'EUR', 'GBP', 'AUD', 'NZD', 'CHF', 'SEK', 'NOK', 'DKK', 'JPY', 'INR', 'SGD', 'ZAR'] as const;
 
-/** "12.5" / "12.50" / "1,200.00" → cents; null when not a valid non-negative amount with ≤ 2 decimals. */
+/** Whether the locale writes 1.5 as "1,5". */
+const commaDecimal = (locale: string = currentLocale()) => new Intl.NumberFormat(locale).format(1.5).includes(',');
+
+/**
+ * A typed decimal in the locale's way → "1234.5" for the callers' checks. Spaces (thin,
+ * non-breaking) are digit groups everywhere; a comma is the decimal mark where the locale
+ * uses one, else a thousands group. A point is always accepted as the decimal mark, since
+ * keypads type one.
+ */
+export function normalizeDecimal(raw: string, locale: string = currentLocale()): string {
+  const s = raw.trim().replace(/[\s\u00a0\u202f]/g, '');
+  // "1,200.50": commas only where they group thousands, so "1,5" stays invalid rather than 15.
+  if (!commaDecimal(locale)) return /^\d{1,3}(,\d{3})+(\.\d*)?$/.test(s) ? s.replace(/,/g, '') : s;
+  return s.includes(',') && !s.includes('.') ? s.replace(',', '.') : s;
+}
+
+/** "12.5" / "12.50" / "1,200.00" ("12,5" / "1 200,00" in French) → cents; null when not a valid non-negative amount with ≤ 2 decimals. */
 export function parseMoneyInput(raw: string): number | null {
-  const s = raw.trim().replace(/,/g, '');
+  const s = normalizeDecimal(raw);
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
   const [whole, frac = ''] = s.split('.');
   return Number(whole) * 100 + Number(frac.padEnd(2, '0'));
 }
 
-export function centsToInput(cents: number): string {
-  return (cents / 100).toFixed(2);
+/** A number as the locale types it into a field, without digit groups: "1200.50" or "1200,50". */
+export function decimalToInput(n: number, decimals: number): string {
+  const v = n.toFixed(decimals);
+  return commaDecimal() ? v.replace('.', ',') : v;
 }
+
+export const centsToInput = (cents: number): string => decimalToInput(cents / 100, 2);
 
 /** "1.5" → 1.5 hours; null unless a non-negative number with ≤ 2 decimals. */
 export function parseHoursInput(raw: string): number | null {
-  const s = raw.trim();
+  const s = normalizeDecimal(raw);
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
   return Number(s);
 }
@@ -38,7 +59,7 @@ export function parseThresholds(raw: string): number[] | null {
 
 /** Tax in basis points from a percentage input ("8.25" → 825). */
 export function parsePercentBp(raw: string): number | null {
-  const s = raw.trim().replace(/%$/, '');
+  const s = normalizeDecimal(raw.trim().replace(/\s*%$/, ''));
   if (s === '') return 0;
   if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
   const bp = Math.round(Number(s) * 100);
@@ -46,7 +67,7 @@ export function parsePercentBp(raw: string): number | null {
 }
 
 export function formatPercentBp(bp: number): string {
-  return `${(bp / 100).toFixed(bp % 100 === 0 ? 0 : 2)}%`;
+  return formatPercent(bp / 100, bp % 100 === 0 ? 0 : 2);
 }
 
 export function formatRate(cents: number, currency: string): string {
@@ -54,7 +75,7 @@ export function formatRate(cents: number, currency: string): string {
 }
 
 export function formatHours(hours: number): string {
-  return `${hours.toFixed(2)} h`;
+  return `${formatNumber(hours, 2)} h`;
 }
 
 export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { draft: 'Draft', issued: 'Issued', void: 'Void' };

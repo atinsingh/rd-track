@@ -57,8 +57,8 @@ describe('schedule labels', () => {
 
 describe('scheduling navigation', () => {
   const me = (role: Me['user']['org_role'], entitlements: Me['entitlements'], teams: string[] = []): Me => ({
-    user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: true, mfa_enabled: false },
-    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active', logo_url: null },
+    user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: true, mfa_enabled: false, locale: null },
+    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active', locale: null, logo_url: null },
     mfa_verified: true,
     managed_team_ids: teams,
     managed_project_ids: [],

@@ -1,4 +1,5 @@
 import type {
+  AppLocale,
   AccountSecurity,
   InviteInfo,
   DataExportDTO,
@@ -96,6 +97,7 @@ import type {
   BudgetKind,
   BudgetResets,
 } from '@rd/contracts';
+import { t } from './i18n';
 
 /**
  * Typed client for the `/v1` web API (system design §5.4).
@@ -410,7 +412,7 @@ export const rd = {
   },
   account: {
     security: (signal?: AbortSignal) => get<AccountSecurity>('/v1/me/security', { signal }),
-    update: (body: { display_name?: string; timezone?: string }) => ok(patch('/v1/me', body)),
+    update: (body: { display_name?: string; timezone?: string; locale?: AppLocale | null }) => ok(patch('/v1/me', body)),
     changePassword: (current_password: string, new_password: string) => ok(post('/v1/me/password', { current_password, new_password })),
     changeEmail: (new_email: string, current_password: string) => ok(post('/v1/me/email', { new_email, current_password })),
     newRecoveryCodes: () => post<RecoveryCodesResponse>('/v1/auth/mfa/recovery-codes'),
@@ -547,6 +549,7 @@ export const rd = {
       post<LogoUploadResponse>('/v1/admin/branding/logo-uploads', { content_type: contentType, size_bytes: sizeBytes }),
     setLogo: (uploadId: string) => put<BrandingDTO>('/v1/admin/branding/logo', { upload_id: uploadId }),
     removeLogo: () => request<BrandingDTO>('DELETE', '/v1/admin/branding/logo'),
+    setOrgLocale: (locale: AppLocale | null) => put<BrandingDTO>('/v1/admin/branding/locale', { locale }),
     deploymentKeys: (signal?: AbortSignal) => list<DeploymentKeyDTO>('/v1/admin/deployment-keys', { signal }),
     createDeploymentKey: (name: string) => post<DeploymentKeyCreated>('/v1/admin/deployment-keys', { name }),
     revokeDeploymentKey: (id: string) => post<DeploymentKeyDTO>(`/v1/admin/deployment-keys/${enc(id)}/revoke`),
@@ -631,24 +634,25 @@ export const rd = {
 export function describeError(e: ApiError): string {
   switch (e.code) {
     case 'unauthenticated':
-      return 'Your session has ended. Sign in again.';
+      return t('error.unauthenticated');
     case 'mfa_required':
-      return 'This needs two-factor verification first.';
+      return t('error.mfaRequired');
     case 'forbidden':
-      return "You don't have access to this.";
+      return t('error.forbidden');
     case 'not_found':
-      return "We couldn't find that. It may have been removed, or you may not have access.";
+      return t('error.notFound');
     case 'validation_failed':
-      return e.message || 'Some values are not valid.';
+      // The server's own words name the field; they are English for now.
+      return e.message || t('error.validation');
     case 'seat_limit_reached':
-      return 'All licensed seats (including the overage allowance) are in use. Add seats in Billing first.';
+      return t('error.seats');
     case 'plan_upgrade_required':
-      return "Your plan doesn't include this. An org admin can change the plan in Billing.";
+      return t('error.plan');
     case 'subscription_inactive':
-      return 'Your organization’s subscription is inactive, so this is read-only.';
+      return t('error.inactive');
     case 'network_error':
-      return "Couldn't reach the server. Check your connection and try again.";
+      return t('error.network');
     default:
-      return e.message || 'Something went wrong.';
+      return e.message || t('error.generic');
   }
 }

@@ -29,7 +29,7 @@ describe('your claims', () => {
 
   it('sums by currency and picks the range start', () => {
     expect(totalText([], 'GBP')).toBe('£0.00');
-    expect(totalText([{ currency: 'GBP', cents: 4860, count: 1 }, { currency: 'USD', cents: 1200, count: 1 }], 'GBP')).toBe('£48.60 + $12.00');
+    expect(totalText([{ currency: 'GBP', cents: 4860, count: 1 }, { currency: 'USD', cents: 1200, count: 1 }], 'GBP')).toBe('£48.60 + US$12.00');
     expect(claimsFrom('quarter', '2026-10-29')).toBe('2026-08-01');
     expect(claimsFrom('quarter', '2026-02-03')).toBe('2025-12-01');
     expect(claimsFrom('year', '2026-10-29')).toBe('2026-01-01');

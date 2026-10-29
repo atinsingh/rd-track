@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { localeSchema } from './locale';
 
 /**
  * Engine slice 2: invites, password reset, email change, MFA recovery and the person's
@@ -48,6 +49,8 @@ export interface RecoveryCodesResponse {
 export const updateMeRequest = z.strictObject({
   display_name: z.string().trim().min(1).max(200).optional(),
   timezone: z.string().min(1).max(64).optional(),
+  /** null follows the organization's language and formats. */
+  locale: localeSchema.nullable().optional(),
 });
 export const changePasswordRequest = z.strictObject({ current_password: z.string().min(1).max(200), new_password: password });
 export const changeEmailRequest = z.strictObject({ new_email: z.email().max(320), current_password: z.string().min(1).max(200) });

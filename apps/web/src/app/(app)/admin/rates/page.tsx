@@ -20,7 +20,7 @@ import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Checkbox, SelectField, TextArea, TextField } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName, formatMoney } from '@/lib/format';
+import { byName, formatMoney, formatPercent } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { CURRENCIES, adjustmentWhen, centsToInput, formatRate, latestBy, parseHoursInput, parseMoneyInput, parseThresholds } from '@/lib/money';
 import { formatDayLabel, todayInTz } from '@/lib/time';
@@ -541,7 +541,7 @@ function Budgets({ projects }: { projects: ProjectDTO[] }) {
                   <details>
                     <summary>
                       <span className={s.summaryName}>{b.project_name}</span>
-                      <span className="small muted">{b.used_percent.toFixed(1)}% used</span>
+                      <span className="small muted">{formatPercent(b.used_percent, 1)} used</span>
                     </summary>
                     <div className={s.detail}>
                       <BudgetMeter budget={b} />

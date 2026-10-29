@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CopyButton } from '@/components/CopyButton';
 import { Button } from '@/components/ui/Button';
 import { Checkbox } from '@/components/ui/Field';
+import { useT } from '@/lib/i18n';
 import s from './recovery.module.css';
 
 /**
@@ -11,6 +12,7 @@ import s from './recovery.module.css';
  * on, because nobody (including Track) can show them again.
  */
 export function RecoveryCodes({ codes, doneLabel, onDone }: { codes: string[]; doneLabel: string; onDone: () => void }) {
+  const t = useT();
   const [saved, setSaved] = useState(false);
   const text = `RoundDigital Track recovery codes\nEach code works once. Keep them somewhere safe.\n\n${codes.join('\n')}\n`;
   const download = () => {
@@ -22,10 +24,9 @@ export function RecoveryCodes({ codes, doneLabel, onDone }: { codes: string[]; d
   return (
     <div className={s.wrap}>
       <p className="secondary">
-        If you lose your phone, each of these codes signs you in once instead of the app. They are shown only now; store them in a
-        password manager or print them.
+        {t('recovery.intro')}
       </p>
-      <ul className={s.codes} aria-label="Recovery codes">
+      <ul className={s.codes} aria-label={t('recovery.list')}>
         {codes.map((c) => (
           <li key={c} className="mono">
             {c}
@@ -33,12 +34,12 @@ export function RecoveryCodes({ codes, doneLabel, onDone }: { codes: string[]; d
         ))}
       </ul>
       <div className={s.actions}>
-        <CopyButton text={codes.join('\n')} label="Copy codes" />
+        <CopyButton text={codes.join('\n')} label={t('recovery.copy')} />
         <Button variant="quiet" onClick={download}>
-          Download .txt
+          {t('recovery.download')}
         </Button>
       </div>
-      <Checkbox label="I’ve saved these codes somewhere safe" checked={saved} onChange={(e) => setSaved(e.target.checked)} />
+      <Checkbox label={t('recovery.saved')} checked={saved} onChange={(e) => setSaved(e.target.checked)} />
       <Button variant="primary" disabled={!saved} onClick={onDone}>
         {doneLabel}
       </Button>

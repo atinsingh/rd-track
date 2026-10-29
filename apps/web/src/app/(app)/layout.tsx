@@ -5,6 +5,7 @@ import { Suspense, useEffect, type ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { ErrorState, Loading } from '@/components/ui/DataState';
 import { rd } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import { MeProvider } from '@/lib/me';
 import { useApi } from '@/lib/useApi';
 import s from './gate.module.css';
@@ -24,14 +25,14 @@ export default function SignedInLayout({ children }: { children: ReactNode }) {
     const redirecting = me.error.code === 'unauthenticated' || me.error.code === 'mfa_required';
     return (
       <div className={s.gate}>
-        {redirecting ? <Loading label="Redirecting to sign in" /> : <ErrorState error={me.error} onRetry={me.reload} />}
+        {redirecting ? <Loading label={t('common.redirectingSignIn')} /> : <ErrorState error={me.error} onRetry={me.reload} />}
       </div>
     );
   }
   if (!me.data || needsMfa) {
     return (
       <div className={s.gate}>
-        <Loading label={needsMfa ? 'Two-factor verification required' : 'Loading your workspace'} />
+        <Loading label={needsMfa ? t('common.mfaRequired') : t('common.loadingWorkspace')} />
       </div>
     );
   }

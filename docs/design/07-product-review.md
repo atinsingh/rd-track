@@ -61,7 +61,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) — **done** | L | P1/P2 |
-| G27 | All | Hard-coded English; mixed date and money formats | M | P2 |
+| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French on the employee's core pages; the rest of the screens, emails and the desktop app follow | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
 
@@ -283,6 +283,26 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      accepted (TLS protects the answer, and Track publishes no encryption key).
    - Libraries: `@node-saml/node-saml` (signature, audience, InResponseTo and time checks)
      and `@xmldom/xmldom` for metadata; no DTDs are read.
+
+   **10 done 2026-10-29 (G27)**: language and formats.
+   - *Who decides*: each person under Settings › Language and formats; else the
+     organization's default under Settings › Logo and language; else the browser's
+     languages. Supported: English (US, Canada, UK, Australia, India) and French (Canada,
+     France). Migration 026 adds `users.locale` and `organizations.locale`.
+   - *Formats everywhere*: dates, times (12- or 24-hour as the locale has it), weekday
+     names, numbers, percentages and money all go through Intl with the chosen locale, so
+     the mix of British dates and US money is gone. Amount and hour fields read what people
+     type the local way ("1 234,50" in French) and never take a decimal comma for a
+     thousands separator in English. Invoices and the client portal use the agency's
+     locale, whoever opens them.
+   - *Translations*: a typed catalogue (`apps/web/src/lib/messages`), English the source and
+     French complete for it (the compiler and a test check every key and placeholder). In
+     French so far: navigation, the shell, search, notifications, errors, sign-in and
+     two-factor, My day, What's collected, Settings, the language settings and invoices.
+     What's collected keeps its English word for word the shared text the desktop app
+     shows (a test checks). Other screens, text the server writes (notification and to-do
+     titles, emails, API error details) and the desktop app are still English; French
+     users are told some pages are.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

@@ -3,6 +3,7 @@
 import { useId, useMemo, useRef } from 'react';
 import { InlineSelect } from '@/components/ui/Field';
 import { addDays, formatDayLabel, timeZoneOptions } from '@/lib/time';
+import { t } from '@/lib/i18n';
 import s from './day.module.css';
 
 /** ‹ date › plus time zone, for day and week views. */
@@ -43,13 +44,13 @@ export function DateSwitcher({
   const nextDisabled = max !== undefined && nextDate > max;
   return (
     <div className={s.switcher}>
-      <button type="button" className={s.stepBtn} aria-label={`Previous ${unit}`} onClick={() => onDate(addDays(date, -step))}>
+      <button type="button" className={s.stepBtn} aria-label={unit === 'day' ? t('date.previousDay') : t('date.previousWeek')} onClick={() => onDate(addDays(date, -step))}>
         ‹
       </button>
       <span className={s.dateBox}>
         <span aria-live="polite">{label ?? formatDayLabel(date)}</span>
         <label htmlFor={id} className="visually-hidden">
-          {unit === 'day' ? 'Choose a date' : 'Choose a day in the week'}
+          {unit === 'day' ? t('date.chooseDate') : t('date.chooseWeekDay')}
         </label>
         <input
           id={id}
@@ -70,14 +71,14 @@ export function DateSwitcher({
       <button
         type="button"
         className={s.stepBtn}
-        aria-label={`Next ${unit}`}
+        aria-label={unit === 'day' ? t('date.nextDay') : t('date.nextWeek')}
         disabled={nextDisabled}
         onClick={() => onDate(nextDate)}
       >
         ›
       </button>
       {onTz ? (
-        <InlineSelect label="Time zone" value={tz} onChange={(e) => onTz(e.target.value)}>
+        <InlineSelect label={t('date.timeZone')} value={tz} onChange={(e) => onTz(e.target.value)}>
           {zones.map((z) => (
             <option key={z} value={z}>
               {z}
