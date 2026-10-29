@@ -2,6 +2,7 @@ import type { Entitlement, Me, OrgRole } from '@rd/contracts';
 
 export type Capability =
   | 'me'
+  | 'tracking'
   | 'screenshots'
   | 'team'
   | 'approvals'
@@ -16,12 +17,17 @@ export type Capability =
   | 'adminSchedules'
   | 'adminHolidays'
   | 'adminTimeOff'
-  | 'money';
+  | 'money'
+  | 'finance';
 
 export interface Access {
   role: OrgRole;
   isAdmin: boolean;
   isAuditor: boolean;
+  /** The finance role: Money without full admin (slice 4, G21). */
+  isFinance: boolean;
+  /** Tracking is on for the signed-in person, so My day has something to show. */
+  tracks: boolean;
   managesTeams: boolean;
   managesProjects: boolean;
   entitlements: readonly Entitlement[];
@@ -33,6 +39,8 @@ export function accessFor(me: Me): Access {
     role,
     isAdmin: role === 'org_admin' || role === 'super_admin',
     isAuditor: role === 'auditor',
+    isFinance: role === 'finance',
+    tracks: me.user.tracking_enabled,
     managesTeams: me.managed_team_ids.length > 0,
     managesProjects: me.managed_project_ids.length > 0,
     entitlements: me.entitlements,
@@ -46,8 +54,12 @@ export function can(a: Access, c: Capability): boolean {
     case 'me':
     case 'exports':
       return true;
+    case 'tracking':
+      // Your own time pages. People whose tracking was turned off keep their history; admins,
+      // auditors and finance who never track don't get pages that can only be empty.
+      return a.tracks || !(a.isAdmin || a.isAuditor || a.isFinance);
     case 'screenshots':
-      return a.entitlements.includes('screenshots');
+      return can(a, 'tracking') && a.entitlements.includes('screenshots');
     case 'team':
       return a.managesTeams;
     case 'approvals':
@@ -74,8 +86,11 @@ export function can(a: Access, c: Capability): boolean {
     case 'adminTimeOff':
       return a.isAdmin && timeOff;
     case 'money':
-      // Clients, rates, budgets and invoices (Pro): org admins only.
-      return a.isAdmin && a.entitlements.includes('budgets_invoicing');
+      // Clients, rates, budgets, invoices and payroll (Pro): org admins and finance.
+      return (a.isAdmin || a.isFinance) && a.entitlements.includes('budgets_invoicing');
+    case 'finance':
+      // Finance people land on Money even before the plan includes it, to see what's needed.
+      return a.isFinance || can(a, 'money');
   }
 }
 
@@ -100,9 +115,9 @@ const GROUPS: NavGroup[] = [
     key: 'me',
     label: 'Me',
     items: [
-      { href: '/me', label: 'My day', capability: 'me', keywords: 'today timeline home' },
-      { href: '/me/time', label: 'My time', capability: 'me', keywords: 'timesheet week corrections manual' },
-      { href: '/me/insights', label: 'Insights', capability: 'me', keywords: 'focus apps trends' },
+      { href: '/me', label: 'My day', capability: 'tracking', keywords: 'today timeline home' },
+      { href: '/me/time', label: 'My time', capability: 'tracking', keywords: 'timesheet week corrections manual' },
+      { href: '/me/insights', label: 'Insights', capability: 'tracking', keywords: 'focus apps trends' },
       { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
       { href: '/me/privacy', label: "What's collected", capability: 'me', keywords: 'privacy data deletion' },
@@ -124,6 +139,7 @@ const GROUPS: NavGroup[] = [
     key: 'money',
     label: 'Money',
     items: [
+      { href: '/money', label: 'Period close', capability: 'finance', keywords: 'home payroll unpaid invoices unbilled' },
       { href: '/admin/clients', label: 'Clients', capability: 'money' },
       { href: '/admin/invoices', label: 'Invoices', capability: 'money', keywords: 'billing clients' },
       { href: '/admin/rates', label: 'Rates and budgets', capability: 'money', keywords: 'pay bill rate cost' },
@@ -133,6 +149,7 @@ const GROUPS: NavGroup[] = [
     key: 'admin',
     label: 'Admin',
     items: [
+      { href: '/admin', label: 'Setup and health', capability: 'admin', keywords: 'home checklist overview seats summary' },
       { href: '/admin/users', label: 'People', capability: 'admin', keywords: 'users invite deactivate' },
       { href: '/admin/teams', label: 'Teams and projects', capability: 'admin', keywords: 'members managers tasks' },
       { href: '/admin/devices', label: 'Devices', capability: 'admin', keywords: 'agent enrol computers' },
@@ -189,12 +206,45 @@ export function roleLabel(me: Me): string {
     case 'auditor':
       parts.push('Auditor');
       break;
+    case 'finance':
+      parts.push('Finance');
+      break;
     default:
       parts.push('Employee');
   }
   if (me.managed_team_ids.length) parts.push('Team manager');
   else if (me.managed_project_ids.length) parts.push('Project manager');
-  if ((me.user.org_role === 'org_admin' || me.user.org_role === 'super_admin') && me.mfa_verified)
+  if ((me.user.org_role === 'org_admin' || me.user.org_role === 'super_admin' || me.user.org_role === 'finance') && me.mfa_verified)
     parts.push('MFA verified');
   return parts.join(' · ');
 }
+
+// ───────────── role homes (slice 4) ─────────────
+
+export interface Home {
+  href: string;
+  label: string;
+}
+
+/**
+ * The homes this person can switch between, most specific first: the first one is where
+ * "/" lands unless they picked another. My day is offered to anyone who tracks, and is
+ * the fallback for everyone else.
+ */
+export function homesFor(a: Access): Home[] {
+  const homes: Home[] = [];
+  if (a.isAdmin) homes.push({ href: '/admin', label: 'Setup and health' });
+  if (can(a, 'finance')) homes.push({ href: '/money', label: 'Period close' });
+  if (a.isAuditor) homes.push({ href: '/audit', label: 'Audit log' });
+  if (a.managesTeams) homes.push({ href: '/team', label: 'Team today' });
+  if (a.tracks || homes.length === 0) homes.push({ href: '/me', label: 'My day' });
+  return homes;
+}
+
+/** Where "/" goes: the saved choice if it's still one of theirs, else their first home. */
+export function homeFor(a: Access, saved: string | null): string {
+  const homes = homesFor(a);
+  return homes.find((h) => h.href === saved)?.href ?? homes[0]!.href;
+}
+
+export const HOME_KEY = 'rd.home';

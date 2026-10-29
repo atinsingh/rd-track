@@ -1,0 +1,111 @@
+/* Role homes (slice 4): headline tiles and the setup checklist. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.tile,
+.tileAlert {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px 20px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
+  color: inherit;
+  text-decoration: none;
+}
+.tileAlert {
+  box-shadow: inset 3px 0 0 #d42b2b, var(--glass-shadow);
+}
+a.tile:hover,
+a.tileAlert:hover {
+  background: var(--glass-strong);
+}
+.tileLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tileValue {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+.tileSub {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: step;
+}
+.step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--rule-soft);
+}
+.step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+.mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1.5px solid var(--control-border);
+  font-size: 12px;
+  font-weight: 700;
+}
+.markDone {
+  composes: mark;
+  border-color: var(--text);
+  background: var(--text);
+  color: var(--text-on-ink);
+}
+.stepText {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.stepTitle {
+  font-weight: 600;
+}
+.stepDone {
+  composes: stepTitle;
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.stepGo {
+  white-space: nowrap;
+}
+.progress {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--rule);
+  overflow: hidden;
+}
+.progressBar {
+  height: 100%;
+  background: var(--text);
+}

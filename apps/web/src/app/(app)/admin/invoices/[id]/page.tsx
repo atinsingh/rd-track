@@ -12,8 +12,9 @@ import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridCl
 import { rd } from '@/lib/api';
 import { formatDuration, formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { INVOICE_STATUS_LABEL, centsToInput, formatPercentBp, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
-import { formatDateTime, formatDayLabel } from '@/lib/time';
+import { centsToInput, formatPercentBp, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
+import { formatDateTime, formatDayLabel, todayInTz } from '@/lib/time';
+import { INVOICE_STATE_LABEL, invoiceState } from '@/lib/workspaces';
 import { useAction, useApi } from '@/lib/useApi';
 import { MoneyGate } from '../../MoneyGate';
 import m from '../../money.module.css';
@@ -220,9 +221,15 @@ function InvoiceContent({ id }: { id: string }) {
   const { timezone: tz } = useMe();
   const res = useApi(`money:invoice|${id}`, (signal) => rd.money.invoice(id, signal));
   const action = useAction();
-  const [dialog, setDialog] = useState<'issue' | 'void' | 'delete' | null>(null);
+  const [dialog, setDialog] = useState<'issue' | 'void' | 'delete' | 'paid' | 'send' | null>(null);
   const [dueDate, setDueDate] = useState('');
   const [reason, setReason] = useState('');
+  const today = todayInTz(tz);
+  const [paidOn, setPaidOn] = useState(today);
+  const [payNote, setPayNote] = useState('');
+  const [sendTo, setSendTo] = useState('');
+  const [message, setMessage] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
 
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />;
   if (!res.data) return <Loading label="Loading the invoice" />;
@@ -247,6 +254,27 @@ function InvoiceContent({ id }: { id: string }) {
       setDialog(null);
     }
   };
+  const markPaid = async () => {
+    const r = await action.run(() => rd.money.markInvoicePaid(inv.id, paidOn, payNote.trim() || undefined));
+    if (r) {
+      replace(r);
+      setDialog(null);
+    }
+  };
+  const markUnpaid = async () => {
+    const r = await action.run(() => rd.money.markInvoiceUnpaid(inv.id));
+    if (r) replace(r);
+  };
+  const send = async () => {
+    const to = sendTo.trim() || undefined;
+    const r = await action.run(() => rd.money.sendInvoice(inv.id, { to, message: message.trim() || undefined }));
+    if (r) {
+      replace(r);
+      setDialog(null);
+      setNotice(`Sent to ${r.sent_to}`);
+    }
+  };
+  const state = invoiceState(inv, today);
   const remove = async () => {
     if (await action.run(() => rd.money.deleteInvoice(inv.id))) router.push('/admin/invoices');
   };
@@ -256,7 +284,7 @@ function InvoiceContent({ id }: { id: string }) {
       <PageHeader
         eyebrow={
           <>
-            <Link href="/admin/invoices">Invoices</Link> · {INVOICE_STATUS_LABEL[inv.status]}
+            <Link href="/admin/invoices">Invoices</Link> · {INVOICE_STATE_LABEL[state]}
           </>
         }
         title={inv.number ?? 'Draft invoice'}
@@ -279,7 +307,17 @@ function InvoiceContent({ id }: { id: string }) {
                 </Button>
               </>
             ) : null}
-            {inv.status === 'issued' ? <Button onClick={() => setDialog('void')}>Void invoice</Button> : null}
+            {inv.status === 'issued' ? (
+              <>
+                <Button onClick={() => setDialog('void')}>Void invoice</Button>
+                <Button onClick={() => setDialog('send')}>{inv.sent_at ? 'Send again…' : 'Send to client…'}</Button>
+                {inv.paid_on ? null : (
+                  <Button variant="primary" onClick={() => setDialog('paid')}>
+                    Mark paid
+                  </Button>
+                )}
+              </>
+            ) : null}
           </>
         }
       />
@@ -287,6 +325,13 @@ function InvoiceContent({ id }: { id: string }) {
         <Banner tone="warn" title="Some time has no bill rate">
           {formatDuration(inv.unrated_seconds)} on this client&apos;s projects in this period has no bill rate in {inv.currency}, so it isn&apos;t on this
           draft. Add a bill rate in <Link href="/admin/rates">Rates and budgets</Link> and build a new draft, or add a line by hand.
+        </Banner>
+      ) : null}
+      {notice ? <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>} /> : null}
+      {state === 'overdue' ? (
+        <Banner tone="warn" title="Overdue">
+          It was due {formatDayLabel(inv.due_date!)} and isn&apos;t marked paid.
+          {inv.sent_at ? ` Last sent ${formatDateTime(inv.sent_at, tz)} to ${inv.sent_to}.` : ' It hasn’t been sent from Track.'}
         </Banner>
       ) : null}
       {inv.status === 'void' ? (
@@ -349,8 +394,24 @@ function InvoiceContent({ id }: { id: string }) {
               Issued <strong>{formatDateTime(inv.issued_at, tz)}</strong>
             </span>
             <span>Due {inv.due_date ? formatDayLabel(inv.due_date) : '—'}</span>
-            <Badge tone={inv.status === 'issued' ? 'solid' : 'outline'}>{INVOICE_STATUS_LABEL[inv.status]}</Badge>
+            <Badge tone={state === 'overdue' ? 'warn' : state === 'paid' ? 'solid' : 'outline'}>{INVOICE_STATE_LABEL[state]}</Badge>
           </div>
+          {inv.sent_at ? (
+            <p className="small secondary">
+              Sent {formatDateTime(inv.sent_at, tz)} to {inv.sent_to}
+            </p>
+          ) : null}
+          {inv.paid_on ? (
+            <div className={m.row}>
+              <span>
+                Paid <strong>{formatDayLabel(inv.paid_on)}</strong>
+                {inv.payment_note ? ` · ${inv.payment_note}` : ''}
+              </span>
+              <Button size="sm" variant="quiet" onClick={markUnpaid} disabled={action.busy}>
+                Undo payment
+              </Button>
+            </div>
+          ) : null}
           {inv.notes ? <p className="secondary">{inv.notes}</p> : null}
         </Card>
       )}
@@ -387,6 +448,49 @@ function InvoiceContent({ id }: { id: string }) {
         }
       >
         <TextField label="Reason (optional)" value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+        <ActionError error={action.error} />
+      </Dialog>
+      <Dialog
+        open={dialog === 'paid'}
+        onClose={close}
+        title={`Mark ${inv.number} paid?`}
+        description="Records when the money arrived. What was billed doesn't change, and you can undo it."
+        footer={
+          <>
+            <Button onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={markPaid} disabled={action.busy || !paidOn}>
+              Mark paid
+            </Button>
+          </>
+        }
+      >
+        <TextField label="Paid on" type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} required />
+        <TextField label="Note (optional)" hint="A payment reference, for example" value={payNote} maxLength={500} onChange={(e) => setPayNote(e.target.value)} />
+        <ActionError error={action.error} />
+      </Dialog>
+      <Dialog
+        open={dialog === 'send'}
+        onClose={close}
+        title={`Email ${inv.number} to ${inv.client.name}?`}
+        description="The email carries the invoice itself: lines, totals and due date. Replies come to you."
+        footer={
+          <>
+            <Button onClick={close}>Cancel</Button>
+            <Button variant="primary" onClick={send} disabled={action.busy || (!inv.client.contact_email && !sendTo.trim())}>
+              {action.busy ? 'Sending…' : 'Send invoice'}
+            </Button>
+          </>
+        }
+      >
+        <TextField
+          label="To"
+          type="email"
+          placeholder={inv.client.contact_email ?? 'billing@client.com'}
+          hint={inv.client.contact_email ? `Leave empty to send to ${inv.client.contact_email}` : 'This client has no billing email yet'}
+          value={sendTo}
+          onChange={(e) => setSendTo(e.target.value)}
+        />
+        <TextArea label="Message (optional)" rows={3} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} />
         <ActionError error={action.error} />
       </Dialog>
       <Dialog

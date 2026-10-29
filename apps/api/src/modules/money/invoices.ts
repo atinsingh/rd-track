@@ -9,6 +9,8 @@ import {
 } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
+import type { EmailMessage } from '../../email/sender';
+import { invoiceEmail } from '../../email/templates';
 import { toCsv } from '../../lib/csv';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
@@ -20,12 +22,14 @@ import { dateRange, groupSeconds, timeWithBillRates, userTimezone } from './time
  * effect on each session's start date. Drafts can be edited; issuing assigns the next
  * number (INV-YYYY-NNNN, gap-free per organization and year) and locks the invoice — the
  * database refuses later changes (migration 005 triggers). An issued invoice can only be
- * voided; its number is never reused.
+ * voided; its number is never reused. Payment (`paid_on`) and delivery (`sent_at`) are
+ * recorded on issued invoices without touching what was billed (slice 4, G23).
  */
 
 const SUMMARY_SELECT = `
   SELECT i.id, i.number, i.status, i.client_id, c.name AS client_name, i.period_from::text AS period_from,
-         i.period_to::text AS period_to, i.currency, i.total_cents, i.issued_at, i.due_date::text AS due_date, i.created_at
+         i.period_to::text AS period_to, i.currency, i.total_cents, i.issued_at, i.due_date::text AS due_date,
+         i.paid_on::text AS paid_on, i.sent_at, i.created_at
   FROM invoices i JOIN clients c ON c.id = i.client_id`;
 
 const locked = () => errors.conflict('invoice_locked', 'This invoice has been issued and can no longer be changed. Void it and create a new one.');
@@ -34,13 +38,24 @@ export async function listInvoices(q: Queryable, orgId: string): Promise<Invoice
   return many<InvoiceSummaryDTO>(q, `${SUMMARY_SELECT} WHERE i.organization_id = $1 ORDER BY i.created_at DESC LIMIT 500`, [orgId]);
 }
 
+/** Drafts and issued invoices not yet paid: what finance still has to act on. Oldest due first. */
+export async function openInvoices(q: Queryable, orgId: string): Promise<InvoiceSummaryDTO[]> {
+  return many<InvoiceSummaryDTO>(
+    q,
+    `${SUMMARY_SELECT} WHERE i.organization_id = $1 AND (i.status = 'draft' OR (i.status = 'issued' AND i.paid_on IS NULL))
+     ORDER BY i.status DESC, COALESCE(i.due_date, i.issued_at::date, i.created_at::date), i.created_at LIMIT 200`,
+    [orgId],
+  );
+}
+
 export async function getInvoice(q: Queryable, orgId: string, id: string): Promise<InvoiceDTO> {
   const inv = await one<Omit<InvoiceDTO, 'lines' | 'client'> & { client_email: string | null; client_address: string | null }>(
     q,
     `SELECT i.id, i.number, i.status, i.client_id, c.name AS client_name, c.contact_email AS client_email, c.address AS client_address,
             o.name AS organization_name, i.period_from::text AS period_from, i.period_to::text AS period_to, i.timezone, i.group_by,
             i.currency, i.subtotal_cents, i.tax_rate_bp, i.tax_cents, i.total_cents, i.unrated_seconds, i.issued_at,
-            i.due_date::text AS due_date, i.notes, i.voided_at, i.void_reason, i.created_at
+            i.due_date::text AS due_date, i.notes, i.voided_at, i.void_reason, i.paid_on::text AS paid_on, i.payment_note,
+            i.sent_at, i.sent_to, i.created_at
      FROM invoices i JOIN clients c ON c.id = i.client_id JOIN organizations o ON o.id = i.organization_id
      WHERE i.organization_id = $1 AND i.id = $2`,
     [orgId, id],
@@ -244,6 +259,71 @@ export async function voidInvoice(deps: Deps, q: Queryable, actor: UserActor, id
   ]);
   await audit(q, { organizationId: orgId, actor, action: 'invoice.void', targetType: 'invoice', targetId: id, requestId });
   return getInvoice(q, orgId, id);
+}
+
+export async function markInvoicePaid(q: Queryable, actor: UserActor, id: string, paidOn: string, note: string | undefined, requestId?: string): Promise<InvoiceDTO> {
+  const orgId = actor.organizationId;
+  const cur = await lockInvoice(q, orgId, id);
+  if (cur.status !== 'issued') throw errors.conflict('invoice_not_issued', 'Only issued invoices can be marked paid.');
+  await q.query('UPDATE invoices SET paid_on = $2, payment_note = $3, updated_at = now() WHERE id = $1', [id, paidOn, note?.trim() || null]);
+  await audit(q, { organizationId: orgId, actor, action: 'invoice.paid', targetType: 'invoice', targetId: id, requestId, metadata: { paid_on: paidOn } });
+  return getInvoice(q, orgId, id);
+}
+
+/** Undo a payment recorded by mistake. */
+export async function markInvoiceUnpaid(q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<InvoiceDTO> {
+  const orgId = actor.organizationId;
+  const cur = await lockInvoice(q, orgId, id);
+  if (cur.status !== 'issued') throw errors.conflict('invoice_not_issued', 'Only issued invoices have a payment to undo.');
+  await q.query('UPDATE invoices SET paid_on = NULL, payment_note = NULL, updated_at = now() WHERE id = $1', [id]);
+  await audit(q, { organizationId: orgId, actor, action: 'invoice.unpaid', targetType: 'invoice', targetId: id, requestId });
+  return getInvoice(q, orgId, id);
+}
+
+const hoursText = (h: number) => h.toFixed(2);
+/** "1 Oct 2026": calendar dates, so formatted in UTC whatever the server's zone. */
+const dateText = (d: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
+const moneyText = (cents: number, currency: string) =>
+  new Intl.NumberFormat('en', { style: 'currency', currency }).format(cents / 100);
+
+/**
+ * Emails an issued invoice to the client (its billing contact unless `to` is given) and
+ * records when and to whom. Returns the message for the caller to send after commit.
+ */
+export async function prepareInvoiceEmail(
+  deps: Pick<Deps, 'now'>,
+  q: Queryable,
+  actor: UserActor,
+  id: string,
+  body: { to?: string; message?: string },
+  requestId?: string,
+): Promise<{ invoice: InvoiceDTO; message: EmailMessage }> {
+  const orgId = actor.organizationId;
+  const cur = await lockInvoice(q, orgId, id);
+  if (cur.status !== 'issued') throw errors.conflict('invoice_not_issued', 'Issue the invoice before sending it.');
+  const inv = await getInvoice(q, orgId, id);
+  const to = body.to ?? inv.client.contact_email;
+  if (!to) throw errors.validation('This client has no billing email. Add one to the client, or enter an address.');
+  const sender = await one<{ email: string }>(q, 'SELECT email FROM users WHERE id = $1', [actor.userId]);
+  const label = (l: InvoiceDTO['lines'][number]) => [l.project_name, l.user_name, l.description].filter(Boolean).join(' · ') || 'Time';
+  const message = invoiceEmail({
+    to,
+    replyTo: sender!.email,
+    orgName: inv.organization_name,
+    number: inv.number!,
+    clientName: inv.client.name,
+    period: `${dateText(inv.period_from)} – ${dateText(inv.period_to)}`,
+    due: inv.due_date ? dateText(inv.due_date) : null,
+    lines: inv.lines.map((l) => ({ label: label(l), hours: hoursText(l.hours), rate: moneyText(l.rate_cents, inv.currency), amount: moneyText(l.amount_cents, inv.currency) })),
+    subtotal: moneyText(inv.subtotal_cents, inv.currency),
+    tax: inv.tax_cents ? `${moneyText(inv.tax_cents, inv.currency)} (${(inv.tax_rate_bp / 100).toFixed(2)}%)` : null,
+    total: moneyText(inv.total_cents, inv.currency),
+    notes: inv.notes,
+    message: body.message?.trim() || null,
+  });
+  await q.query('UPDATE invoices SET sent_at = $2, sent_to = $3, updated_at = now() WHERE id = $1', [id, deps.now().toISOString(), to]);
+  await audit(q, { organizationId: orgId, actor, action: 'invoice.send', targetType: 'invoice', targetId: id, requestId, metadata: { to } });
+  return { invoice: await getInvoice(q, orgId, id), message };
 }
 
 export async function deleteDraftInvoice(q: Queryable, actor: UserActor, id: string, requestId?: string) {

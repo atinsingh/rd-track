@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { InvoiceGrouping } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
@@ -11,9 +11,10 @@ import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridCl
 import { rd } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { INVOICE_STATUS_LABEL, parsePercentBp } from '@/lib/money';
+import { parsePercentBp } from '@/lib/money';
 import { addDays, formatDayLabel, startOfMonth, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { INVOICE_STATE_LABEL, invoiceState } from '@/lib/workspaces';
 import { MoneyGate } from '../MoneyGate';
 import m from '../money.module.css';
 
@@ -23,9 +24,13 @@ function NewDraft() {
   const today = todayInTz(tz);
   const clients = useApi('money:clients', (signal) => rd.money.clients(signal));
   const create = useAction();
-  const [clientId, setClientId] = useState('');
-  const [from, setFrom] = useState(() => startOfMonth(addDays(startOfMonth(today), -1)));
-  const [to, setTo] = useState(() => addDays(startOfMonth(today), -1));
+  // ?client=&from= comes from "Not yet invoiced" on Period close.
+  const params = useSearchParams();
+  const qFrom = params.get('from');
+  const fromParam = qFrom && /^\d{4}-\d{2}-\d{2}$/.test(qFrom) && qFrom <= today ? qFrom : null;
+  const [clientId, setClientId] = useState(() => params.get('client') ?? '');
+  const [from, setFrom] = useState(() => fromParam ?? startOfMonth(addDays(startOfMonth(today), -1)));
+  const [to, setTo] = useState(() => (fromParam ? today : addDays(startOfMonth(today), -1)));
   const [groupBy, setGroupBy] = useState<InvoiceGrouping>('project');
   const [tax, setTax] = useState('0');
   const taxBp = parsePercentBp(tax);
@@ -96,6 +101,8 @@ function NewDraft() {
 }
 
 function InvoicesContent() {
+  const { timezone: tz } = useMe();
+  const today = todayInTz(tz);
   const invoices = useApi('money:invoices', (signal) => rd.money.invoices(signal));
   return (
     <>
@@ -135,7 +142,9 @@ function InvoicesContent() {
                           {formatDayLabel(i.period_from)} – {formatDayLabel(i.period_to)}
                         </td>
                         <td>
-                          <Badge tone={i.status === 'issued' ? 'solid' : 'outline'}>{INVOICE_STATUS_LABEL[i.status]}</Badge>
+                          <Badge tone={invoiceState(i, today) === 'overdue' ? 'warn' : i.status === 'issued' ? 'solid' : 'outline'}>
+                            {INVOICE_STATE_LABEL[invoiceState(i, today)]}
+                          </Badge>
                         </td>
                         <td className={numClass}>{formatMoney(i.total_cents, i.currency)}</td>
                       </tr>

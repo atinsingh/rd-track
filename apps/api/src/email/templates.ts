@@ -50,3 +50,67 @@ export function actionEmail(p: { to: string; orgName: string; title: string; bod
   const text = `${p.title}\n\n${p.body}\n\n${p.actionLabel}: ${p.url}\n\n—\n${p.orgName} · RoundDigital Track\n${footer}\n`;
   return { to: p.to, subject: p.title, text, html: layout({ ...p, footer }) };
 }
+
+/**
+ * An issued invoice sent to a client's billing contact. Clients have no account, so the
+ * invoice itself is the message: lines, totals and due date. It names projects and,
+ * when the invoice is grouped by person, the people on each line — what the client is
+ * billed for, nothing more (no activity, apps or screenshots ever appear on invoices).
+ */
+export function invoiceEmail(p: {
+  to: string;
+  replyTo: string;
+  orgName: string;
+  number: string;
+  clientName: string;
+  period: string;
+  due: string | null;
+  lines: { label: string; hours: string; rate: string; amount: string }[];
+  subtotal: string;
+  tax: string | null;
+  total: string;
+  notes: string | null;
+  message: string | null;
+}): EmailMessage {
+  const subject = `Invoice ${p.number} from ${p.orgName}`;
+  const dueLine = p.due ? `Due ${p.due}.` : '';
+  const text = [
+    `${subject}`,
+    '',
+    p.message ?? `Please find invoice ${p.number} for ${p.period} below.`,
+    '',
+    ...p.lines.map((l) => `${l.label} — ${l.hours} h × ${l.rate} = ${l.amount}`),
+    '',
+    `Subtotal: ${p.subtotal}`,
+    ...(p.tax ? [`Tax: ${p.tax}`] : []),
+    `Total: ${p.total}`,
+    dueLine,
+    ...(p.notes ? ['', p.notes] : []),
+    '',
+    `Reply to this email to reach ${p.orgName}.`,
+  ].join('\n');
+  const rows = p.lines
+    .map(
+      (l) =>
+        `<tr><td style="padding:8px 0;border-top:1px solid #e3e6ea">${escape(l.label)}</td><td style="padding:8px 0;border-top:1px solid #e3e6ea;text-align:right;font-family:ui-monospace,monospace">${escape(l.hours)} h</td><td style="padding:8px 0;border-top:1px solid #e3e6ea;text-align:right;font-family:ui-monospace,monospace">${escape(l.rate)}</td><td style="padding:8px 0;border-top:1px solid #e3e6ea;text-align:right;font-family:ui-monospace,monospace">${escape(l.amount)}</td></tr>`,
+    )
+    .join('');
+  const sum = (label: string, value: string, strong = false) =>
+    `<tr><td colspan="3" style="padding:6px 0;text-align:right;${strong ? 'font-weight:700' : ''}">${escape(label)}</td><td style="padding:6px 0;text-align:right;font-family:ui-monospace,monospace;${strong ? 'font-weight:700' : ''}">${escape(value)}</td></tr>`;
+  const html = `<!doctype html><html><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1013">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:16px"><tr><td style="padding:24px 28px">
+<p style="margin:0;font:500 11px/1.4 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#53595f">${escape(p.orgName)} · Invoice</p>
+<h1 style="margin:12px 0 4px;font:700 22px/1.25 Inter,system-ui,sans-serif">${escape(p.number)}</h1>
+<p style="margin:0 0 16px;color:#3f444b">${escape(p.clientName)} · ${escape(p.period)}${p.due ? ` · Due ${escape(p.due)}` : ''}</p>
+${p.message ? `<p style="margin:0 0 16px;white-space:pre-line">${escape(p.message)}</p>` : ''}
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">
+<tr><th align="left" style="padding:0 0 8px;font-weight:600">Item</th><th align="right" style="padding:0 0 8px;font-weight:600">Hours</th><th align="right" style="padding:0 0 8px;font-weight:600">Rate</th><th align="right" style="padding:0 0 8px;font-weight:600">Amount</th></tr>
+${rows}${sum('Subtotal', p.subtotal)}${p.tax ? sum('Tax', p.tax) : ''}${sum('Total', p.total, true)}
+</table>
+${p.notes ? `<p style="margin:16px 0 0;white-space:pre-line;color:#3f444b">${escape(p.notes)}</p>` : ''}
+</td></tr></table>
+<p style="max-width:640px;margin:16px auto 0;font-size:12px;color:#53595f">Reply to this email to reach ${escape(p.orgName)}.</p>
+</td></tr></table></body></html>`;
+  return { to: p.to, replyTo: p.replyTo, subject, text, html };
+}

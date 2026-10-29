@@ -1,10 +1,10 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { AuditEventDTO } from '@rd/contracts';
+import { AUDIT_EXPORT_MAX_ROWS, type AuditEventDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataState';
-import { TextField } from '@/components/ui/Field';
+import { SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, formGridClass, tableClass } from '@/components/ui/Layout';
 import { rd, toApiError, type ApiError, type AuditQuery } from '@/lib/api';
 import { humanize } from '@/lib/format';
@@ -18,12 +18,13 @@ interface Filters {
   to: string;
   action: string;
   actor: string;
+  subject: string;
 }
 
 export default function AuditPage() {
   const { access, timezone: tz } = useMe();
   const today = todayInTz(tz);
-  const [draft, setDraft] = useState<Filters>({ from: addDays(today, -6), to: today, action: '', actor: '' });
+  const [draft, setDraft] = useState<Filters>({ from: addDays(today, -6), to: today, action: '', actor: '', subject: '' });
   const [applied, setApplied] = useState<Filters>(draft);
   const [more, setMore] = useState<{ key: string; items: AuditEventDTO[]; cursor: string | null } | null>(null);
   const [moreBusy, setMoreBusy] = useState(false);
@@ -34,10 +35,13 @@ export default function AuditPage() {
     from: applied.from ? dayRange(applied.from, tz).from : undefined,
     to: applied.to ? dayRange(applied.to, tz).to : undefined,
     action: applied.action.trim() || undefined,
-    actor_id: applied.actor.trim() || undefined,
+    actor_id: applied.actor || undefined,
+    subject_id: applied.subject || undefined,
   };
   const key = JSON.stringify(query);
   const first = useApi(allowed ? `audit|${key}` : null, (signal) => rd.audit(query, signal));
+  const people = useApi(allowed ? 'audit:people' : null, (signal) => rd.auditPeople(signal));
+  const nameOf = (id: string | null) => (id ? people.data?.find((p) => p.id === id)?.display_name : undefined);
   if (!allowed) return <NoAccess what="The audit log is for auditors and org admins." />;
 
   const extra = more?.key === key ? more : null;
@@ -77,7 +81,24 @@ export default function AuditPage() {
             <TextField label="From" type="date" value={draft.from} max={draft.to || today} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
             <TextField label="To" type="date" value={draft.to} min={draft.from} max={today} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
             <TextField label="Action" placeholder="e.g. screenshot.view" value={draft.action} onChange={(e) => setDraft({ ...draft, action: e.target.value })} />
-            <TextField label="Actor ID" placeholder="User id" value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} />
+            <SelectField label="Done by" value={draft.actor} onChange={(e) => setDraft({ ...draft, actor: e.target.value })}>
+              <option value="">Anyone</option>
+              {(people.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name}
+                  {p.status === 'active' ? '' : ` (${p.status})`}
+                </option>
+              ))}
+            </SelectField>
+            <SelectField label="About" hint="Whose data it was" value={draft.subject} onChange={(e) => setDraft({ ...draft, subject: e.target.value })}>
+              <option value="">Anyone</option>
+              {(people.data ?? []).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.display_name}
+                  {p.status === 'active' ? '' : ` (${p.status})`}
+                </option>
+              ))}
+            </SelectField>
           </div>
           <Button type="submit" variant="primary">
             Apply
@@ -85,7 +106,15 @@ export default function AuditPage() {
         </form>
       </Card>
       <Banner tag="NOTE">Only who, what, when and the outcome are shown — never the content of what was viewed.</Banner>
-      <Card title="Events">
+      <Card
+        title="Events"
+        actions={
+          <a className="small" href={rd.auditExportUrl(query)} download>
+            Download CSV
+          </a>
+        }
+        subtitle={`The CSV holds up to ${AUDIT_EXPORT_MAX_ROWS.toLocaleString('en')} events with these filters. Downloading it is recorded here too.`}
+      >
         {first.error ? (
           <ErrorState error={first.error} onRetry={first.reload} />
         ) : !first.data ? (
@@ -95,13 +124,14 @@ export default function AuditPage() {
         ) : (
           <>
             <TableBox label="Audit events">
-              <table className={tableClass} style={{ minWidth: 900 }}>
+              <table className={tableClass} style={{ minWidth: 1000 }}>
                 <thead>
                   <tr>
                     <th scope="col">Time</th>
                     <th scope="col">Actor</th>
                     <th scope="col">Action</th>
                     <th scope="col">Target</th>
+                    <th scope="col">About</th>
                     <th scope="col">Result</th>
                     <th scope="col">Request ID</th>
                   </tr>
@@ -126,6 +156,7 @@ export default function AuditPage() {
                         {e.target_type ? humanize(e.target_type) : '—'}
                         {e.target_id ? <span className="mono muted"> · {e.target_id.slice(0, 8)}</span> : null}
                       </td>
+                      <td className="small">{e.target_user_id ? (nameOf(e.target_user_id) ?? e.target_user_id.slice(0, 8)) : '—'}</td>
                       <td>
                         <Badge tone={e.result === 'success' ? 'outline' : 'warn'}>{e.result}</Badge>
                       </td>

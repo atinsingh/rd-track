@@ -50,15 +50,15 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) | M | P1 |
 | G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV | S/M | P1 |
 | G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed | S | P1 |
-| G16 | Admin | No setup checklist after signup | M | P1 |
+| G16 | Admin | No setup checklist after signup — **done** | M | P1 |
 | G17 | Admin | No tenant export, contract-end deletion or deletion certificate | M | P1 |
 | G18 | Emp | Deletion requests cover screenshots only; no "download my data" | M | P1 |
 | G19 | Manager | No timesheet due dates, reminders or escalation — **done** | M | P1 |
-| G20 | Org admin | No organization-wide summary without being a manager | M | P1 |
-| G21 | Finance | No finance role; Money needs full `org_admin` | M | P1 |
-| G22 | Finance | Payroll export buried in Rates and budgets | S | P1 |
-| G23 | Finance | Invoices have no paid state and no send-to-client | S/M | P1 |
-| G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day | S | P1 |
+| G20 | Org admin | No organization-wide summary without being a manager — **done** | M | P1 |
+| G21 | Finance | No finance role; Money needs full `org_admin` — **done** | M | P1 |
+| G22 | Finance | Payroll export buried in Rates and budgets — **done** | S | P1 |
+| G23 | Finance | Invoices have no paid state and no send-to-client — **done** | S/M | P1 |
+| G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1), MDM packages and tenant logo (P2) promised but missing | L | P1/P2 |
 | G27 | All | Hard-coded English; mixed date and money formats | M | P2 |
@@ -138,6 +138,17 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
 4. **Role workspaces.** Role homes; admin checklist; agent download and self-enrolment;
    complete People and Teams pages; finance role and Money home; auditor tools;
    organization summary (G10, G12, G14–G16, G20–G24).
+
+   **4a done 2026-10-29**: `/` opens the person's home (Setup and health for org admins,
+   Period close for finance, the audit log for auditors, Team today for managers, My day
+   for anyone who tracks), with a view switcher in the rail that remembers the choice.
+   The `finance` role (migration 012) runs Money without admin; Period close shows this
+   month's approved hours, payroll export, invoices to finish, time not yet invoiced and
+   budgets near their limit. Issued invoices can be emailed to the client and marked paid
+   (amounts stay locked). Setup and health builds its checklist from the data and shows
+   seats, reviewers, computers to check and hours by team (teams of 5+ only). Auditors
+   filter by who acted or whose data it was and download CSV. Next: 4b People and Teams,
+   4c agent download and self-enrolment.
 5. **Platform console and data lifecycle.** The operator console (`/platform`) with
    support grants end to end, tenant offboarding with export and deletion certificate,
    employee data export and erasure (G2, G17, G18). Then SSO / SCIM (G26).

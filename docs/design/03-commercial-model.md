@@ -80,7 +80,7 @@ Terms confirmed on 2026-10-29: an annual term is half the month-to-month price.
 A **billable seat** is a user whose status is `active` **and** `tracking_enabled = true`
 (they can start work sessions). Everything else is free:
 
-* Admins, auditors, project managers and team managers who don't track their own time
+* Admins, auditors, finance, project managers and team managers who don't track their own time
   are **unlimited free viewer seats**. A manager who also tracks uses one seat.
 * Deactivated users free their seat immediately; their records stay under retention.
 * Seat usage is measured continuously; invoices use the **peak** number of billable seats

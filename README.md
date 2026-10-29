@@ -25,7 +25,7 @@ term, or $5 / $10 month to month).
 |---|---|
 | `packages/contracts` | Shared Zod schemas and types: event envelope, policy model and resolver, plans, API DTOs |
 | `apps/api` | Fastify API (`src/main.ts`) and worker (`src/worker.ts`) on PostgreSQL |
-| `apps/web` | Next.js dashboard for employees, managers, admins and auditors |
+| `apps/web` | Next.js dashboard with a home for each role: employees, managers, admins, finance and auditors |
 | `agent/` | Rust desktop agent: `rd-agent-core` library and `rd-agent` headless binary |
 | `infra/` | Local Postgres + MinIO (`docker compose`) |
 | `scripts/e2e-agent.sh` | Real agent against real API + worker, reconciled in SQL |
@@ -45,7 +45,8 @@ pnpm dev:web                                         # http://localhost:3000
 ```
 
 The seed prints demo sign-ins (password `track-demo-2026`): an org admin, a team manager
-(Priya), employees and an auditor, with a week of synthetic sessions.
+(Priya), employees, an auditor and a finance user, with a week of synthetic sessions. Each lands on
+their own home: My day, Team today, Setup and health, Period close or the audit log.
 
 Run a desktop agent against it (simulated input — native collectors come next):
 

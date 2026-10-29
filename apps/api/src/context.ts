@@ -40,7 +40,8 @@ export interface PlatformActor {
 
 export type Actor = UserActor | DeviceActor | PlatformActor;
 
-export const PRIVILEGED_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin'];
+/** Roles that must use MFA when it is required for admins: they reach pay rates or everyone's data. */
+export const PRIVILEGED_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'finance'];
 
 export function isAdmin(a: UserActor): boolean {
   return a.orgRole === 'org_admin' || a.orgRole === 'super_admin';

@@ -11,6 +11,7 @@ import { agentRoutes } from './modules/agent-routes';
 import { commerceRoutes } from './modules/commerce-routes';
 import { insightsRoutes } from './modules/insights-routes';
 import { approvalsRoutes } from './modules/approvals-routes';
+import { workspacesRoutes } from './modules/workspaces-routes';
 import { moneyRoutes } from './modules/money-routes';
 import { authRoutes } from './modules/auth/routes';
 import { authenticateDevice, authenticateUser } from './modules/auth/service';
@@ -139,6 +140,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => commerceRoutes(s, deps));
   await app.register(async (s) => insightsRoutes(s, deps));
   await app.register(async (s) => approvalsRoutes(s, deps));
+  await app.register(async (s) => workspacesRoutes(s, deps));
   await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));

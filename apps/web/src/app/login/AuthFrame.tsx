@@ -31,6 +31,6 @@ export function AuthFrame({ children }: { children: ReactNode }) {
 }
 
 export function safeNext(next: string | null | undefined): string {
-  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/me';
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/';
   return next;
 }

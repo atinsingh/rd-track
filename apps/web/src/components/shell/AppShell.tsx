@@ -2,14 +2,14 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
 import { onApprovalsChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { activeHref, can, groupOf, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
+import { HOME_KEY, activeHref, can, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
 import { useApi } from '@/lib/useApi';
 import { CommandPalette } from './CommandPalette';
 import { LicenceBanner } from './LicenceBanner';
@@ -43,7 +43,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '/';
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuOpen = menuFor === pathname;
+  const router = useRouter();
   const groups = navFor(access);
+  const homes = homesFor(access);
   const current = activeHref(groups, pathname);
   const currentGroup = groupOf(groups, current);
   const [collapsed, setCollapsed] = useState<NavGroupKey[]>(readCollapsed);
@@ -89,7 +91,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       </a>
       <nav className={s.rail} aria-label="Main">
         <div className={s.bar}>
-          <Link href="/me" className={s.brand} aria-label="RoundDigital Track, my day">
+          <Link href="/" className={s.brand} aria-label="RoundDigital Track, home">
             <Image src="/brand/rd-logo-reversed.png" alt="" width={112} height={24} priority />
             <span className={s.product} aria-hidden="true">
               TRACK
@@ -128,6 +130,37 @@ export function AppShell({ children }: { children: ReactNode }) {
               {shortcut}
             </kbd>
           </button>
+          {homes.length > 1 ? (
+            <div className={s.view}>
+              <label htmlFor="rail-view" className={s.viewLabel}>
+                View
+              </label>
+              <select
+                id="rail-view"
+                className={s.viewSelect}
+                value={homes.find((h) => pathname === h.href || pathname.startsWith(`${h.href}/`))?.href ?? ''}
+                onChange={(e) => {
+                  const href = e.target.value;
+                  try {
+                    window.localStorage.setItem(HOME_KEY, href);
+                  } catch {
+                    // Not remembered; still go there.
+                  }
+                  setMenuFor(null);
+                  router.push(href);
+                }}
+              >
+                <option value="" disabled>
+                  Choose a view
+                </option>
+                {homes.map((h) => (
+                  <option key={h.href} value={h.href}>
+                    {h.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div className={s.nav}>
             {groups.map((g) => {
               // The group with the page you're on never folds away.

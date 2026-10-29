@@ -1,6 +1,9 @@
 import type {
   AccountSecurity,
   InviteInfo,
+  AdminOverview,
+  AuditPerson,
+  MoneyOverview,
   InboxCounts,
   TimesheetRule,
   TodosResponse,
@@ -259,6 +262,8 @@ export interface AuditQuery {
   to?: string;
   action?: string;
   actor_id?: string;
+  /** Whose data the event was about. */
+  subject_id?: string;
   cursor?: string;
 }
 
@@ -322,6 +327,11 @@ const money = {
   deleteInvoice: (id: string) => ok(del(`/v1/admin/invoices/${enc(id)}`)),
   /** Same-origin GET; the browser sends the session cookie and saves the CSV. */
   invoiceCsvUrl: (id: string) => `/v1/admin/invoices/${enc(id)}/csv`,
+  markInvoicePaid: (id: string, paidOn: string, note?: string) =>
+    post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/paid`, note ? { paid_on: paidOn, note } : { paid_on: paidOn }),
+  markInvoiceUnpaid: (id: string) => del<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/paid`),
+  sendInvoice: (id: string, body: { to?: string; message?: string }) => post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/send`, body),
+  overview: (signal?: AbortSignal) => get<MoneyOverview>('/v1/money/overview', { signal }),
   payrollExports: (signal?: AbortSignal) => list<PayrollExportDTO>('/v1/admin/payroll-exports', { signal }),
   payrollExport: (id: string) => get<PayrollExportDTO>(`/v1/admin/payroll-exports/${enc(id)}`),
   createPayrollExport: (body: { period_from: string; period_to: string; timezone?: string; user_ids?: string[] }) =>
@@ -453,6 +463,7 @@ export const rd = {
       list<DeletionRequestDTO>('/v1/admin/deletion-requests', { signal }),
     approveDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/approve`)),
     rejectDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/reject`)),
+    overview: (signal?: AbortSignal) => get<AdminOverview>('/v1/admin/overview', { signal }),
     timesheetRule: (signal?: AbortSignal) => get<TimesheetRule>('/v1/admin/timesheet-rule', { signal }),
     setTimesheetRule: (rule: TimesheetRule) => put<TimesheetRule>('/v1/admin/timesheet-rule', rule),
     appCategories: (signal?: AbortSignal) => list<AppCategoryDTO>('/v1/admin/app-categories', { signal }),
@@ -488,6 +499,12 @@ export const rd = {
     counts: (signal?: AbortSignal) => get<InboxCounts>('/v1/inbox/counts', { signal }),
     batch: (body: { action: 'approve' | 'reject'; note?: string; items: { type: ApprovalType; id: string }[] }) =>
       post<ApprovalsBatchResponse>('/v1/approvals/batch', body),
+  },
+  auditPeople: (signal?: AbortSignal) => list<AuditPerson>('/v1/audit-events/people', { signal }),
+  /** Same-origin GET of the filtered log as CSV; the browser sends the session cookie. */
+  auditExportUrl: (q: Omit<AuditQuery, 'cursor'>) => {
+    const p = new URLSearchParams(Object.entries(q).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== ''));
+    return `/v1/audit-events/export${p.size ? `?${p}` : ''}`;
   },
   audit: (q: AuditQuery, signal?: AbortSignal) =>
     get<Page<AuditEventDTO>>('/v1/audit-events', { query: { ...q }, signal }),

@@ -100,7 +100,8 @@ memberships.
 | Team manager | `team_memberships.role = 'manager'` (current rows) | Members of managed teams: time and activity summaries; apps if `viewers.manager_can_view_apps`; screenshots only if the resolved policy for that employee grants `viewers.manager_can_view_screenshots`. Approves members' corrections. |
 | Project manager | `project_memberships.role = 'manager'` | Time per member **on managed projects only**; no activity detail, no screenshots. |
 | Org admin | `users.org_role = 'org_admin'` | Users, teams, projects, devices, policies, deletion requests, exports. **No screenshot access by default** — an admin who also manages a team gets that team's manager access, nothing more. |
-| Auditor | `users.org_role = 'auditor'` | Audit log and access records. No activity detail, no screenshots. |
+| Auditor | `users.org_role = 'auditor'` | Audit log and access records, filtered by who acted or whose data it was, and CSV export (itself audited). Names only, no emails; no activity detail, no screenshots. |
+| Finance | `users.org_role = 'finance'` | Money (Pro): clients, pay and bill rates, budgets, invoices (issue, send to the client, record payment) and payroll export; reads the people and project lists those are set against. No people admin, policies, devices, activity, apps or screenshots. MFA required like admins. |
 | Super admin | `users.org_role = 'super_admin'` | Break-glass org administration; MFA mandatory; every action audited with `actor_role = 'super_admin'`. |
 | Platform operator | `platform_admins` (separate realm and login) | RoundDigital staff running the SaaS: tenants, plans, seats, billing health. **No** tenant activity, apps or screenshots; support access needs a time-boxed grant approved by the tenant's org admin. |
 
@@ -234,7 +235,7 @@ Response and request types live in `packages/contracts/src/api.ts`. Lists return
 | Admin | `GET/POST /v1/admin/users` (`POST` → `{user, initial_password?}`) · `PATCH /v1/admin/users/{id}` · `POST /v1/admin/users/{id}/deactivate` · `GET/POST /v1/admin/teams` · `POST /v1/admin/teams/{id}/members` · `DELETE /v1/admin/teams/{id}/members/{user_id}` · `GET/POST /v1/admin/projects` · `POST /v1/admin/projects/{id}/tasks` · `POST /v1/admin/projects/{id}/members` · `POST /v1/admin/enrollment-codes` → `EnrollmentCodeResponse` · `GET /v1/admin/devices` → `DeviceDTO[]` · `POST /v1/admin/devices/{id}/revoke` · `GET /v1/admin/deletion-requests` · `POST /v1/admin/deletion-requests/{id}/approve\|reject` · `POST /v1/admin/legal-holds` |
 | Policies | `GET /v1/policies` → `PolicyListResponse` · `GET /v1/policies/{scope_type}/{scope_id}` → `PolicyScopeDetail` · `PUT /v1/policies/{scope_type}/{scope_id}` `{settings, change_note, confirm_expansion}` → `PolicyScopeDetail`, or `409 expansion_requires_confirmation` (details: `ExpansionConflict`), or `402 plan_upgrade_required` |
 | Billing | `GET /v1/billing/subscription` → `SubscriptionDTO` · `POST /v1/billing/plan` `{plan, seats}` → `SubscriptionDTO` |
-| Audit | `GET /v1/audit-events?from&to&action&actor_id&cursor` → `Page<AuditEventDTO>` (auditor, org admin) |
+| Audit | `GET /v1/audit-events?from&to&action&actor_id&subject_id&cursor` → `Page<AuditEventDTO>`; `GET /v1/audit-events/export` (CSV, up to 10,000 rows, audited); `GET /v1/audit-events/people` (auditor, org admin) |
 
 Error codes the UI must handle: `unauthenticated` (401), `mfa_required` (403),
 `forbidden` (403), `not_found` (404), `validation_failed` (400),

@@ -6,7 +6,7 @@ export function NoAccess({ what }: { what: string }) {
     <>
       <PageHeader eyebrow="No access" title="This page isn't available to you" description={what} />
       <p>
-        <Link href="/me">Go to My day</Link>
+        <Link href="/">Go to your home page</Link>
       </p>
     </>
   );

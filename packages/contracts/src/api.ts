@@ -13,7 +13,8 @@ export interface ApiErrorBody {
   error: { code: string; message: string; request_id: string; details?: unknown };
 }
 
-export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin'] as const;
+/** `finance` (slice 4, G21) runs Money: rates, invoices, budgets and payroll, without full admin. */
+export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin', 'finance'] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 // ───────────────────────── auth ─────────────────────────

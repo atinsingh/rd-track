@@ -65,9 +65,10 @@ const SELECT = `
 export async function listAudit(
   q: Queryable,
   orgId: string,
-  f: { from?: string; to?: string; action?: string; actorId?: string; cursor?: string; limit?: number },
+  f: { from?: string; to?: string; action?: string; actorId?: string; subjectId?: string; cursor?: string; limit?: number },
+  maxLimit = 500,
 ): Promise<Page<AuditEventDTO>> {
-  const limit = Math.min(f.limit ?? 100, 500);
+  const limit = Math.min(f.limit ?? 100, maxLimit);
   const rows = await many<AuditEventDTO>(
     q,
     `${SELECT}
@@ -77,8 +78,9 @@ export async function listAudit(
        AND ($4::text IS NULL OR a.action LIKE $4 || '%')
        AND ($5::uuid IS NULL OR a.actor_id = $5)
        AND ($6::bigint IS NULL OR a.id < $6)
+       AND ($8::uuid IS NULL OR a.target_user_id = $8)
      ORDER BY a.id DESC LIMIT $7`,
-    [orgId, f.from ?? null, f.to ?? null, f.action ?? null, f.actorId ?? null, f.cursor ?? null, limit + 1],
+    [orgId, f.from ?? null, f.to ?? null, f.action ?? null, f.actorId ?? null, f.cursor ?? null, limit + 1, f.subjectId ?? null],
   );
   const items = rows.slice(0, limit);
   return { items, next_cursor: rows.length > limit ? items[items.length - 1]!.id : null };

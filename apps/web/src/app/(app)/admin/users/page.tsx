@@ -21,6 +21,7 @@ const ROLE_LABEL: Record<OrgRole, string> = {
   org_admin: 'Org admin',
   auditor: 'Auditor',
   super_admin: 'Super admin',
+  finance: 'Finance',
 };
 
 function SeatError({ error }: { error: ApiError | null }) {
@@ -127,8 +128,11 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
             checked={form.tracking_enabled}
             onChange={(e) => set({ tracking_enabled: e.target.checked })}
           />
-          {form.org_role === 'org_admin' || form.org_role === 'super_admin' ? (
-            <p className="small secondary">Admins must set up two-factor sign-in the first time they sign in.</p>
+          {form.org_role === 'finance' ? (
+            <p className="small secondary">Finance runs rates, invoices, budgets and payroll. They never see activity, apps or screenshots.</p>
+          ) : null}
+          {form.org_role === 'org_admin' || form.org_role === 'super_admin' || form.org_role === 'finance' ? (
+            <p className="small secondary">They must set up two-factor sign-in the first time they sign in.</p>
           ) : null}
           <SeatError error={action.error} />
           <div className={formActionsClass}>

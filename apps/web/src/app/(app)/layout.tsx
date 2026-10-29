@@ -9,7 +9,7 @@ import { MeProvider } from '@/lib/me';
 import { useApi } from '@/lib/useApi';
 import s from './gate.module.css';
 
-const PRIVILEGED = new Set(['org_admin', 'super_admin']);
+const PRIVILEGED = new Set(['org_admin', 'super_admin', 'finance']);
 
 export default function SignedInLayout({ children }: { children: ReactNode }) {
   const router = useRouter();

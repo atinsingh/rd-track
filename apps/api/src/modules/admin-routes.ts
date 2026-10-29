@@ -15,10 +15,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
-import { ADMIN_ROLES, AUDIT_ROLES, requireRole } from '../http';
+import { ADMIN_ROLES, MONEY_ROLES, requireRole } from '../http';
 import { errors } from '../lib/errors';
 import { parse } from '../lib/validate';
-import { listAudit } from './audit/service';
 import { adminResetMfa, inviteUser } from './auth/identity';
 import { createEnrollmentCode, listDevices, revokeDevice } from './devices/service';
 import * as org from './org/service';
@@ -37,9 +36,11 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
   const { pool } = deps;
   const user = { config: { auth: 'user' as const } };
   const admin = (req: Parameters<typeof requireRole>[0]) => requireRole(req, ADMIN_ROLES);
+  /** Finance reads the people and project lists that rates and budgets are set against; it changes neither. */
+  const reader = (req: Parameters<typeof requireRole>[0]) => requireRole(req, MONEY_ROLES);
 
   // ───────── users ─────────
-  app.get('/v1/admin/users', user, async (req) => ({ items: await org.listUsers(pool, admin(req).organizationId) }));
+  app.get('/v1/admin/users', user, async (req) => ({ items: await org.listUsers(pool, reader(req).organizationId) }));
   app.post('/v1/admin/users', user, async (req, reply) => {
     const body = parse(createUserRequest, req.body);
     const { user: created, invite } = await withTx(pool, (tx) => org.createUser(deps, tx, admin(req), body, req.id));
@@ -80,7 +81,7 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
     await withTx(pool, (tx) => org.removeTeamMember(tx, admin(req), req.params.id, req.params.userId, req.id));
     return { ok: true };
   });
-  app.get('/v1/admin/projects', user, async (req) => ({ items: await org.listProjects(pool, admin(req).organizationId) }));
+  app.get('/v1/admin/projects', user, async (req) => ({ items: await org.listProjects(pool, reader(req).organizationId) }));
   app.post('/v1/admin/projects', user, async (req, reply) => {
     const body = parse(createProjectRequest, req.body);
     return reply.code(201).send(await withTx(pool, (tx) => org.createProject(tx, admin(req), body.name, body.client_ref, req.id)));
@@ -133,24 +134,4 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
     if (new Date(body.to) <= new Date(body.from)) throw errors.validation('to must be after from');
     return reply.code(201).send(await withTx(pool, (tx) => createLegalHold(deps, tx, admin(req), body, req.id)));
   });
-
-  // ───────── audit ─────────
-  app.get<{ Querystring: { from?: string; to?: string; action?: string; actor_id?: string; cursor?: string } }>(
-    '/v1/audit-events',
-    user,
-    async (req) => {
-      const a = requireRole(req, AUDIT_ROLES);
-      const qs = parse(
-        z.object({
-          from: z.iso.datetime({ offset: true }).optional(),
-          to: z.iso.datetime({ offset: true }).optional(),
-          action: z.string().max(100).optional(),
-          actor_id: z.uuid().optional(),
-          cursor: z.string().regex(/^\d+$/).optional(),
-        }),
-        req.query,
-      );
-      return listAudit(pool, a.organizationId, { ...qs, actorId: qs.actor_id });
-    },
-  );
 }

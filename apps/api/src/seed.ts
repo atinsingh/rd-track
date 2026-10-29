@@ -148,6 +148,7 @@ async function main() {
       sara: await addUser(q, orgId, 'sara@rounddigital.example', 'Sara Lindqvist'),
     };
     await addUser(q, orgId, 'audit@rounddigital.example', 'Robin Auditor', 'auditor', false);
+    await addUser(q, orgId, 'finance@rounddigital.example', 'Morgan Ellis', 'finance', false);
 
     const team = async (name: string) => (await one<{ id: string }>(q, `INSERT INTO teams (organization_id, name) VALUES ($1, $2) RETURNING id`, [orgId, name]))!.id;
     const platform = await team('Platform');

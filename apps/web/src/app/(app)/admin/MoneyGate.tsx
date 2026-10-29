@@ -6,15 +6,15 @@ import { Banner, PageHeader } from '@/components/ui/Layout';
 import { useMe } from '@/lib/me';
 import { NoAccess } from '../NoAccess';
 
-/** Clients, rates, budgets and invoices: org admins on a plan with `budgets_invoicing` (Pro). */
+/** Clients, rates, budgets, invoices and payroll: org admins and finance, on a plan with `budgets_invoicing` (Pro). */
 export function useMoneyAccess() {
   const { access } = useMe();
-  return { admin: access.isAdmin, entitled: access.entitlements.includes('budgets_invoicing') };
+  return { admin: access.isAdmin || access.isFinance, entitled: access.entitlements.includes('budgets_invoicing') };
 }
 
 export function MoneyGate({ title, children }: { title: string; children: ReactNode }) {
   const { admin, entitled } = useMoneyAccess();
-  if (!admin) return <NoAccess what={`${title} are managed by org admins.`} />;
+  if (!admin) return <NoAccess what={`${title} are managed by org admins and finance.`} />;
   if (!entitled)
     return (
       <>

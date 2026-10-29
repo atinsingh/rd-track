@@ -237,6 +237,10 @@ export interface InvoiceSummaryDTO {
   total_cents: number;
   issued_at: string | null;
   due_date: string | null;
+  /** Issued invoices: the day payment arrived (slice 4, G23). */
+  paid_on: string | null;
+  /** When it was last emailed to the client. */
+  sent_at: string | null;
   created_at: string;
 }
 export interface InvoiceDTO extends InvoiceSummaryDTO {
@@ -250,10 +254,23 @@ export interface InvoiceDTO extends InvoiceSummaryDTO {
   notes: string | null;
   voided_at: string | null;
   void_reason: string | null;
+  payment_note: string | null;
+  sent_to: string | null;
   lines: InvoiceLineDTO[];
   /** Draft only: time in the period that had no bill rate in the invoice currency. */
   unrated_seconds: number;
 }
+
+/** `POST /v1/admin/invoices/{id}/paid` */
+export const invoicePaidRequest = z.strictObject({
+  paid_on: isoDate,
+  note: z.string().max(500).optional(),
+});
+/** `POST /v1/admin/invoices/{id}/send`: emails the invoice to the client's contact, or to `to`. */
+export const invoiceSendRequest = z.strictObject({
+  to: z.email().max(320).optional(),
+  message: z.string().max(2000).optional(),
+});
 
 // ───────────────────────── payroll ─────────────────────────
 

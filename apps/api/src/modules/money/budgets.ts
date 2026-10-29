@@ -193,7 +193,7 @@ export async function checkBudget(deps: Pick<Deps, 'now'>, q: Queryable, b: Budg
     `SELECT pm.user_id AS id, true AS manages FROM project_memberships pm JOIN users u ON u.id = pm.user_id
      WHERE pm.organization_id = $1 AND pm.project_id = $2 AND pm.role = 'manager' AND pm.valid_to IS NULL AND u.status = 'active'
      UNION
-     SELECT id, false FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')
+     SELECT id, false FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin', 'finance')
        AND id NOT IN (SELECT user_id FROM project_memberships WHERE project_id = $2 AND role = 'manager' AND valid_to IS NULL)`,
     [b.organization_id, b.project_id],
   );

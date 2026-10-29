@@ -45,6 +45,8 @@ export function requireRole(req: FastifyRequest, roles: readonly OrgRole[]): Use
 
 export const ADMIN_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin'];
 export const AUDIT_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'auditor'];
+/** Money (rates, budgets, invoices, payroll): admins and the finance role (slice 4, G21). */
+export const MONEY_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'finance'];
 
 export function setSessionCookie(reply: FastifyReply, name: string, token: string, secure: boolean, maxAgeSec: number) {
   reply.setCookie(name, token, { httpOnly: true, secure, sameSite: 'strict', path: '/', maxAge: maxAgeSec });
