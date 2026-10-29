@@ -1,5 +1,6 @@
-import type { DomainEventType } from '@rd/contracts';
+import type { DomainEventType, WebhookEventType } from '@rd/contracts';
 import { many, one, type Queryable } from '../../db/pool';
+import { emitEvent } from '../webhooks/service';
 import { notify, type NotificationInput } from './notify';
 
 /**
@@ -44,7 +45,42 @@ export async function publish(q: Queryable, e: DomainEventInput): Promise<string
     dedupeKey: e.dedupeKey ?? null,
   };
   await notifyFor(q, event);
+  await webhookFor(q, event);
   return row.id;
+}
+
+/**
+ * Engine events that integrations can subscribe to. Payloads carry ids and dates only —
+ * never activity, app names or anything typed (INT-03).
+ */
+async function webhookFor(q: Queryable, e: DomainEvent): Promise<void> {
+  const d = e.data;
+  const who = { user_id: e.subjectUserId };
+  const send = (type: WebhookEventType, data: Record<string, unknown>) => emitEvent(q, e.organizationId, type, { ...who, ...data });
+  switch (e.type) {
+    case 'correction.submitted':
+      return void (await send('time_correction.submitted', { correction_id: d.correction_id }));
+    case 'correction.decided':
+      // Approvals are emitted by the corrections module with the approved times.
+      if (!d.approved) await send('time_correction.rejected', { correction_id: d.correction_id });
+      return;
+    case 'timesheet.submitted':
+      return void (await send('timesheet.submitted', { timesheet_id: d.timesheet_id, period_start: d.period_start }));
+    case 'timesheet.decided':
+      return void (await send(d.approved ? 'timesheet.approved' : 'timesheet.rejected', { timesheet_id: d.timesheet_id, period_start: d.period_start }));
+    case 'time_off.requested':
+      return void (await send('time_off.requested', { request_id: d.request_id, start_date: d.start_date, end_date: d.end_date }));
+    case 'time_off.decided':
+      return void (await send(d.approved ? 'time_off.approved' : 'time_off.rejected', { request_id: d.request_id, start_date: d.start_date, end_date: d.end_date }));
+    case 'user.invited':
+      return void (await send('user.invited', {}));
+    case 'user.deactivated':
+      return void (await send('user.deactivated', {}));
+    case 'device.revoked':
+      return void (await send('device.revoked', { device_id: d.device_id }));
+    default:
+      return;
+  }
 }
 
 // ───────────── who hears about it ─────────────
@@ -189,6 +225,53 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
         body: 'Agents stopped tracking and show a notice. Reports and exports stay readable. Choose a plan to resume.',
         link: '/admin/billing',
       });
+      return;
+    case 'timesheet.due_soon':
+      await send(subject, {
+        kind: 'timesheet_due',
+        category: 'my_requests',
+        title: `Your timesheet for the week of ${str(d.week_label)} is due ${str(d.due_label)}`,
+        body: 'Check the week and submit it for approval.',
+        link: '/me/time',
+      });
+      return;
+    case 'timesheet.overdue':
+      await send(subject, {
+        kind: 'timesheet_overdue',
+        category: 'my_requests',
+        title: `Your timesheet for the week of ${str(d.week_label)} is overdue`,
+        body: `It was due ${str(d.due_label)}. Submit it so your reviewer can approve it.`,
+        link: '/me/time',
+      });
+      return;
+    case 'timesheet.escalated': {
+      const names = Array.isArray(d.names) ? (d.names as string[]) : [];
+      const count = Number(d.count);
+      await send(subject, {
+        kind: 'timesheet_escalated',
+        category: 'approvals',
+        title: `${count} ${count === 1 ? 'timesheet is' : 'timesheets are'} overdue for the week of ${str(d.week_label)}`,
+        body: `${names.join(', ')}${count > names.length ? ` and ${count - names.length} more` : ''} haven't submitted yet.`,
+        link: str(d.link) || '/team',
+      });
+      return;
+    }
+    case 'device.stale':
+      await send(subject, {
+        kind: 'device_stale',
+        category: 'devices',
+        title: `${str(d.device_name)} hasn’t synced for a few working days`,
+        body: `Last seen ${day(d.last_seen_at)}. If you've been working on it, open Track so your time arrives. If you no longer use it, ask your org admin to remove it.`,
+        link: '/me',
+      });
+      return;
+    // Notified by their own modules (timesheet and time-off decisions, time-off requests);
+    // published for integrations and history.
+    case 'timesheet.decided':
+    case 'time_off.requested':
+    case 'time_off.decided':
+    case 'user.invited':
+    case 'user.deactivated':
       return;
   }
 }

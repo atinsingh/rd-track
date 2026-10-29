@@ -15,6 +15,7 @@ export type JobKind =
   | 'seats.snapshot'
   | 'notification.email'
   | 'billing.lifecycle'
+  | 'rules.run'
   | 'webhook.deliver'
   | 'time_off.accrue'
   | 'payroll.generate'

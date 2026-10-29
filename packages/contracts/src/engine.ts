@@ -19,6 +19,16 @@ export const DOMAIN_EVENT_TYPES = [
   'billing.payment_failed',
   'billing.grace_ending',
   'billing.inactive',
+  // Engine slice 3
+  'timesheet.decided',
+  'timesheet.due_soon',
+  'timesheet.overdue',
+  'timesheet.escalated',
+  'time_off.requested',
+  'time_off.decided',
+  'user.invited',
+  'user.deactivated',
+  'device.stale',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 
@@ -90,6 +100,62 @@ export const notificationPreferencesUpdate = z.strictObject({
     .min(1)
     .max(NOTIFICATION_CATEGORIES.length),
 });
+
+// ───────────── work items (engine slice 3) ─────────────
+
+/** What waits on the signed-in person as a reviewer; drives the nav badge. */
+export interface InboxCounts {
+  corrections: number;
+  timesheets: number;
+  time_off: number;
+  /** Org admins only. */
+  deletion_requests: number;
+  total: number;
+}
+
+export const TODO_KINDS = ['submit_timesheet', 'resubmit_timesheet', 'allow_permission', 'open_agent'] as const;
+export type TodoKind = (typeof TODO_KINDS)[number];
+
+/** Something the person themselves should do; computed, so it disappears once done. */
+export interface TodoDTO {
+  id: string;
+  kind: TodoKind;
+  title: string;
+  body: string;
+  link: string;
+  /** When it is due, if a rule sets one. */
+  due_at: string | null;
+  overdue: boolean;
+}
+export interface TodosResponse {
+  items: TodoDTO[];
+}
+
+// ───────────── rules (engine slice 3) ─────────────
+
+/**
+ * Timesheet deadline: a week's timesheet is due on `due_weekday` (1 = Monday) of the
+ * following week at `due_time`, in each person's own time zone. A reminder goes out the
+ * working day before; the person is told when it is overdue; reviewers get one digest
+ * `escalate_after_hours` later (0 = never). People with no tracked time that week are
+ * never chased.
+ */
+export interface TimesheetRule {
+  enabled: boolean;
+  due_weekday: number;
+  due_time: string;
+  escalate_after_hours: number;
+}
+export const DEFAULT_TIMESHEET_RULE: TimesheetRule = { enabled: false, due_weekday: 1, due_time: '10:00', escalate_after_hours: 24 };
+export const timesheetRuleUpdate = z.strictObject({
+  enabled: z.boolean(),
+  due_weekday: z.number().int().min(1).max(7),
+  due_time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  escalate_after_hours: z.number().int().min(0).max(168),
+});
+
+/** A computer that hasn't synced for this many working days gets a nudge to its owner. */
+export const DEVICE_STALE_WORKING_DAYS = 3;
 
 // ───────────── terms ─────────────
 

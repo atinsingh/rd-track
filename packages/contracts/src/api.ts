@@ -520,7 +520,7 @@ export interface Page<T> {
 
 // ───────────── Stage 4 F2: batch approvals ─────────────
 
-export const APPROVAL_TYPES = ['correction', 'timesheet', 'time_off'] as const;
+export const APPROVAL_TYPES = ['correction', 'timesheet', 'time_off', 'deletion_request'] as const;
 export type ApprovalType = (typeof APPROVAL_TYPES)[number];
 export const MAX_BATCH_APPROVALS = 100;
 

@@ -15,6 +15,7 @@ import { actionEmail } from '../../email/templates';
 import { hashPassword, randomToken, sha256Hex, verifyPassword } from '../../lib/crypto';
 import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { publish } from '../engine/events';
 import { notify } from '../engine/notify';
 import { isValidTimeZone } from '../scheduling/tz';
 import { mustUseMfa } from './service';
@@ -109,6 +110,7 @@ export async function inviteUser(deps: Deps, q: Queryable, p: { orgId: string; u
   const now = deps.now();
   const raw = await issueToken(q, { orgId: p.orgId, userId: p.userId, purpose: 'invite', ttlMs: INVITE_TTL_DAYS * 24 * HOUR, now, createdBy: p.invitedBy?.userId });
   await q.query('UPDATE users SET invited_at = $2 WHERE id = $1', [p.userId, now.toISOString()]);
+  await publish(q, { organizationId: p.orgId, type: 'user.invited', subjectUserId: p.userId, actorUserId: p.invitedBy?.userId ?? null });
   await audit(q, {
     organizationId: p.orgId,
     actor: p.invitedBy ?? { kind: 'system' },

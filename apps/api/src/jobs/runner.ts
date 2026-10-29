@@ -4,6 +4,7 @@ import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
 import { runBillingLifecycle, snapshotSeats } from '../modules/billing/service';
 import { publish } from '../modules/engine/events';
 import { sendNotificationEmail } from '../modules/engine/notify';
+import { runDeviceHealth, runTimesheetRules } from '../modules/engine/work';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
 import { checkAllBudgets } from '../modules/money/budgets';
@@ -75,6 +76,10 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'billing.lifecycle':
       await runBillingLifecycle(deps);
       return;
+    case 'rules.run':
+      await runTimesheetRules(deps);
+      await runDeviceHealth(deps);
+      return;
     default:
       throw new Error(`Unknown job kind ${job.kind}`);
   }
@@ -105,6 +110,7 @@ export async function scheduleRecurring(deps: Deps): Promise<void> {
     ['time_off.accrue', 6 * 3600_000],
     ['budgets.check', 600_000],
     ['billing.lifecycle', 3600_000],
+    ['rules.run', 3600_000],
   ];
   for (const [kind, everyMs] of schedule) {
     const r = await deps.pool.query(`SELECT 1 FROM jobs WHERE kind = $1 AND status IN ('queued', 'running') LIMIT 1`, [kind]);

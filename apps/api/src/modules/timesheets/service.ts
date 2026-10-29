@@ -609,6 +609,15 @@ export async function reviewTimesheet(
     reopen: `${actor.displayName}: “${note ?? ''}”. You can propose corrections for that week again, then resubmit.`,
   };
   await notify(q, actor.organizationId, row.user_id, titles[verb], bodies[verb]);
+  if (verb !== 'reopen') {
+    await publish(q, {
+      organizationId: actor.organizationId,
+      type: 'timesheet.decided',
+      subjectUserId: row.user_id,
+      actorUserId: actor.userId,
+      data: { timesheet_id: id, period_start: row.period_start, approved: verb === 'approve' },
+    });
+  }
   return buildDto(deps, q, actor, who, row.period_start, await one<SheetRow>(q, `${SHEET_SELECT} WHERE t.id = $1`, [id]));
 }
 

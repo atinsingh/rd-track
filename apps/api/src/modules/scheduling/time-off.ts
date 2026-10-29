@@ -19,6 +19,7 @@ import { SYSTEM_SCOPE, withScope } from '../../db/tenant-scope';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
+import { publish, reviewersOf } from '../engine/events';
 import { leaveHoursOn } from './attendance';
 import { entitlementsOf, getSettings, loadCalendars, notify, todayFor } from './service';
 import { daysBetween, eachDate } from './tz';
@@ -283,17 +284,18 @@ export async function createRequest(q: Queryable, actor: UserActor, input: z.inf
     [actor.organizationId, actor.userId, input.policy_id, input.start_date, input.end_date, input.partial_hours ?? null, hours, input.reason?.trim() || null],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'time_off_request.create', targetType: 'time_off_request', targetId: r!.id, targetUserId: actor.userId, requestId });
-  // Tell the people who can approve it: the person's current team managers.
-  const managers = await many<{ user_id: string }>(
-    q,
-    `SELECT DISTINCT m.user_id FROM team_memberships m JOIN team_memberships t ON t.team_id = m.team_id
-     WHERE t.user_id = $1 AND t.valid_to IS NULL AND m.role = 'manager' AND m.valid_to IS NULL AND m.user_id <> $1`,
-    [actor.userId],
-  );
+  // Tell the people who can approve it: the person's team managers, or the org admins when there are none.
   const span = input.start_date === input.end_date ? input.start_date : `${input.start_date} – ${input.end_date}`;
-  for (const m of managers) {
-    await notify(q, actor.organizationId, m.user_id, 'time_off_request', `Time off request from ${actor.displayName}`, `${span} · ${hours} h. Review it in Approvals.`);
+  for (const reviewer of await reviewersOf(q, actor.organizationId, actor.userId)) {
+    await notify(q, actor.organizationId, reviewer, 'time_off_request', `Time off request from ${actor.displayName}`, `${span} · ${hours} h. Review it in Approvals.`);
   }
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'time_off.requested',
+    subjectUserId: actor.userId,
+    actorUserId: actor.userId,
+    data: { request_id: r!.id, start_date: input.start_date, end_date: input.end_date },
+  });
   return getRequest(q, r!.id);
 }
 
@@ -361,6 +363,13 @@ export async function reviewRequest(q: Queryable, actor: UserActor, id: string, 
     approve ? 'Time off approved' : 'Time off not approved',
     `${span}${note?.trim() ? ` · “${note.trim()}”` : ''}`,
   );
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'time_off.decided',
+    subjectUserId: r.user_id,
+    actorUserId: actor.userId,
+    data: { request_id: id, start_date: r.start_date, end_date: r.end_date, approved: approve },
+  });
   return getRequest(q, id);
 }
 

@@ -6,6 +6,7 @@ import { hashPassword } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { inviteUser } from '../auth/identity';
+import { publish } from '../engine/events';
 import { assertSeatAvailable } from '../billing/service';
 
 const USER_SELECT = `
@@ -139,6 +140,7 @@ export async function deactivateUser(deps: Deps, q: Queryable, actor: UserActor,
     requestId,
     metadata: { stopped_sessions: open.length },
   });
+  await publish(q, { organizationId: actor.organizationId, type: 'user.deactivated', subjectUserId: id, actorUserId: actor.userId });
   return getUser(q, actor.organizationId, id);
 }
 

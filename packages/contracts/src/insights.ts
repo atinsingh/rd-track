@@ -87,7 +87,23 @@ export interface AppCategoryDTO {
 
 // ───────────── outbound webhooks (INT-03) ─────────────
 
-export const WEBHOOK_EVENTS = ['session.started', 'session.stopped', 'time_correction.approved', 'export.ready'] as const;
+export const WEBHOOK_EVENTS = [
+  'session.started',
+  'session.stopped',
+  'time_correction.submitted',
+  'time_correction.approved',
+  'time_correction.rejected',
+  'timesheet.submitted',
+  'timesheet.approved',
+  'timesheet.rejected',
+  'time_off.requested',
+  'time_off.approved',
+  'time_off.rejected',
+  'user.invited',
+  'user.deactivated',
+  'device.revoked',
+  'export.ready',
+] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
 
 export const webhookCreateRequest = z.strictObject({
