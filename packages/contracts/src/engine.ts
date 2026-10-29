@@ -29,6 +29,8 @@ export const DOMAIN_EVENT_TYPES = [
   'user.invited',
   'user.deactivated',
   'device.stale',
+  // Slice 5a
+  'support_grant.requested',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 

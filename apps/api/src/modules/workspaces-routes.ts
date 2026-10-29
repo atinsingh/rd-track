@@ -7,8 +7,10 @@ import {
   type DeviceDTO,
   type EnrollmentCodeResponse,
   type MoneyOverview,
+  type SupportGrantDTO,
 } from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
 import type { Config } from '../config';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
@@ -19,6 +21,7 @@ import { audit, listAudit } from './audit/service';
 import { createEnrollmentCode, listDevices } from './devices/service';
 import { adminOverview, auditPeople, moneyOverview } from './engine/workspaces';
 import { assertMoneyPlan } from './money/time';
+import { decideGrant, endGrant, listGrants } from './platform/support';
 
 /**
  * Installer links for the published agent version (G10). File names are the Tauri bundler's,
@@ -49,6 +52,23 @@ export async function workspacesRoutes(app: FastifyInstance, deps: Deps) {
     const a = requireRole(req, MONEY_ROLES);
     await assertMoneyPlan(deps, pool, a.organizationId);
     return moneyOverview(deps, pool, a);
+  });
+
+  // ───────── support access the tenant approves (G2) ─────────
+  app.get('/v1/admin/support-grants', user, async (req): Promise<{ items: SupportGrantDTO[] }> => ({
+    items: await listGrants(deps, pool, { orgId: requireRole(req, ADMIN_ROLES).organizationId }),
+  }));
+  app.post<{ Params: { id: string } }>('/v1/admin/support-grants/:id/approve', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    return withTx(pool, (tx) => decideGrant(deps, tx, a, parse(z.uuid(), req.params.id), true, req.id));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/support-grants/:id/deny', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    return withTx(pool, (tx) => decideGrant(deps, tx, a, parse(z.uuid(), req.params.id), false, req.id));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/support-grants/:id/end', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    return withTx(pool, (tx) => endGrant(deps, tx, { actor: a, side: 'tenant' }, parse(z.uuid(), req.params.id), req.id));
   });
 
   // ───────── getting the agent (G10, G12) ─────────

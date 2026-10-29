@@ -1,6 +1,7 @@
 import type {
   AccountSecurity,
   InviteInfo,
+  SupportGrantDTO,
   AgentDownloadsResponse,
   AdminProjectDTO,
   UserImportResponse,
@@ -480,6 +481,10 @@ export const rd = {
     approveDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/approve`)),
     rejectDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/reject`)),
     overview: (signal?: AbortSignal) => get<AdminOverview>('/v1/admin/overview', { signal }),
+    supportGrants: (signal?: AbortSignal) => list<SupportGrantDTO>('/v1/admin/support-grants', { signal }),
+    approveSupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/approve`),
+    denySupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/deny`),
+    endSupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/end`),
     timesheetRule: (signal?: AbortSignal) => get<TimesheetRule>('/v1/admin/timesheet-rule', { signal }),
     setTimesheetRule: (rule: TimesheetRule) => put<TimesheetRule>('/v1/admin/timesheet-rule', rule),
     appCategories: (signal?: AbortSignal) => list<AppCategoryDTO>('/v1/admin/app-categories', { signal }),

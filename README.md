@@ -48,6 +48,12 @@ The seed prints demo sign-ins (password `track-demo-2026`): an org admin, a team
 (Priya), employees, an auditor and a finance user, with a week of synthetic sessions. Each lands on
 their own home: My day, Team today, Setup and health, Period close or the audit log.
 
+RoundDigital operators use a separate console at `/platform` (own login, TOTP always).
+Create one with `pnpm --filter @rd/api platform:create-admin -- ops@example.com "Name"`.
+Operators manage organizations, plans and seats; reading an organization's setup needs
+support access its admins approve under Settings › Support access, and every read lands
+in that organization's audit log.
+
 Run a desktop agent against it (simulated input — native collectors come next):
 
 ```bash

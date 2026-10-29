@@ -36,7 +36,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | ID | Persona | Gap | Effort | Pri |
 |---|---|---|---|---|
 | G1 | Operator | Tenant creation returns the tenant admin's password to the operator | S | P0 |
-| G2 | Operator | Support grants: no request, approval, expiry or tenant-side audit | M | P0 |
+| G2 | Operator | Support grants: no request, approval, expiry or tenant-side audit — **done** | M | P0 |
 | G3 | All | No forgot / reset password | S | P0 |
 | G4 | Admin | No invite flow; admins hand over a one-time password, never forced to change | M | P0 |
 | G5 | Admin | Mandatory admin MFA with no recovery codes and no admin reset | S | P0 |
@@ -169,6 +169,18 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
 5. **Platform console and data lifecycle.** The operator console (`/platform`) with
    support grants end to end, tenant offboarding with export and deletion certificate,
    employee data export and erasure (G2, G17, G18). Then SSO / SCIM (G26).
+
+   **5a done 2026-10-29**: the operator console at `/platform` (its own sign-in, TOTP
+   every time) lists organizations by state with health counts only (people, connected
+   computers, agent versions, last sync), creates organizations (the first admin is
+   invited) and edits plans and seats. Support access (migration 014): an operator asks
+   with a reason and up to 72 hours; the organization's admins are notified (security,
+   can't be muted) and approve or decline under Settings › Support access; approval
+   starts the clock, and either side can end it. While open, the operator can read
+   people, teams, computers, policies and the audit log — never activity, apps,
+   screenshots, time or money — and each section they open is written to the
+   organization's audit log as “RoundDigital support · name”. Next: 5b tenant export
+   and closing an account, 5c employee data export and erasure.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

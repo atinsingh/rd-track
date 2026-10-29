@@ -1,15 +1,28 @@
-import { PLAN_IDS, TRIAL_DAYS, loginRequest, mfaVerifyRequest } from '@rd/contracts';
+import {
+  DEVICE_STALE_WORKING_DAYS,
+  PLAN_IDS,
+  SUPPORT_SECTIONS,
+  TRIAL_DAYS,
+  loginRequest,
+  mfaVerifyRequest,
+  supportGrantRequest,
+  type PlatformMe,
+  type PlatformTenantDetail,
+  type PlatformTenantDTO,
+} from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Deps, PlatformActor } from '../../context';
 import { many, one, withTx, type Queryable } from '../../db/pool';
-import { PLATFORM_COOKIE, platformOf, setSessionCookie } from '../../http';
+import { PLATFORM_COOKIE, clearSessionCookie, platformOf, setSessionCookie } from '../../http';
 import { decryptSecret, hashPassword, randomToken, sha256Hex, verifyPassword, verifyTotp } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { parse } from '../../lib/validate';
 import { audit } from '../audit/service';
 import { inviteUser } from '../auth/identity';
 import { seatCounts } from '../billing/service';
+import { workingDaysBetween } from '../engine/work';
+import { endGrant, grantState, listGrants, requestGrant, supportRead } from './support';
 
 /**
  * Vendor operator realm (commercial model §5). Operators manage tenants and
@@ -136,16 +149,68 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true };
   });
 
-  app.get('/platform/v1/organizations', platform, async (req) => {
+  app.get('/platform/v1/me', platform, async (req): Promise<PlatformMe> => {
+    const p = platformOf(req);
+    const a = await one<{ id: string; email: string; display_name: string }>(pool, 'SELECT id, email, display_name FROM platform_admins WHERE id = $1', [p.platformAdminId]);
+    return { ...a!, mfa_verified: p.mfaVerified };
+  });
+  app.post('/platform/v1/auth/logout', platform, async (req, reply) => {
+    await pool.query('UPDATE platform_sessions SET revoked_at = now() WHERE token_hash = $1', [sha256Hex(req.cookies[PLATFORM_COOKIE] ?? '')]);
+    clearSessionCookie(reply, PLATFORM_COOKIE);
+    return { ok: true };
+  });
+
+  /** Tenants by state, with health counts only (slice 5a). */
+  app.get('/platform/v1/organizations', platform, async (req): Promise<{ items: PlatformTenantDTO[] }> => {
     verified(req);
-    const orgs = await many<{ id: string; name: string; slug: string; region: string; plan: string; status: string; seats: number; created_at: string }>(
+    return { items: await tenants(deps, pool) };
+  });
+  app.get<{ Params: { id: string } }>('/platform/v1/organizations/:id', platform, async (req): Promise<PlatformTenantDetail> => {
+    verified(req);
+    const id = parse(z.uuid(), req.params.id);
+    const t = (await tenants(deps, pool, id))[0];
+    if (!t) throw errors.notFound('Organization');
+    const sub = await one<{ price_per_seat_cents: number | null; billing_interval: 'month' | 'year'; current_period_end: string | null }>(
       pool,
-      `SELECT o.id, o.name, o.slug, o.region, s.plan, s.status, s.seats, o.created_at
-       FROM organizations o JOIN subscriptions s ON s.organization_id = o.id ORDER BY o.created_at DESC`,
+      'SELECT price_per_seat_cents, billing_interval, current_period_end FROM subscriptions WHERE organization_id = $1',
+      [id],
     );
-    const items = [];
-    for (const o of orgs) items.push({ ...o, ...(await seatCounts(pool, o.id)) });
-    return { items };
+    const devices = await many<{ agent_version: string; last_seen_at: string | null }>(
+      pool,
+      `SELECT agent_version, last_seen_at FROM devices WHERE organization_id = $1 AND credential_status = 'active'`,
+      [id],
+    );
+    const versions = new Map<string, number>();
+    for (const d of devices) versions.set(d.agent_version, (versions.get(d.agent_version) ?? 0) + 1);
+    const now = deps.now().getTime();
+    return {
+      ...t,
+      ...sub!,
+      devices_stale: devices.filter((d) => d.last_seen_at && workingDaysBetween(Date.parse(d.last_seen_at), now) >= DEVICE_STALE_WORKING_DAYS).length,
+      agent_versions: [...versions].map(([version, count]) => ({ version, count })).sort((a, b) => b.count - a.count),
+      grants: await listGrants(deps, pool, { orgId: id, limit: 50 }),
+    };
+  });
+
+  // ───────── support grants (G2) ─────────
+  app.get('/platform/v1/support-grants', platform, async (req) => {
+    verified(req);
+    return { items: await listGrants(deps, pool) };
+  });
+  app.post<{ Params: { id: string } }>('/platform/v1/organizations/:id/support-grants', platform, async (req, reply) => {
+    const actor = verified(req);
+    const body = parse(supportGrantRequest, req.body);
+    return reply.code(201).send(await withTx(pool, (tx) => requestGrant(deps, tx, actor, parse(z.uuid(), req.params.id), body)));
+  });
+  app.post<{ Params: { id: string } }>('/platform/v1/support-grants/:id/end', platform, async (req) => {
+    const actor = verified(req);
+    return withTx(pool, (tx) => endGrant(deps, tx, { actor, side: 'operator' }, parse(z.uuid(), req.params.id)));
+  });
+  /** Configuration reads under an active grant, each one audited in the tenant's log. */
+  app.get<{ Params: { id: string; section: string } }>('/platform/v1/organizations/:id/support/:section', platform, async (req) => {
+    const actor = verified(req);
+    const section = parse(z.enum(SUPPORT_SECTIONS), req.params.section);
+    return withTx(pool, (tx) => supportRead(deps, tx, actor, parse(z.uuid(), req.params.id), section));
   });
 
   app.post('/platform/v1/organizations', platform, async (req, reply) => {
@@ -191,6 +256,35 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
       return r;
     });
   });
+}
+
+async function tenants(deps: Pick<Deps, 'now'>, q: Queryable, onlyId?: string): Promise<PlatformTenantDTO[]> {
+  const rows = await many<Omit<PlatformTenantDTO, 'support_active' | 'support_pending' | 'billable_seats' | 'viewer_seats'> & { grants: { status: 'pending' | 'approved' | 'denied' | 'ended'; expires_at: string | null }[] }>(
+    q,
+    `SELECT o.id, o.name, o.slug, o.region, s.plan, s.status, s.seats, s.trial_ends_at, s.grace_ends_at, o.created_at,
+       (SELECT count(*)::int FROM users u WHERE u.organization_id = o.id AND u.status = 'active') AS people,
+       (SELECT count(*)::int FROM devices d WHERE d.organization_id = o.id AND d.credential_status = 'active') AS devices,
+       (SELECT max(d.last_sync_at) FROM devices d WHERE d.organization_id = o.id) AS last_sync_at,
+       COALESCE((SELECT json_agg(json_build_object('status', g.status, 'expires_at', g.expires_at))
+                 FROM support_access_grants g WHERE g.organization_id = o.id AND g.status IN ('pending', 'approved')), '[]') AS grants
+     FROM organizations o JOIN subscriptions s ON s.organization_id = o.id
+     WHERE ($1::uuid IS NULL OR o.id = $1)
+     ORDER BY o.created_at DESC`,
+    [onlyId ?? null],
+  );
+  const now = deps.now().getTime();
+  const out: PlatformTenantDTO[] = [];
+  for (const { grants, ...r } of rows) {
+    const seats = await seatCounts(q, r.id);
+    out.push({
+      ...r,
+      billable_seats: seats.billable,
+      viewer_seats: seats.viewer,
+      support_active: grants.some((g) => grantState(g, now) === 'active'),
+      support_pending: grants.some((g) => g.status === 'pending'),
+    });
+  }
+  return out;
 }
 
 export async function createPlatformAdmin(q: Queryable, email: string, name: string, password: string, mfaSecretEnc: string) {

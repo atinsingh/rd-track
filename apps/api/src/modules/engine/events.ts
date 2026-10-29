@@ -188,6 +188,17 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
         link: '/me',
       });
       return;
+    case 'support_grant.requested': {
+      const hours = Number(d.hours);
+      await send(await orgAdmins(q, e.organizationId), {
+        kind: 'support_request',
+        category: 'security',
+        title: 'RoundDigital support asks to look at your setup',
+        body: `${str(d.operator_name)} asked for ${hours} ${hours === 1 ? 'hour' : 'hours'} of read-only access to your configuration (people, teams, devices, policies, audit log; never activity or screenshots): “${str(d.reason)}”. Approve or decline in Support access.`,
+        link: '/admin/support',
+      });
+      return;
+    }
     case 'billing.trial_ending': {
       const days = Number(d.days_left);
       await send(await orgAdmins(q, e.organizationId), {

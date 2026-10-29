@@ -168,6 +168,7 @@ const GROUPS: NavGroup[] = [
     label: 'Settings',
     items: [
       { href: '/admin/billing', label: 'Plan and billing', capability: 'admin', keywords: 'seats subscription upgrade' },
+      { href: '/admin/support', label: 'Support access', capability: 'admin', keywords: 'rounddigital help grant operator' },
       { href: '/admin/webhooks', label: 'Webhooks', capability: 'webhooks', keywords: 'developers integrations api' },
       { href: '/audit', label: 'Audit log', capability: 'audit', keywords: 'history security' },
     ],

@@ -11,7 +11,11 @@ const nextConfig: NextConfig = {
   // Proxy the API through this origin so the HttpOnly session cookie stays first-party
   // (SameSite=Strict) and the browser never talks to the API host directly.
   async rewrites() {
-    return [{ source: '/v1/:path*', destination: `${apiUrl}/v1/:path*` }];
+    return [
+      { source: '/v1/:path*', destination: `${apiUrl}/v1/:path*` },
+      // The operator realm (separate cookie and login), for the /platform console.
+      { source: '/platform/v1/:path*', destination: `${apiUrl}/platform/v1/:path*` },
+    ];
   },
   async headers() {
     return [

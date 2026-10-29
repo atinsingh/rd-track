@@ -11,3 +11,4 @@ export * from './money';
 export * from './engine';
 export * from './identity';
 export * from './workspaces';
+export * from './platform';
