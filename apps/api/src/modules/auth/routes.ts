@@ -90,12 +90,8 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.post('/v1/auth/email-change/confirm', limited, async (req) => {
     const { token } = parse(emailChangeConfirm, req.body);
-    const { old, next } = await withTx(pool, (tx) => identity.confirmEmailChange(deps, tx, token, req.id));
-    await deps.email.send({
-      to: old,
-      subject: 'Your RoundDigital Track email was changed',
-      text: `You now sign in with ${next}. If this wasn't you, contact your org admin now.\n`,
-    });
+    const { old, next, l } = await withTx(pool, (tx) => identity.confirmEmailChange(deps, tx, token, req.id));
+    await deps.email.send({ to: old, subject: l.t('emailChanged.subject'), text: l.t('emailChanged.text', { email: next }) });
     return { ok: true };
   });
 

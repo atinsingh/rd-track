@@ -11,6 +11,7 @@ import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 type Period = 'week' | 'four_weeks';
 
@@ -27,19 +28,19 @@ export default function MyInsightsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Insights"
-        title="Insights"
-        description="Focus time, working hours and breaks, worked out from your own activity. Per-person insights are visible to you only."
+        eyebrow={t('ins.eyebrow')}
+        title={t('ins.title')}
+        description={t('ins.description')}
         actions={
           <>
             <Segmented<Period>
-              legend="Period"
+              legend={t('ins.period')}
               name="period"
               value={period}
               onChange={setPeriod}
               options={[
-                { value: 'week', label: 'Week' },
-                { value: 'four_weeks', label: '4 weeks' },
+                { value: 'week', label: t('ins.week') },
+                { value: 'four_weeks', label: t('ins.fourWeeks') },
               ]}
             />
             <DateSwitcher
@@ -53,16 +54,15 @@ export default function MyInsightsPage() {
               label={`${formatDayMonth(start)} – ${formatDayMonth(addDays(start, days - 1))}`}
             />
             <ButtonLink href={`/print/insights?${new URLSearchParams({ start, days: String(days), tz })}`} target="_blank" rel="noopener">
-              Save as PDF
+              {t('ins.savePdf')}
             </ButtonLink>
           </>
         }
       />
       <Banner tag="NOTE">
-        A focus block is 30 minutes or more of continuous activity in one session. Quiet minutes (reading, thinking) don&apos;t break it,
-        and minutes without input permission never count. Computer activity is not a measure of performance.
+        {t('ins.note')}
       </Banner>
-      <Resource {...insights} label="Working out your insights">
+      <Resource {...insights} label={t('ins.loading')}>
         {(d) => (
           <>
             <Wellbeing d={d} />

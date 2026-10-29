@@ -1,7 +1,7 @@
 import { languageOf, SSO_ERRORS, type AppLanguage, type AppLocale, type SsoErrorCode } from '@rd/contracts';
 import { en, type MessageKey } from './messages/en';
 import { fr } from './messages/fr';
-import { currentLanguage, useLocale } from './locale';
+import { currentLanguage, currentLocale, useLocale } from './locale';
 
 /**
  * Translations (G27). English is the source; every other language must have every key
@@ -36,3 +36,9 @@ export type { MessageKey };
 
 /** Why a sign-in through the identity provider failed, in the reader's language. */
 export const ssoErrorText = (tr: Translate, code: SsoErrorCode): string => (code in SSO_ERRORS ? tr(`sso.error.${code}` as MessageKey) : '');
+
+/** The `one` or `other` form for `n`, by the language's own rule (French counts 0 as one). */
+export function tPlural(n: number, one: MessageKey, other: MessageKey, vars?: Vars): string {
+  const form = new Intl.PluralRules(currentLocale()).select(n);
+  return t(form === 'one' ? one : other, { n, ...vars });
+}

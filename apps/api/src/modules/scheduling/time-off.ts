@@ -24,6 +24,7 @@ import { publish, reviewersOf } from '../engine/events';
 import { leaveHoursOn } from './attendance';
 import { entitlementsOf, getSettings, loadCalendars, notify, todayFor } from './service';
 import { daysBetween, eachDate } from './tz';
+import type { Lang } from '../../i18n';
 
 /**
  * Time off: policies with accrual, per-person assignments, requests reviewed by the
@@ -183,7 +184,10 @@ export async function adjustBalance(deps: Pick<Deps, 'now'>, q: Queryable, actor
     requestId,
     metadata: { hours: input.hours },
   });
-  await notify(q, actor.organizationId, input.user_id, 'time_off_adjustment', 'Your time-off balance changed', `${input.hours > 0 ? '+' : ''}${input.hours} h: ${input.note}`);
+  await notify(q, actor.organizationId, input.user_id, 'time_off_adjustment',
+    (l) => l.t('timeoff.balance.title'),
+    (l) => l.t('timeoff.balance.body', { hours: `${input.hours > 0 ? '+' : ''}${l.number(input.hours)}`, note: input.note }),
+  );
   return (await listAssignments(q, actor.organizationId, { policyId: input.policy_id, userId: input.user_id }))[0]!;
 }
 
@@ -287,9 +291,16 @@ export async function createRequest(q: Queryable, actor: UserActor, input: z.inf
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'time_off_request.create', targetType: 'time_off_request', targetId: r!.id, targetUserId: actor.userId, requestId });
   // Tell the people who can approve it: the person's team managers, or the org admins when there are none.
-  const span = input.start_date === input.end_date ? input.start_date : `${input.start_date} – ${input.end_date}`;
+  const span = (l: Lang) => (input.start_date === input.end_date ? l.day(input.start_date) : `${l.day(input.start_date)} – ${l.day(input.end_date)}`);
   for (const reviewer of await reviewersOf(q, actor.organizationId, actor.userId)) {
-    await notify(q, actor.organizationId, reviewer, 'time_off_request', `Time off request from ${actor.displayName}`, `${span} · ${hours} h. Review it in Approvals.`);
+    await notify(
+      q,
+      actor.organizationId,
+      reviewer,
+      'time_off_request',
+      (l) => l.t('timeoff.request.title', { name: actor.displayName }),
+      (l) => l.t('timeoff.request.body', { span: span(l), hours: l.number(hours) }),
+    );
   }
   await publish(q, {
     organizationId: actor.organizationId,
@@ -356,14 +367,14 @@ export async function reviewRequest(q: Queryable, actor: UserActor, id: string, 
     targetUserId: r.user_id,
     requestId,
   });
-  const span = r.start_date === r.end_date ? r.start_date : `${r.start_date} – ${r.end_date}`;
+  const span = (l: Lang) => (r.start_date === r.end_date ? l.day(r.start_date) : `${l.day(r.start_date)} – ${l.day(r.end_date)}`);
   await notify(
     q,
     actor.organizationId,
     r.user_id,
     'time_off_review',
-    approve ? 'Time off approved' : 'Time off not approved',
-    `${span}${note?.trim() ? ` · “${note.trim()}”` : ''}`,
+    (l) => (approve ? l.t('timeoff.approved.title') : l.t('timeoff.denied.title')),
+    (l) => (note?.trim() ? l.t('timeoff.note', { span: span(l), note: note.trim() }) : span(l)),
   );
   await publish(q, {
     organizationId: actor.organizationId,

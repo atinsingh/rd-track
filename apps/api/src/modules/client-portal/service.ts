@@ -16,6 +16,7 @@ import { hashPassword, randomToken, sha256Hex, verifyPassword } from '../../lib/
 import { AppError, errors } from '../../lib/errors';
 import { projectReport } from '../activity/queries';
 import { audit } from '../audit/service';
+import { langOfOrg } from '../../i18n';
 import { logoUrl, orgLocale } from '../branding/service';
 import { listBudgets } from '../money/budgets';
 import { getInvoice } from '../money/invoices';
@@ -75,17 +76,19 @@ async function issueLink(deps: Deps, q: Queryable, contactId: string, orgId: str
      RETURNING client_contacts.email, client_contacts.display_name, cl.name AS client_name, o.name AS org_name, client_contacts.password_hash IS NULL AS first`,
     [contactId, orgId, sha256Hex(raw), new Date(now.getTime() + LINK_DAYS * 86_400_000).toISOString(), now.toISOString(), actor.userId],
   );
+  // A client of the agency: the agency's language (G27).
+  const l = await langOfOrg(q, orgId);
+  const vars = { org: c!.org_name, client: c!.client_name, name: actor.displayName };
   return actionEmail({
+    l,
     to: c!.email,
     orgName: c!.org_name,
-    title: c!.first ? `${c!.org_name} shared its work for ${c!.client_name} with you` : `Choose a new password for ${c!.org_name}'s client portal`,
-    body: c!.first
-      ? `${actor.displayName} at ${c!.org_name} gave you read-only access to the hours, budgets and invoices for ${c!.client_name}'s projects. Choose a password to sign in.`
-      : `Use this link to choose a new password for the client portal.`,
-    actionLabel: c!.first ? 'Choose a password' : 'Choose a new password',
+    title: c!.first ? l.t('portal.firstTitle', vars) : l.t('portal.againTitle', vars),
+    body: c!.first ? l.t('portal.firstBody', vars) : l.t('portal.againBody'),
+    actionLabel: c!.first ? l.t('portal.firstAction') : l.t('portal.againAction'),
     url: `${deps.config.webUrl}/client/link?token=${raw}`,
-    expires: `in ${LINK_DAYS} days`,
-    ignore: "If you weren't expecting it, you can ignore this email.",
+    expires: l.t('email.inDays', { n: LINK_DAYS }),
+    ignore: l.t('invite.ignore'),
   });
 }
 

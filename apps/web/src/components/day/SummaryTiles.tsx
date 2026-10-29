@@ -2,7 +2,7 @@ import type { ActivityTotals, SessionDTO } from '@rd/contracts';
 import { activityPercent } from '@rd/contracts';
 import { ActivityInfo } from '@/components/ui/ActivityInfo';
 import { formatDuration, formatPercent } from '@/lib/format';
-import { t } from '@/lib/i18n';
+import { t, tPlural } from '@/lib/i18n';
 import s from './day.module.css';
 
 export function SummaryTiles({
@@ -29,7 +29,7 @@ export function SummaryTiles({
         <span className={s.tileLabel}>{t('tiles.tracked')}</span>
         <span className={s.tileValue}>{formatDuration(tracked)}</span>
         <span className={s.tileSub}>
-          {t(agentSessions.length === 1 ? 'tiles.sessions.one' : 'tiles.sessions.other', { n: agentSessions.length })}
+          {tPlural(agentSessions.length, 'tiles.sessions.one', 'tiles.sessions.other')}
           {projects.length ? ` · ${projects.slice(0, 2).join(', ')}${projects.length > 2 ? '…' : ''}` : ''}
         </span>
       </div>
@@ -46,7 +46,7 @@ export function SummaryTiles({
       <div className={s.tile}>
         <span className={s.tileLabel}>{t('tiles.manual')}</span>
         <span className={s.tileValue}>{formatDuration(manual)}</span>
-        <span className={s.tileSub}>{manualSessions.length ? t(manualSessions.length === 1 ? 'tiles.entries.one' : 'tiles.entries.other', { n: manualSessions.length }) : t('tiles.noManual')}</span>
+        <span className={s.tileSub}>{manualSessions.length ? tPlural(manualSessions.length, 'tiles.entries.one', 'tiles.entries.other') : t('tiles.noManual')}</span>
       </div>
       <div className={s.tile}>
         <span className={s.tileLabel}>{t('tiles.notMeasured')}</span>

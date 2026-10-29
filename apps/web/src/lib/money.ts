@@ -1,5 +1,6 @@
 import type { BudgetStatus, InvoiceStatus, PayrollAdjustmentDTO } from '@rd/contracts';
 import { formatMoney, formatNumber, formatPercent } from './format';
+import { t } from './i18n';
 import { currentLocale } from './locale';
 import { formatDayLabel } from './time';
 
@@ -100,7 +101,7 @@ export function latestBy<T extends { effective_from: string }>(rows: readonly T[
 
 /** "Once, in the pay period with Thu 15 Oct 2026" / "Every pay period from Tue 1 Sep 2026 until Sat 31 Oct 2026" (F8). */
 export function adjustmentWhen(a: Pick<PayrollAdjustmentDTO, 'recurrence' | 'effective_from' | 'effective_to'>): string {
-  if (a.recurrence === 'once') return `Once, in the pay period with ${formatDayLabel(a.effective_from)}`;
-  return `Every pay period from ${formatDayLabel(a.effective_from)}${a.effective_to ? ` until ${formatDayLabel(a.effective_to)}` : ''}`;
+  if (a.recurrence === 'once') return t('pay.once', { date: formatDayLabel(a.effective_from) });
+  return `${t('pay.every', { date: formatDayLabel(a.effective_from) })}${a.effective_to ? t('pay.until', { date: formatDayLabel(a.effective_to) }) : ''}`;
 }
 

@@ -10,6 +10,7 @@ import {
 import type { Deps } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { notificationEmail } from '../../email/templates';
+import { lang, localesOf, render, SERVER_DEFAULT_LOCALE, type Localized } from '../../i18n';
 import { enqueue } from '../../jobs/queue';
 
 /**
@@ -21,8 +22,9 @@ import { enqueue } from '../../jobs/queue';
 export interface NotificationInput {
   kind: string;
   category: NotificationCategory;
-  title: string;
-  body: string;
+  /** Written for each person in their language (G27); a plain string is the same for everyone. */
+  title: Localized;
+  body: Localized;
   /** In-app path to act on it. */
   link?: string | null;
   /** The domain event behind it: one notification per person per event. */
@@ -47,16 +49,18 @@ export async function notify(q: Queryable, orgId: string, userIds: Iterable<stri
      WHERE u.organization_id = $1 AND u.id = ANY($2::uuid[]) AND u.status = 'active'`,
     [orgId, ids, n.category],
   );
+  const locales = await localesOf(q, people.map((p) => p.id));
   let sent = 0;
   for (const p of people) {
     const pref = effective(n.category, p.in_app === null ? undefined : { in_app: p.in_app, email: p.email! });
     if (!pref.in_app && !pref.email) continue;
+    const l = lang(locales.get(p.id) ?? SERVER_DEFAULT_LOCALE);
     const row = await one<{ id: string }>(
       q,
       `INSERT INTO notifications (organization_id, user_id, kind, category, title, body, link, event_id, in_app)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        ON CONFLICT (event_id, user_id) WHERE event_id IS NOT NULL DO NOTHING RETURNING id`,
-      [orgId, p.id, n.kind, n.category, n.title, n.body, n.link ?? null, n.eventId ?? null, pref.in_app],
+      [orgId, p.id, n.kind, n.category, render(n.title, l), render(n.body, l), n.link ?? null, n.eventId ?? null, pref.in_app],
     );
     if (!row) continue;
     if (pref.email) await enqueue(q, 'notification.email', { notification_id: row.id }, { organizationId: orgId, maxAttempts: 6 });
@@ -67,15 +71,16 @@ export async function notify(q: Queryable, orgId: string, userIds: Iterable<stri
 
 /** Worker: sends one notification's email once. Throws to let the queue retry. */
 export async function sendNotificationEmail(deps: Deps, q: Queryable, notificationId: string): Promise<void> {
-  const n = await one<{ title: string; body: string; link: string | null; category: NotificationCategory; email: string; org_name: string }>(
+  const n = await one<{ title: string; body: string; link: string | null; category: NotificationCategory; email: string; org_name: string; user_id: string }>(
     q,
-    `SELECT n.title, n.body, n.link, n.category, u.email, o.name AS org_name
+    `SELECT n.title, n.body, n.link, n.category, u.email, o.name AS org_name, u.id AS user_id
      FROM notifications n JOIN users u ON u.id = n.user_id JOIN organizations o ON o.id = n.organization_id
      WHERE n.id = $1 AND n.emailed_at IS NULL AND u.status = 'active'`,
     [notificationId],
   );
   if (!n) return;
-  await deps.email.send(notificationEmail({ to: n.email, orgName: n.org_name, title: n.title, body: n.body, link: n.link, category: n.category, webUrl: deps.config.webUrl }));
+  const l = lang((await localesOf(q, [n.user_id])).get(n.user_id) ?? SERVER_DEFAULT_LOCALE);
+  await deps.email.send(notificationEmail({ to: n.email, orgName: n.org_name, title: n.title, body: n.body, link: n.link, category: n.category, webUrl: deps.config.webUrl, l }));
   await q.query('UPDATE notifications SET emailed_at = now() WHERE id = $1', [notificationId]);
 }
 

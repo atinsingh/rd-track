@@ -17,6 +17,7 @@ import { notify } from '../engine/notify';
 import { orgAdmins } from '../engine/events';
 import { personFiles } from './person';
 import { tableCsv } from './tables';
+import type { Lang } from '../../i18n';
 
 /**
  * Data lifecycle (slice 5b, G17): an organization's own export, closing it, and the
@@ -181,8 +182,8 @@ export async function generateDataExport(deps: Deps, q: Queryable, id: string): 
   await notify(q, job.organization_id, [job.requested_by], {
     kind: 'data_export_ready',
     category: 'my_requests',
-    title: job.kind === 'organization' ? "Your organization's export is ready" : 'Your data is ready to download',
-    body: `The file is available for ${DATA_EXPORT_HOURS} hours.`,
+    title: (l) => (job.kind === 'organization' ? l.t('export.orgReady') : l.t('export.mineReady')),
+    body: (l) => l.t('export.body', { n: DATA_EXPORT_HOURS }),
     link,
   });
 }
@@ -215,8 +216,8 @@ export async function scheduleClose(deps: Deps, q: Queryable, actor: UserActor, 
   await notify(q, actor.organizationId, await orgAdmins(q, actor.organizationId), {
     kind: 'organization_closing',
     category: 'security',
-    title: `${org.name} will be deleted on ${day(at)}`,
-    body: `${actor.orgRole === 'super_admin' ? 'A super admin' : 'An org admin'} closed the organization. Export your records before then; any org admin can cancel until that day.`,
+    title: (l) => l.t('closing.admins.title', { org: org.name, date: day(l, at) }),
+    body: (l) => l.t(actor.orgRole === 'super_admin' ? 'closing.admins.body.super' : 'closing.admins.body.org'),
     link: '/admin/data',
   });
   // Everyone else's data goes too, so they hear about it and can download their own first.
@@ -227,8 +228,8 @@ export async function scheduleClose(deps: Deps, q: Queryable, actor: UserActor, 
   await notify(q, actor.organizationId, everyone, {
     kind: 'organization_closing',
     category: 'privacy',
-    title: `${org.name} is closing its Track account on ${day(at)}`,
-    body: 'Everything recorded about you will be deleted then. You can download your own data until that day.',
+    title: (l) => l.t('closing.everyone.title', { org: org.name, date: day(l, at) }),
+    body: (l) => l.t('closing.everyone.body'),
     link: '/me/privacy',
   });
   return lifecycle(q, actor.organizationId);
@@ -242,14 +243,14 @@ export async function cancelClose(deps: Deps, q: Queryable, actor: UserActor, re
   await notify(q, actor.organizationId, await orgAdmins(q, actor.organizationId), {
     kind: 'organization_closing_cancelled',
     category: 'security',
-    title: `${org.name} will not be deleted`,
-    body: 'An org admin cancelled the closing. Everything stays as it was.',
+    title: (l) => l.t('closing.cancelled.title', { org: org.name }),
+    body: (l) => l.t('closing.cancelled.body'),
     link: '/admin/data',
   });
   return lifecycle(q, actor.organizationId);
 }
 
-const day = (iso: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso));
+const day = (l: Lang, iso: string) => new Intl.DateTimeFormat(l.locale, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso));
 
 /** The certificate's canonical text; its SHA-256 is the digest. */
 export function certificateText(c: Omit<DeletionCertificateDTO, 'id' | 'digest'>): string {

@@ -308,8 +308,8 @@ export async function publishPolicy(
   await notify(q, orgId, expandedFor, {
     kind: 'policy_expansion',
     category: 'privacy',
-    title: 'What is collected about you has changed',
-    body: `${actor.displayName} published a policy change: ${input.change_note}. See "What's collected" for details.`,
+    title: (l) => l.t('policy.changed.title'),
+    body: (l) => l.t('policy.changed.body', { name: actor.displayName, note: input.change_note }),
     link: '/me/privacy',
   });
   await audit(q, {

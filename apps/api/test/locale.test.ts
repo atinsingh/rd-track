@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeOrg, testEnv, type Org, type TestEnv } from './helpers';
+import { makeOrg, PASSWORD, testEnv, type Org, type TestEnv } from './helpers';
 
 /** G27: language and formats for the organization and for each person. */
 
@@ -42,5 +42,34 @@ describe('language and formats', () => {
     await c.req('PATCH', '/v1/me', { locale: null });
     expect((await c.get('/v1/me')).body.user.locale).toBeNull();
     expect((await c.req('PATCH', '/v1/me', { locale: 'xx' })).status).toBe(400);
+  });
+});
+
+describe('what the server writes, in each reader’s language', () => {
+  it('notifications, to-dos and emails follow the person, then the organization', async () => {
+    // The organization is French (above); the manager chose English for themselves.
+    await org.users.manager!.client.req('PATCH', '/v1/me', { locale: 'en-GB' });
+    const emp2 = org.users.emp2!.client;
+
+    // A security notice to someone following the organization: French.
+    expect((await emp2.post('/v1/me/password', { current_password: PASSWORD, new_password: 'another-long-password-1' })).status).toBe(200);
+    const fr = (await emp2.get('/v1/me/notifications')).body.items.find((n: { kind: string }) => n.kind === 'password_changed');
+    expect(fr.title).toBe('Votre mot de passe a été changé');
+
+    // To-dos are written when read, in the reader's language.
+    const todos = (await emp2.get('/v1/me/todos')).body.items as { kind: string; title: string }[];
+    expect(todos.find((x) => x.kind === 'connect_computer')?.title).toBe('Connectez votre ordinateur');
+    const enTodos = (await org.users.manager!.client.get('/v1/me/todos')).body.items as { kind: string; title: string }[];
+    expect(enTodos.find((x) => x.kind === 'connect_computer')?.title).toBe('Connect your computer');
+
+    // Emails too: the reset link in French, its expiry and footer included.
+    const before = env.email.sent.length;
+    await env.app.inject({ method: 'POST', url: '/v1/auth/password-reset', payload: { email: 'manager@lang.test' } });
+    await env.app.inject({ method: 'POST', url: '/v1/auth/password-reset', payload: { email: 'emp@lang.test' } });
+    const [en, frMail] = env.email.sent.slice(before);
+    expect(en!.subject).toBe('Reset your RoundDigital Track password');
+    expect(frMail!.subject).toBe('Réinitialisez votre mot de passe RoundDigital Track');
+    expect(frMail!.text).toContain('Le lien fonctionne une seule fois et expire dans');
+    expect(frMail!.html).toContain('lang="fr-CA"');
   });
 });

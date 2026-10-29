@@ -126,7 +126,7 @@ export async function heartbeat(
         organizationId: device.organizationId,
         type: 'device.permission_missing',
         subjectUserId: device.userId,
-        data: { device_id: device.deviceId, device_name: before?.name ?? 'Your computer', permission_label: label, what },
+        data: { device_id: device.deviceId, device_name: before?.name ?? 'Your computer', permission: key, permission_label: label, what },
         dedupeKey: `permission:${device.deviceId}:${key}:${now.toISOString().slice(0, 10)}`,
       });
     }

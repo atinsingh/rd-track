@@ -11,7 +11,7 @@ import { SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Card, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { announceNotificationsChanged } from '@/lib/events';
-import { t } from '@/lib/i18n';
+import { t, tPlural } from '@/lib/i18n';
 import { browserLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
 import { timeZoneOptions } from '@/lib/time';
@@ -289,7 +289,7 @@ export function SecurityCard() {
             <dd className="secondary">
               {sec.data.other_sessions === 0
                 ? t('security.onlyThis')
-                : t(sec.data.other_sessions === 1 ? 'security.otherCount.one' : 'security.otherCount.other', { n: sec.data.other_sessions })}
+                : tPlural(sec.data.other_sessions, 'security.otherCount.one', 'security.otherCount.other')}
             </dd>
             <dd className={s.rowAction}>
               {sec.data.other_sessions > 0 ? (
@@ -300,7 +300,7 @@ export function SecurityCard() {
                   onClick={async () => {
                     const r = await others.run(() => rd.account.signOutOthers());
                     if (r) {
-                      setNote(t(r.signed_out === 1 ? 'security.signedOut.one' : 'security.signedOut.other', { n: r.signed_out }));
+                      setNote(tPlural(r.signed_out, 'security.signedOut.one', 'security.signedOut.other'));
                       sec.reload();
                     }
                   }}

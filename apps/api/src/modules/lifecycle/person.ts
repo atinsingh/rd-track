@@ -10,6 +10,7 @@ import { notify } from '../engine/notify';
 import { deactivateUser } from '../org/service';
 import { deleteScreenshot } from '../screenshots/service';
 import { tableCsv } from './tables';
+import { langOfUser } from '../../i18n';
 
 /**
  * A person's own data (slice 5c, G18): "download my data", and erasure that an org admin
@@ -128,8 +129,8 @@ export async function requestErasure(q: Queryable, actor: UserActor, reason: str
   await notify(q, actor.organizationId, (await orgAdmins(q, actor.organizationId)).filter((id) => id !== actor.userId), {
     kind: 'erasure_request',
     category: 'approvals',
-    title: `${me!.display_name} asked to have their data erased`,
-    body: 'Decide in Deletion and erasure requests. Records kept for pay and billing stay; anything under a legal hold is kept until the hold ends.',
+    title: (l) => l.t('erasure.asked.title', { name: me!.display_name }),
+    body: (l) => l.t('erasure.asked.body'),
     link: '/admin/requests',
   });
   return getRequest(q, actor.organizationId, r!.id);
@@ -176,8 +177,8 @@ export async function decideErasure(
     await notify(q, actor.organizationId, [r.user_id], {
       kind: 'erasure_declined',
       category: 'privacy',
-      title: 'Your erasure request was declined',
-      body: `${declineReason} You can still download your data from What's collected.`,
+      title: (l) => l.t('erasure.declined.title'),
+      body: (l) => l.t('erasure.declined.body', { reason: declineReason ?? '' }),
       link: '/me/privacy',
     });
   }
@@ -194,6 +195,8 @@ export async function erasePerson(deps: Deps, q: Queryable, requestId: string): 
   if (!r) return null;
   const { organization_id: orgId, user_id: userId } = r;
   const who = await one<{ email: string; org: string }>(q, 'SELECT u.email, o.name AS org FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = $1', [userId]);
+  // Their language, read before the account is emptied.
+  const l = await langOfUser(q, userId);
   const held = (col: string) => `EXISTS (SELECT 1 FROM legal_holds h WHERE h.user_id = $1 AND h.released_at IS NULL AND ${col} BETWEEN h.from_at AND h.to_at)`;
   const deleted: Record<string, number> = {};
   const kept: Record<string, number> = {};
@@ -232,19 +235,20 @@ export async function erasePerson(deps: Deps, q: Queryable, requestId: string): 
   await q.query(`UPDATE erasure_requests SET status = 'completed', completed_at = $2, result = $3 WHERE id = $1`, [requestId, deps.now().toISOString(), result]);
   await audit(q, { organizationId: orgId, actor: { kind: 'system' }, action: 'user.erased', targetType: 'user', targetId: userId, targetUserId: userId, metadata: result });
   const keptLine = Object.keys(kept).length
-    ? `Kept until a legal hold ends: ${Object.entries(kept).map(([t, n]) => `${t.replace(/_/g, ' ')} ${n}`).join(', ')}.`
-    : 'Nothing was under a legal hold.';
+    ? l.t('erasure.done.kept', { list: Object.entries(kept).map(([t, n]) => `${t.replace(/_/g, ' ')} ${n}`).join(', ') })
+    : l.t('erasure.done.noHold');
+  const deletedList = Object.entries(deleted).filter(([, n]) => n > 0).map(([t, n]) => `${t.replace(/_/g, ' ')} ${n}`).join(', ');
   return {
     to: who!.email,
-    subject: `Your data in ${who!.org} was erased`,
+    subject: l.t('erasure.done.subject', { org: who!.org }),
     text: [
-      `Your data in ${who!.org} (RoundDigital Track) was erased as you asked.`,
+      l.t('erasure.done.intro', { org: who!.org }),
       '',
-      `Deleted: ${Object.entries(deleted).filter(([, n]) => n > 0).map(([t, n]) => `${t.replace(/_/g, ' ')} ${n}`).join(', ') || 'nothing left to delete'}.`,
+      l.t('erasure.done.deleted', { list: deletedList || l.t('erasure.done.nothing') }),
       keptLine,
-      'Your name and email were replaced. Time records your employer must keep for pay and billing stay, without your name.',
+      l.t('erasure.done.replaced'),
       '',
-      'This is the last email you will get from Track about this account.',
+      l.t('erasure.done.last'),
     ].join('\n'),
   };
 }

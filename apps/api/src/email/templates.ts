@@ -1,4 +1,5 @@
-import { MANDATORY_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, type DeletionCertificateDTO, type NotificationCategory } from '@rd/contracts';
+import { MANDATORY_CATEGORIES, type DeletionCertificateDTO, type NotificationCategory } from '@rd/contracts';
+import type { Lang } from '../i18n';
 import type { EmailMessage } from './sender';
 
 /**
@@ -9,8 +10,8 @@ import type { EmailMessage } from './sender';
 const escape = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** The one email layout: eyebrow, title, a short body, one button. */
-function layout(p: { orgName: string; title: string; body: string; actionLabel: string; url: string; footer: string }): string {
-  return `<!doctype html><html><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1013">
+function layout(p: { orgName: string; title: string; body: string; actionLabel: string; url: string; footer: string; lang: string }): string {
+  return `<!doctype html><html lang="${escape(p.lang)}"><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1013">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:16px">
 <tr><td style="padding:24px 28px 0;font:500 11px/1.4 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#53595f">
@@ -31,24 +32,27 @@ export function notificationEmail(p: {
   link: string | null;
   category: NotificationCategory;
   webUrl: string;
+  /** The reader's language: the title and body are already in it. */
+  l: Lang;
 }): EmailMessage {
+  const { l } = p;
   const url = p.link ? `${p.webUrl}${p.link}` : `${p.webUrl}/me`;
   const settings = `${p.webUrl}/me/settings`;
   const why = MANDATORY_CATEGORIES.includes(p.category)
-    ? `You get this because it is about your ${p.category === 'billing' ? 'organization’s subscription' : p.category === 'privacy' ? 'data' : 'account'}; it can't be turned off.`
-    : `You get this for “${NOTIFICATION_CATEGORY_LABELS[p.category].label}”. Change what you get by email: ${settings}`;
-  const text = `${p.title}\n\n${p.body}\n\nOpen RoundDigital Track: ${url}\n\n—\n${p.orgName} · RoundDigital Track\n${why}\n`;
-  return { to: p.to, subject: p.title, text, html: layout({ orgName: p.orgName, title: p.title, body: p.body, actionLabel: 'Open in Track', url, footer: why }) };
+    ? l.t(p.category === 'billing' ? 'email.why.billing' : p.category === 'privacy' ? 'email.why.privacy' : 'email.why.account')
+    : l.t('email.why.category', { category: l.t(`cat.${p.category}`), url: settings });
+  const text = `${p.title}\n\n${p.body}\n\n${l.t('email.openTrack', { url })}\n\n—\n${p.orgName} · RoundDigital Track\n${why}\n`;
+  return { to: p.to, subject: p.title, text, html: layout({ orgName: p.orgName, title: p.title, body: p.body, actionLabel: l.t('email.openInTrack'), url, footer: why, lang: l.locale }) };
 }
 
 /**
  * A single-use link (invite, password reset, email change). These are sent directly,
  * never stored as notifications, because the link itself grants access.
  */
-export function actionEmail(p: { to: string; orgName: string; title: string; body: string; actionLabel: string; url: string; expires: string; ignore: string }): EmailMessage {
-  const footer = `The link works once and expires ${p.expires}. ${p.ignore}`;
+export function actionEmail(p: { to: string; orgName: string; title: string; body: string; actionLabel: string; url: string; expires: string; ignore: string; l: Lang }): EmailMessage {
+  const footer = p.l.t('email.linkFooter', { expires: p.expires, ignore: p.ignore });
   const text = `${p.title}\n\n${p.body}\n\n${p.actionLabel}: ${p.url}\n\n—\n${p.orgName} · RoundDigital Track\n${footer}\n`;
-  return { to: p.to, subject: p.title, text, html: layout({ ...p, footer }) };
+  return { to: p.to, subject: p.title, text, html: layout({ ...p, footer, lang: p.l.locale }) };
 }
 
 /**
@@ -71,23 +75,26 @@ export function invoiceEmail(p: {
   total: string;
   notes: string | null;
   message: string | null;
+  /** The agency's language: the client is its client. */
+  l: Lang;
 }): EmailMessage {
-  const subject = `Invoice ${p.number} from ${p.orgName}`;
-  const dueLine = p.due ? `Due ${p.due}.` : '';
+  const { l } = p;
+  const subject = l.t('invoice.subject', { number: p.number, org: p.orgName });
+  const dueLine = p.due ? l.t('invoice.due', { date: p.due }) : '';
   const text = [
     `${subject}`,
     '',
-    p.message ?? `Please find invoice ${p.number} for ${p.period} below.`,
+    p.message ?? l.t('invoice.intro', { number: p.number, period: p.period }),
     '',
     ...p.lines.map((l) => `${l.label} — ${l.hours} h × ${l.rate} = ${l.amount}`),
     '',
-    `Subtotal: ${p.subtotal}`,
-    ...(p.tax ? [`Tax: ${p.tax}`] : []),
-    `Total: ${p.total}`,
+    `${l.t('invoice.subtotal')}: ${p.subtotal}`,
+    ...(p.tax ? [`${l.t('invoice.tax')}: ${p.tax}`] : []),
+    `${l.t('invoice.total')}: ${p.total}`,
     dueLine,
     ...(p.notes ? ['', p.notes] : []),
     '',
-    `Reply to this email to reach ${p.orgName}.`,
+    l.t('invoice.reply', { org: p.orgName }),
   ].join('\n');
   const rows = p.lines
     .map(
@@ -97,20 +104,20 @@ export function invoiceEmail(p: {
     .join('');
   const sum = (label: string, value: string, strong = false) =>
     `<tr><td colspan="3" style="padding:6px 0;text-align:right;${strong ? 'font-weight:700' : ''}">${escape(label)}</td><td style="padding:6px 0;text-align:right;font-family:ui-monospace,monospace;${strong ? 'font-weight:700' : ''}">${escape(value)}</td></tr>`;
-  const html = `<!doctype html><html><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1013">
+  const html = `<!doctype html><html lang="${escape(l.locale)}"><body style="margin:0;background:#eceef2;font-family:Inter,system-ui,-apple-system,'Segoe UI',sans-serif;color:#0e1013">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:640px;background:#ffffff;border-radius:16px"><tr><td style="padding:24px 28px">
-<p style="margin:0;font:500 11px/1.4 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#53595f">${escape(p.orgName)} · Invoice</p>
+<p style="margin:0;font:500 11px/1.4 ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#53595f">${escape(l.t('invoice.eyebrow', { org: p.orgName }))}</p>
 <h1 style="margin:12px 0 4px;font:700 22px/1.25 Inter,system-ui,sans-serif">${escape(p.number)}</h1>
-<p style="margin:0 0 16px;color:#3f444b">${escape(p.clientName)} · ${escape(p.period)}${p.due ? ` · Due ${escape(p.due)}` : ''}</p>
+<p style="margin:0 0 16px;color:#3f444b">${escape(p.clientName)} · ${escape(p.period)}${p.due ? ` · ${escape(l.t('invoice.dueShort', { date: p.due }))}` : ''}</p>
 ${p.message ? `<p style="margin:0 0 16px;white-space:pre-line">${escape(p.message)}</p>` : ''}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="font-size:14px">
-<tr><th align="left" style="padding:0 0 8px;font-weight:600">Item</th><th align="right" style="padding:0 0 8px;font-weight:600">Hours</th><th align="right" style="padding:0 0 8px;font-weight:600">Rate</th><th align="right" style="padding:0 0 8px;font-weight:600">Amount</th></tr>
-${rows}${sum('Subtotal', p.subtotal)}${p.tax ? sum('Tax', p.tax) : ''}${sum('Total', p.total, true)}
+<tr><th align="left" style="padding:0 0 8px;font-weight:600">${escape(l.t('invoice.item'))}</th><th align="right" style="padding:0 0 8px;font-weight:600">${escape(l.t('invoice.hours'))}</th><th align="right" style="padding:0 0 8px;font-weight:600">${escape(l.t('invoice.rate'))}</th><th align="right" style="padding:0 0 8px;font-weight:600">${escape(l.t('invoice.amount'))}</th></tr>
+${rows}${sum(l.t('invoice.subtotal'), p.subtotal)}${p.tax ? sum(l.t('invoice.tax'), p.tax) : ''}${sum(l.t('invoice.total'), p.total, true)}
 </table>
 ${p.notes ? `<p style="margin:16px 0 0;white-space:pre-line;color:#3f444b">${escape(p.notes)}</p>` : ''}
 </td></tr></table>
-<p style="max-width:640px;margin:16px auto 0;font-size:12px;color:#53595f">Reply to this email to reach ${escape(p.orgName)}.</p>
+<p style="max-width:640px;margin:16px auto 0;font-size:12px;color:#53595f">${escape(l.t('invoice.reply', { org: p.orgName }))}</p>
 </td></tr></table></body></html>`;
   return { to: p.to, replyTo: p.replyTo, subject, text, html };
 }

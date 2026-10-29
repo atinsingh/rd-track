@@ -1,19 +1,20 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import { EXPENSE_CATEGORIES, EXPENSE_CATEGORY_LABELS, type ExpenseCategory, type ExpenseDTO } from '@rd/contracts';
+import { EXPENSE_CATEGORIES, type ExpenseCategory, type ExpenseDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataState';
 import { Checkbox, InlineSelect, SelectField, TextArea, TextField } from '@/components/ui/Field';
 import { Badge, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { claimMeta, claimStatus, claimsFrom, receiptProblem, totalCount, totalText, type ClaimRange } from '@/lib/expenses';
+import { claimMeta, claimStatus, claimsFrom, expenseCategoryLabel, receiptProblem, totalCount, totalText, type ClaimRange } from '@/lib/expenses';
 import { formatBytes, formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { CURRENCIES, parseMoneyInput } from '@/lib/money';
 import { can } from '@/lib/nav';
 import { formatDayMonth, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { NoAccess } from '../../NoAccess';
 import s from './expenses.module.css';
 
@@ -34,7 +35,7 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
   const cents = parseMoneyInput(amount);
   const project = projects.data?.find((p) => p.id === projectId) ?? null;
   const canBill = Boolean(project?.client_name);
-  const amountError = amount && (cents === null || cents < 1 || cents > 10_000_000) ? 'Enter an amount like 34.50, up to 100,000.' : null;
+  const amountError = amount && (cents === null || cents < 1 || cents > 10_000_000) ? t('exp.amountError') : null;
   const ready = cents !== null && cents >= 1 && !amountError && note.trim().length > 0 && spentOn <= today && !fileError;
   const currencies = (CURRENCIES as readonly string[]).includes(currency) ? CURRENCIES : [currency, ...CURRENCIES];
 
@@ -52,7 +53,7 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
         // The receipt goes straight to private storage; the API checks it arrived before saving the claim.
         const up = await rd.expenses.receiptUpload(file.type, file.size);
         const put = await fetch(up.url, { method: 'PUT', headers: up.headers, body: file }).catch(() => null);
-        if (!put?.ok) throw new Error('The receipt didn’t upload. Try again.');
+        if (!put?.ok) throw new Error(t('exp.uploadFailed'));
         receiptId = up.upload_id;
       }
       return rd.expenses.create({
@@ -75,28 +76,28 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
   };
 
   return (
-    <Card title="New claim" className={s.form}>
+    <Card title={t('exp.newClaim')} className={s.form}>
       <form onSubmit={submit} className={s.formBody}>
         <div className={s.pair}>
-          <TextField label="Amount" inputMode="decimal" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} error={amountError} />
-          <SelectField label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <TextField label={t('exp.amount')} inputMode="decimal" autoComplete="off" value={amount} onChange={(e) => setAmount(e.target.value)} error={amountError} />
+          <SelectField label={t('exp.currency')} value={currency} onChange={(e) => setCurrency(e.target.value)}>
             {currencies.map((c) => (
               <option key={c}>{c}</option>
             ))}
           </SelectField>
         </div>
         <div className={s.pair}>
-          <TextField label="Date" type="date" max={today} value={spentOn} onChange={(e) => setSpentOn(e.target.value)} />
-          <SelectField label="Category" value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
+          <TextField label={t('exp.date')} type="date" max={today} value={spentOn} onChange={(e) => setSpentOn(e.target.value)} />
+          <SelectField label={t('exp.category')} value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>
             {EXPENSE_CATEGORIES.map((c) => (
               <option key={c} value={c}>
-                {EXPENSE_CATEGORY_LABELS[c]}
+                {expenseCategoryLabel(c)}
               </option>
             ))}
           </SelectField>
         </div>
-        <SelectField label="Project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-          <option value="">Internal · no project</option>
+        <SelectField label={t('exp.project')} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+          <option value="">{t('exp.noProject')}</option>
           {(projects.data ?? []).map((p) => (
             <option key={p.id} value={p.id}>
               {p.client_name ? `${p.client_name} — ${p.name}` : p.name}
@@ -107,22 +108,22 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
           <Checkbox
             label={
               <>
-                Bill this to the client <span className="muted">· {project!.client_name}</span>
+                {t('exp.billToClient')} <span className="muted">· {project!.client_name}</span>
               </>
             }
-            hint="Once approved it goes on their next draft invoice."
+            hint={t('exp.billHint')}
             checked={billable}
             onChange={(e) => setBillable(e.target.checked)}
           />
         ) : null}
-        <TextArea label="What was it for?" rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
+        <TextArea label={t('exp.whatFor')} rows={2} maxLength={500} value={note} onChange={(e) => setNote(e.target.value)} />
         <label className={file ? s.dropFilled : s.drop}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
             <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
           </svg>
-          <span className={s.dropTitle}>{file ? file.name : 'Add a receipt'}</span>
+          <span className={s.dropTitle}>{file ? file.name : t('exp.addReceipt')}</span>
           <span className={s.dropHint}>
-            {file ? `${formatBytes(file.size)} · choose another to replace it` : 'Photo or PDF, up to 10 MB · only you, your manager and payroll admins can open it'}
+            {file ? t('exp.replaceFile', { size: formatBytes(file.size) }) : t('exp.receiptHint')}
           </span>
           <input
             key={inputKey}
@@ -135,7 +136,7 @@ function NewClaim({ today, currency: defaultCurrency, onCreated }: { today: stri
         {fileError ? <p className={s.fileError}>{fileError}</p> : null}
         <ActionError error={action.error} />
         <Button type="submit" variant="primary" disabled={!ready || action.busy}>
-          {action.busy ? 'Submitting…' : 'Submit for approval'}
+          {action.busy ? t('ts.submitting') : t('ts.submit')}
         </Button>
       </form>
     </Card>
@@ -146,23 +147,23 @@ function Claims({ items, onChange }: { items: ExpenseDTO[]; onChange: (e: Expens
   const action = useAction();
   if (!items.length)
     return (
-      <Empty title="No claims in this range">
-        Add one with the form. It goes to your team manager, or an org admin if you don&apos;t have one.
+      <Empty title={t('exp.noClaims')}>
+        {t('exp.noClaimsBody')}
       </Empty>
     );
   return (
     <>
       <ActionError error={action.error} />
-      <TableBox label="Your claims">
+      <TableBox label={t('exp.yourClaims')}>
         <table className={tableClass}>
           <thead>
             <tr>
-              <th scope="col">Date</th>
-              <th scope="col">Claim</th>
+              <th scope="col">{t('exp.col.date')}</th>
+              <th scope="col">{t('exp.col.claim')}</th>
               <th scope="col" className={numClass}>
-                Amount
+                {t('exp.col.amount')}
               </th>
-              <th scope="col">Status</th>
+              <th scope="col">{t('exp.col.status')}</th>
             </tr>
           </thead>
           <tbody>
@@ -175,7 +176,7 @@ function Claims({ items, onChange }: { items: ExpenseDTO[]; onChange: (e: Expens
                     <span className={s.what}>{e.note}</span>
                     <span className={s.meta}>
                       {claimMeta(e)}
-                      {e.has_receipt ? null : ' · no receipt'}
+                      {e.has_receipt ? null : t('exp.noReceipt')}
                     </span>
                   </td>
                   <td className={numClass}>{formatMoney(e.amount_cents, e.currency)}</td>
@@ -195,7 +196,7 @@ function Claims({ items, onChange }: { items: ExpenseDTO[]; onChange: (e: Expens
                             if (r) onChange(r);
                           }}
                         >
-                          Withdraw
+                          {t('exp.withdraw')}
                         </Button>
                       ) : null}
                     </span>
@@ -218,7 +219,7 @@ export default function ExpensesPage() {
   const mine = useApi(can(access, 'expenses') ? `me:expenses|${from}` : null, (signal) => rd.expenses.mine(from, signal));
   const rate = useApi(can(access, 'expenses') ? 'expenses:pay-rate' : null, (signal) => rd.money.myPayRate(signal).catch(() => null));
 
-  if (!can(access, 'expenses')) return <NoAccess what="Expense claims are part of the Pro plan. Ask an org admin about upgrading." />;
+  if (!can(access, 'expenses')) return <NoAccess what={t('exp.noAccess')} />;
 
   const data = mine.data;
   // New claims start in the currency you last claimed in, else the one you're paid in.
@@ -228,29 +229,29 @@ export default function ExpensesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Expenses"
-        title="Expenses"
-        description="Claim what you spent for work. Your team manager approves it, it's paid with the next payroll, and client costs can go on the client's invoice."
+        eyebrow={t('exp.eyebrow')}
+        title={t('exp.title')}
+        description={t('exp.description')}
       />
       {mine.error ? (
         <ErrorState error={mine.error} onRetry={refresh} />
       ) : !data || rate.loading ? (
-        <Loading label="Loading your expenses" />
+        <Loading label={t('exp.loading')} />
       ) : (
         <>
-          <section aria-label="Totals" className={s.tiles}>
+          <section aria-label={t('exp.totals')} className={s.tiles}>
             <div className={s.tile}>
-              <span className={s.tileLabel}>Waiting for approval</span>
+              <span className={s.tileLabel}>{t('exp.waitingTile')}</span>
               <span className={s.tileValue}>{totalText(data.totals.waiting, currency)}</span>
               <span className={s.tileSub}>{totalCount(data.totals.waiting)}</span>
             </div>
             <div className={s.tile}>
-              <span className={s.tileLabel}>To be paid</span>
+              <span className={s.tileLabel}>{t('exp.toBePaid')}</span>
               <span className={s.tileValue}>{totalText(data.totals.to_be_paid, currency)}</span>
-              <span className={s.tileSub}>{data.totals.to_be_paid.length ? 'With the next payroll' : 'Nothing approved and unpaid'}</span>
+              <span className={s.tileSub}>{data.totals.to_be_paid.length ? t('exp.withNext') : t('exp.nothingUnpaid')}</span>
             </div>
             <div className={s.tile}>
-              <span className={s.tileLabel}>Paid this year</span>
+              <span className={s.tileLabel}>{t('exp.paidYear')}</span>
               <span className={s.tileValue}>{totalText(data.totals.paid_this_year, currency)}</span>
               <span className={s.tileSub}>{totalCount(data.totals.paid_this_year)}</span>
             </div>
@@ -258,12 +259,12 @@ export default function ExpensesPage() {
           <div className={s.layout}>
             <NewClaim key={currency} today={today} currency={currency} onCreated={refresh} />
             <Card
-              title="Your claims"
+              title={t('exp.yourClaims')}
               className={s.list}
               actions={
-                <InlineSelect label="Show" value={range} onChange={(e) => setRange(e.target.value as ClaimRange)}>
-                  <option value="quarter">Last 3 months</option>
-                  <option value="year">This year</option>
+                <InlineSelect label={t('exp.show')} value={range} onChange={(e) => setRange(e.target.value as ClaimRange)}>
+                  <option value="quarter">{t('exp.last3')}</option>
+                  <option value="year">{t('exp.thisYear')}</option>
                 </InlineSelect>
               }
             >

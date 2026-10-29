@@ -1,5 +1,4 @@
 import {
-  ATTENDANCE_LABELS,
   formatHours,
   type AttendanceDay,
   type AttendanceResponse,
@@ -20,6 +19,7 @@ import {
 } from '@rd/contracts';
 import { request, unwrapList } from './api';
 import { formatDayMonth, formatShortDay, formatTime, weekdayShort } from './time';
+import { t } from './i18n';
 
 /**
  * Client and display helpers for schedules, attendance and time off (Stage 3).
@@ -115,7 +115,7 @@ export const sched = {
 /** "Mon–Fri", "Mon, Wed, Fri", "Every day" */
 export function weekdaysLabel(days: readonly number[]): string {
   const sorted = [...new Set(days)].filter((d) => d >= 1 && d <= 7).sort((a, b) => a - b);
-  if (sorted.length === 7) return 'Every day';
+  if (sorted.length === 7) return t('sched.everyDay');
   if (sorted.length === 0) return '—';
   const contiguous = sorted.every((d, i) => i === 0 || d === sorted[i - 1]! + 1);
   if (contiguous && sorted.length >= 3) return `${weekdayShort(sorted[0]!)}–${weekdayShort(sorted[sorted.length - 1]!)}`;
@@ -133,54 +133,43 @@ export function dateSpanLabel(start: string, end: string): string {
 }
 
 export function attendanceLabel(d: AttendanceDay): string {
-  if (d.status === 'on_leave' && d.leave?.partial) return `On leave · ${formatHours(d.leave.hours)}`;
-  return ATTENDANCE_LABELS[d.status];
+  if (d.status === 'on_leave' && d.leave?.partial) return t('sched.onLeavePartial', { hours: formatHours(d.leave.hours) });
+  return t(`sched.att.${d.status}`);
 }
 
 /** One-line plain-language detail, e.g. "Started 09:30 · 30 min after the shift start". */
 export function attendanceDetail(d: AttendanceDay, tz: string): string {
   const parts: string[] = [];
   if (d.holiday) parts.push(d.holiday);
-  if (d.first_start_at && d.last_end_at) parts.push(`Recorded ${formatTime(d.first_start_at, tz)}–${formatTime(d.last_end_at, tz)}`);
-  if (d.late) parts.push(`started ${d.late_minutes} min after the shift start`);
-  if (d.left_early) parts.push(`ended ${d.early_minutes} min before the shift end`);
-  if (d.status === 'absent') parts.push('nothing recorded during the shift');
-  if (d.status === 'upcoming') parts.push('nothing recorded yet');
+  if (d.first_start_at && d.last_end_at) parts.push(t('sched.recorded', { from: formatTime(d.first_start_at, tz), to: formatTime(d.last_end_at, tz) }));
+  if (d.late) parts.push(t('sched.lateBy', { n: d.late_minutes }));
+  if (d.left_early) parts.push(t('sched.earlyBy', { n: d.early_minutes }));
+  if (d.status === 'absent') parts.push(t('sched.nothingDuring'));
+  if (d.status === 'upcoming') parts.push(t('sched.nothingYet'));
   return parts.join(' · ');
 }
 
 /** Short text for a cell in the team "who's off" calendar. */
 export function calendarCellLabel(d: TeamCalendarDay): string {
   if (d.holiday) return d.holiday;
-  if (d.off) return d.off.partial ? `Off ${formatHours(d.off.hours)}` : 'Off';
+  if (d.off) return d.off.partial ? t('sched.offPartial', { hours: formatHours(d.off.hours) }) : t('sched.off');
   if (d.shift) return shiftTimesLabel(d.shift);
   return '—';
 }
 
-export const REQUEST_STATUS_LABEL: Record<TimeOffRequestDTO['status'], string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  denied: 'Not approved',
-  cancelled: 'Cancelled',
-};
+export const requestStatusLabel = (s: TimeOffRequestDTO['status']): string => t(`sched.req.${s}`);
 
-export const LEDGER_KIND_LABEL: Record<MyTimeOffResponse['ledger'][number]['kind'], string> = {
-  accrual: 'Accrued',
-  usage: 'Taken',
-  usage_reversal: 'Returned (cancelled)',
-  adjustment: 'Adjustment',
-  carryover_expiry: 'Above carryover (expired)',
-};
+export const ledgerKindLabel = (k: MyTimeOffResponse['ledger'][number]['kind']): string => t(`sched.ledger.${k}`);
 
 /** When the hours are added, for the policy form's choices and its summary (Stage 4 F9). */
 export function accrualDayLabel(accrual: TimeOffAccrual, day: TimeOffAccrualDay): string {
-  if (accrual === 'per_year') return day === 'first' ? 'on 1 January' : day === 'last' ? 'on 31 December' : 'on their start date each year';
-  return day === 'first' ? 'on the 1st' : day === 'last' ? 'on the last day of the month' : 'on the day of the month they started';
+  if (accrual === 'per_year') return day === 'first' ? t('sched.accrual.yearFirst') : day === 'last' ? t('sched.accrual.yearLast') : t('sched.accrual.yearStart');
+  return day === 'first' ? t('sched.accrual.monthFirst') : day === 'last' ? t('sched.accrual.monthLast') : t('sched.accrual.monthStart');
 }
 
 export function accrualLabel(p: { accrual: TimeOffAccrual; accrual_hours: number; accrual_day?: TimeOffAccrualDay }): string {
-  if (p.accrual === 'none') return 'No accrual';
-  return `${formatHours(p.accrual_hours)} per ${p.accrual === 'per_month' ? 'month' : 'year'}, ${accrualDayLabel(p.accrual, p.accrual_day ?? 'first')}`;
+  if (p.accrual === 'none') return t('sched.noAccrual');
+  return t(p.accrual === 'per_month' ? 'sched.perMonth' : 'sched.perYear', { hours: formatHours(p.accrual_hours), day: accrualDayLabel(p.accrual, p.accrual_day ?? 'first') });
 }
 
 /** Signed hours: "+8 h", "−24 h". */

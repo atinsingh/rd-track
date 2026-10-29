@@ -82,7 +82,7 @@ describe('timesheet deadline rule', () => {
     await run();
     await run();
     let emp = await kinds(org, 'emp');
-    expect(emp.filter((n) => n.kind === 'timesheet_due').map((n) => n.title)).toEqual(['Your timesheet for the week of 26 Oct is due Mon 2 Nov, 10:00']);
+    expect(emp.filter((n) => n.kind === 'timesheet_due').map((n) => n.title)).toEqual(['Your timesheet for the week of Oct 26 is due Mon, Nov 2, 10:00 AM']);
     // emp2 tracked nothing that week: never chased.
     expect((await kinds(org, 'emp2')).filter((n) => n.kind.startsWith('timesheet'))).toEqual([]);
     const todo = (await org.users.emp!.client.get('/v1/me/todos')).body.items[0];
@@ -101,7 +101,7 @@ describe('timesheet deadline rule', () => {
     await run();
     const digest = (await kinds(org, 'manager')).filter((n) => n.kind === 'timesheet_escalated');
     expect(digest).toHaveLength(1);
-    expect(digest[0]).toMatchObject({ title: '1 timesheet is overdue for the week of 26 Oct', link: '/team' });
+    expect(digest[0]).toMatchObject({ title: '1 timesheet is overdue for the week of Oct 26', link: '/team' });
 
     // Submitting clears the to-do.
     expect((await org.users.emp!.client.post('/v1/me/timesheets/2026-10-26/submit', {})).status).toBe(200);

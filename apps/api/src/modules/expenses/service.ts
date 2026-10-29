@@ -98,7 +98,7 @@ export async function createExpense(deps: Deps, q: Queryable, actor: UserActor, 
     type: 'expense.submitted',
     subjectUserId: actor.userId,
     actorUserId: actor.userId,
-    data: { expense_id: r!.id, user_name: actor.displayName, amount: money(input.amount_cents, input.currency), note: input.note },
+    data: { expense_id: r!.id, user_name: actor.displayName, amount: money(input.amount_cents, input.currency), amount_cents: input.amount_cents, currency: input.currency, note: input.note },
   });
   return getExpense(q, actor.organizationId, r!.id);
 }
@@ -199,7 +199,7 @@ export async function reviewExpense(
     type: 'expense.decided',
     subjectUserId: e.user_id,
     actorUserId: actor.userId,
-    data: { expense_id: id, approved: approve, reviewer_name: actor.displayName, review_note: note?.trim() || null, amount: money(Number(e.amount_cents), e.currency) },
+    data: { expense_id: id, approved: approve, reviewer_name: actor.displayName, review_note: note?.trim() || null, amount: money(Number(e.amount_cents), e.currency), amount_cents: Number(e.amount_cents), currency: e.currency },
   });
   return getExpense(q, actor.organizationId, id);
 }

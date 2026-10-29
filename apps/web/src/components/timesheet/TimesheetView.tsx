@@ -11,37 +11,38 @@ import { Badge, Banner, Card, TableBox, formActionsClass, numClass, tableClass }
 import { cx } from '@/lib/cx';
 import { durationOrDash, formatDuration } from '@/lib/format';
 import { formatDateTime, formatDayMonth, weekdayShort } from '@/lib/time';
-import { STATUS_LABEL, countedTotals, limitsSummary, overtimeText, reviewActions, statusTone, timesheetGrid, timesheetsApi } from '@/lib/timesheets';
+import { countedTotals, limitsSummary, overtimeText, reviewActions, statusLabel, statusTone, timesheetGrid, timesheetsApi } from '@/lib/timesheets';
 import { useAction } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import s from './timesheet.module.css';
 
 export function StatusBadge({ status }: { status: TimesheetDTO['status'] }) {
-  return <Badge tone={statusTone(status)}>{STATUS_LABEL[status]}</Badge>;
+  return <Badge tone={statusTone(status)}>{statusLabel(status)}</Badge>;
 }
 
 /** Tracked / manual / corrected / over-limit tiles for a week. */
 export function TimesheetTiles({ totals, limitsText }: { totals: TimesheetTotals; limitsText: string }) {
   return (
-    <section aria-label="Week summary" className={d.tiles}>
+    <section aria-label={t('ts.weekSummary')} className={d.tiles}>
       <div className={d.tile}>
-        <span className={d.tileLabel}>Total</span>
+        <span className={d.tileLabel}>{t('ts.tile.total')}</span>
         <span className={d.tileValue}>{formatDuration(totals.total_seconds)}</span>
-        <span className={d.tileSub}>Sessions that started this week</span>
+        <span className={d.tileSub}>{t('ts.tile.totalSub')}</span>
       </div>
       <div className={d.tile}>
-        <span className={d.tileLabel}>Tracked by agent</span>
+        <span className={d.tileLabel}>{t('ts.tile.tracked')}</span>
         <span className={d.tileValue}>{formatDuration(totals.tracked_seconds)}</span>
-        <span className={d.tileSub}>Measured on the computer</span>
+        <span className={d.tileSub}>{t('ts.tile.trackedSub')}</span>
       </div>
       <div className={d.tile}>
-        <span className={d.tileLabel}>Manual and corrected</span>
+        <span className={d.tileLabel}>{t('ts.tile.manual')}</span>
         <span className={d.tileValue}>{formatDuration(totals.manual_seconds + totals.corrected_seconds)}</span>
         <span className={d.tileSub}>
-          Approved entries · manual {durationOrDash(totals.manual_seconds)} · corrected {durationOrDash(totals.corrected_seconds)}
+          {t('ts.tile.manualSub', { manual: durationOrDash(totals.manual_seconds), corrected: durationOrDash(totals.corrected_seconds) })}
         </span>
       </div>
       <div className={d.tile}>
-        <span className={d.tileLabel}>Over limit</span>
+        <span className={d.tileLabel}>{t('ts.tile.over')}</span>
         <span className={d.tileValue}>{totals.overtime_seconds > 0 ? formatDuration(totals.overtime_seconds) : '—'}</span>
         <span className={d.tileSub}>{limitsText}</span>
       </div>
@@ -52,22 +53,22 @@ export function TimesheetTiles({ totals, limitsText }: { totals: TimesheetTotals
 /** Project × day grid with daily totals and time over the daily limit. */
 export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; label: string }) {
   const rows = timesheetGrid(totals);
-  if (rows.length === 0) return <Empty title="No time recorded this week">Sessions and approved manual time appear here.</Empty>;
+  if (rows.length === 0) return <Empty title={t('ts.gridEmpty')}>{t('ts.gridEmptyBody')}</Empty>;
   const hasOver = totals.days.some((x) => x.overtime_seconds > 0) || totals.weekly_overtime_seconds > 0;
   return (
     <TableBox label={label}>
       <table className={cx(tableClass, s.grid)} style={{ minWidth: 820 }}>
-        <caption className="visually-hidden">{label}: hours per project and day</caption>
+        <caption className="visually-hidden">{t('ts.gridCaption', { label })}</caption>
         <thead>
           <tr>
-            <th scope="col">Project</th>
+            <th scope="col">{t('ts.col.project')}</th>
             {totals.days.map((day, i) => (
               <th key={day.date} scope="col" className={cx(numClass, i >= 5 && s.weekend)}>
                 {weekdayShort(i + 1)} {formatDayMonth(day.date)}
               </th>
             ))}
             <th scope="col" className={numClass}>
-              Total
+              {t('ts.col.total')}
             </th>
           </tr>
         </thead>
@@ -89,7 +90,7 @@ export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; labe
         <tfoot>
           <tr>
             <th scope="row" className={s.rowHead}>
-              Day total
+              {t('ts.dayTotal')}
             </th>
             {totals.days.map((day, i) => (
               <td key={day.date} className={cx(numClass, i >= 5 && s.weekend)}>
@@ -101,7 +102,7 @@ export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; labe
           {hasOver ? (
             <tr>
               <th scope="row" className={s.rowHead}>
-                Over limit
+                {t('ts.col.over')}
               </th>
               {totals.days.map((day, i) => (
                 <td key={day.date} className={cx(numClass, i >= 5 && s.weekend)}>
@@ -109,7 +110,7 @@ export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; labe
                 </td>
               ))}
               <td className={numClass}>
-                <span className={s.over} title={totals.weekly_overtime_seconds > 0 ? `Includes ${formatDuration(totals.weekly_overtime_seconds)} over the weekly limit` : undefined}>
+                <span className={s.over} title={totals.weekly_overtime_seconds > 0 ? t('ts.includesWeekly', { over: formatDuration(totals.weekly_overtime_seconds) }) : undefined}>
                   {overtimeText(totals.overtime_seconds)}
                 </span>
               </td>
@@ -121,23 +122,19 @@ export function TimesheetGrid({ totals, label }: { totals: TimesheetTotals; labe
   );
 }
 
-const EVENT_TEXT: Record<TimesheetEventDTO['action'], string> = {
-  submit: 'Submitted',
-  approve: 'Approved',
-  reject: 'Sent back',
-  reopen: 'Reopened',
-};
+const eventText = (a: TimesheetEventDTO['action']): string => t(`ts.event.${a}`);
 
 function History({ events, tz }: { events: TimesheetEventDTO[]; tz: string }) {
   if (events.length === 0) return null;
   return (
-    <Card title="History" subtitle="Every submission and decision is kept">
+    <Card title={t('ts.history')} subtitle={t('ts.historySub')}>
       <ul className={s.history}>
         {events.map((e) => (
           <li key={e.id}>
             <span className={s.when}>{formatDateTime(e.created_at, tz)}</span>
             <span>
-              <strong>{EVENT_TEXT[e.action]}</strong> by {e.actor_name ?? 'a former member'}
+              <strong>{eventText(e.action)}</strong>
+              {t('ts.by', { name: e.actor_name ?? t('ts.formerMember') })}
             </span>
             {e.note ? <span className="secondary">“{e.note}”</span> : null}
           </li>
@@ -149,34 +146,32 @@ function History({ events, tz }: { events: TimesheetEventDTO[]; tz: string }) {
 
 /** Status line for a week, written for the employee or for a reviewer. */
 function StatusBanner({ sheet, tz, self }: { sheet: TimesheetDTO; tz: string; self: boolean }) {
-  const reviewer = sheet.reviewer_name ?? 'a reviewer';
+  const reviewer = sheet.reviewer_name ?? t('ts.aReviewer');
   switch (sheet.status) {
     case 'submitted':
       return (
-        <Banner tag="NOTE" title={`Submitted ${formatDateTime(sheet.submitted_at, tz)}`}>
-          {self ? 'Waiting for your manager. ' : ''}
-          {sheet.changed_since_submit
-            ? 'The records changed after submission (for example, a correction was approved). The figures below are current; the submitted totals are kept.'
-            : 'The figures match what was submitted.'}
+        <Banner tag="NOTE" title={t('ts.submittedAt', { when: formatDateTime(sheet.submitted_at, tz) })}>
+          {self ? t('ts.waitingManager') : ''}
+          {sheet.changed_since_submit ? t('ts.changed') : t('ts.matches')}
         </Banner>
       );
     case 'approved':
       return (
-        <Banner tone="ink" title={`Approved by ${reviewer} · ${formatDateTime(sheet.reviewed_at, tz)}`}>
-          This week is locked: corrections and manual time for it need the timesheet reopened first.
+        <Banner tone="ink" title={t('ts.approvedBy', { name: reviewer, when: formatDateTime(sheet.reviewed_at, tz) })}>
+          {t('ts.locked')}
           {sheet.note ? ` “${sheet.note}”` : ''}
         </Banner>
       );
     case 'rejected':
       return (
-        <Banner tag="SENT BACK" title={`Sent back by ${reviewer}`}>
-          “{sheet.note}” {self ? 'Propose any corrections, then submit again.' : ''}
+        <Banner tag={t('ts.sentBackTag')} title={t('ts.sentBackBy', { name: reviewer })}>
+          “{sheet.note}” {self ? t('ts.sentBackSelf') : ''}
         </Banner>
       );
     case 'reopened':
       return (
-        <Banner tag="REOPENED" title={`Reopened by ${reviewer}`}>
-          “{sheet.note}” {self ? 'Corrections for this week are open again. Submit when it is right.' : ''}
+        <Banner tag={t('ts.reopenedTag')} title={t('ts.reopenedBy', { name: reviewer })}>
+          “{sheet.note}” {self ? t('ts.reopenedSelf') : ''}
         </Banner>
       );
     default:
@@ -192,15 +187,11 @@ export function TimesheetView({ sheet, tz, self }: { sheet: TimesheetDTO; tz: st
       <StatusBanner sheet={sheet} tz={tz} self={self} />
       <TimesheetTiles totals={totals} limitsText={limitsSummary(sheet.limits)} />
       <Card
-        title={sheet.status === 'approved' ? 'Approved hours' : 'Hours by project and day'}
-        subtitle={`Week of ${formatDayMonth(sheet.period_start)} · ${sheet.timezone}`}
+        title={sheet.status === 'approved' ? t('ts.approvedHours') : t('ts.hoursByProject')}
+        subtitle={t('ts.weekOf', { date: formatDayMonth(sheet.period_start), tz: sheet.timezone })}
       >
-        <TimesheetGrid totals={totals} label={`Timesheet for the week of ${formatDayMonth(sheet.period_start)}`} />
-        <p className="small secondary">
-          Sessions count on the day they start, in {sheet.timezone}. Tracked time is what the agent measured; manual and
-          corrected time counts once approved. Time over a limit is shown for planning and pay — it says nothing about how
-          well someone works.
-        </p>
+        <TimesheetGrid totals={totals} label={t('ts.gridLabel', { date: formatDayMonth(sheet.period_start) })} />
+        <p className="small secondary">{t('ts.explain', { tz: sheet.timezone })}</p>
       </Card>
       <History events={sheet.events} tz={tz} />
     </>
@@ -217,7 +208,7 @@ export function ReviewPanel({ sheet, onDone }: { sheet: TimesheetDTO; onDone: (t
   const decide = async (verb: 'approve' | 'reject' | 'reopen') => {
     const text = note.trim();
     if (verb !== 'approve' && text.length < 3) {
-      setNoteError(verb === 'reject' ? 'Tell them what to fix.' : 'Say why the week is being reopened.');
+      setNoteError(verb === 'reject' ? t('ts.tellFix') : t('ts.sayWhy'));
       return;
     }
     setNoteError(null);
@@ -230,8 +221,8 @@ export function ReviewPanel({ sheet, onDone }: { sheet: TimesheetDTO; onDone: (t
   return (
     <>
       <TextArea
-        label={actions.includes('reopen') ? 'Reason for reopening (shown to the employee)' : 'Note to the employee'}
-        hint={actions.includes('approve') ? 'Optional when approving; required when sending back.' : undefined}
+        label={actions.includes('reopen') ? t('ts.reasonReopen') : t('ts.noteEmployee')}
+        hint={actions.includes('approve') ? t('ts.noteHint') : undefined}
         rows={2}
         maxLength={1000}
         value={note}
@@ -242,17 +233,17 @@ export function ReviewPanel({ sheet, onDone }: { sheet: TimesheetDTO; onDone: (t
       <div className={formActionsClass}>
         {actions.includes('reopen') ? (
           <Button onClick={() => decide('reopen')} disabled={action.busy}>
-            Reopen week
+            {t('ts.reopen')}
           </Button>
         ) : null}
         {actions.includes('reject') ? (
           <Button onClick={() => decide('reject')} disabled={action.busy}>
-            Send back
+            {t('ts.sendBack')}
           </Button>
         ) : null}
         {actions.includes('approve') ? (
           <Button variant="primary" onClick={() => decide('approve')} disabled={action.busy}>
-            Approve and lock
+            {t('ts.approve')}
           </Button>
         ) : null}
       </div>

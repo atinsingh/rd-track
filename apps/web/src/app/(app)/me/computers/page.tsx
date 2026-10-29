@@ -10,8 +10,10 @@ import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { formatCountdown, formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t, type MessageKey } from '@/lib/i18n';
 
 const OS_LABEL = { macos: 'macOS', windows: 'Windows', linux: 'Linux' } as const;
+const KNOWN_PERMISSIONS = new Set(['input_monitoring', 'screen_recording', 'accessibility']);
 
 /** The computer this page is open on, best guess, to put its installer first. */
 function useThisOs(): AgentDownload['os'] | null {
@@ -28,22 +30,22 @@ function useThisOs(): AgentDownload['os'] | null {
 function Expiry({ at }: { at: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
   const left = Date.parse(at) - now;
-  return left > 0 ? <>Works once, for the next {formatCountdown(left)}.</> : <strong>This code has expired. Get a new one.</strong>;
+  return left > 0 ? <>{t('comp.expires', { left: formatCountdown(left) })}</> : <strong>{t('comp.expired')}</strong>;
 }
 
 function Download() {
   const res = useApi('agent:downloads', (signal) => rd.my.agentDownloads(signal));
   const os = useThisOs();
   return (
-    <Card title="1. Install Track" subtitle="The app sits in your menu bar or system tray. It records nothing until you start a session.">
-      <Resource {...res} label="Loading downloads">
+    <Card title={t('comp.install')} subtitle={t('comp.installSub')}>
+      <Resource {...res} label={t('comp.loadingDownloads')}>
         {(d) =>
           !d.available ? (
-            <Empty title="Installers aren't published yet">Ask your org admin for the Track installer for your computer.</Empty>
+            <Empty title={t('comp.notPublished')}>{t('comp.notPublishedBody')}</Empty>
           ) : (
             <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {[...d.files]
@@ -51,10 +53,10 @@ function Download() {
                 .map((f) => (
                   <li key={f.url} style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
                     <span>
-                      <strong>{f.label}</strong> <span className="small muted">· {f.kind}</span> {f.os === os && f.kind !== 'MSI' ? <Badge tone="solid">This computer</Badge> : null}
+                      <strong>{f.label}</strong> <span className="small muted">· {f.kind}</span> {f.os === os && f.kind !== 'MSI' ? <Badge tone="solid">{t('comp.thisComputer')}</Badge> : null}
                     </span>
                     <a href={f.url} rel="noopener">
-                      Download {OS_LABEL[f.os]} {f.kind === 'MSI' ? 'MSI' : f.kind.toLowerCase()} (v{d.version})
+                      {t('comp.download', { os: OS_LABEL[f.os], kind: f.kind === 'MSI' ? 'MSI' : f.kind.toLowerCase(), version: d.version ?? '' })}
                     </a>
                   </li>
                 ))}
@@ -78,8 +80,8 @@ function Connect() {
   }, []);
   if (!me.user.tracking_enabled) {
     return (
-      <Banner tag="NOTE" title="Tracking is off for your account">
-        There&apos;s nothing to connect, so nothing is collected about you. An org admin can turn tracking on.
+      <Banner tag="NOTE" title={t('day.trackingOffTitle')}>
+        {t('comp.trackingOffBody')}
       </Banner>
     );
   }
@@ -89,33 +91,33 @@ function Connect() {
   };
   const link = code && server ? enrollmentLink(server, code.code) : null;
   return (
-    <Card title="2. Connect it" subtitle="A one-time code links one computer to you. Get a new one for each computer.">
+    <Card title={t('comp.connect')} subtitle={t('comp.connectSub')}>
       {!code ? (
         <div>
           <Button variant="primary" onClick={get} disabled={action.busy}>
-            {action.busy ? 'Getting a code…' : 'Get a connection code'}
+            {action.busy ? t('comp.getting') : t('comp.getCode')}
           </Button>
         </div>
       ) : (
         <>
           <p>
-            With Track installed on this computer, <a href={link!}>open it with this link</a>: the server address and code are filled in, and you press
-            Connect. Or type them in yourself:
+            {t('comp.withLinkBefore')} <a href={link!}>{t('comp.withLink')}</a>
+            {t('comp.withLinkAfter')}
           </p>
           <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr auto', gap: '10px 16px', alignItems: 'center', margin: 0 }}>
-            <dt className="small muted">Server address</dt>
+            <dt className="small muted">{t('comp.server')}</dt>
             <dd className="mono" style={{ margin: 0 }}>
               {server}
             </dd>
-            <CopyButton text={server} label="Copy address" />
-            <dt className="small muted">Code</dt>
-            <dd className="mono" style={{ margin: 0, fontSize: 22, letterSpacing: '0.12em' }} aria-label="Connection code">
+            <CopyButton text={server} label={t('comp.copyAddress')} />
+            <dt className="small muted">{t('comp.code')}</dt>
+            <dd className="mono" style={{ margin: 0, fontSize: 22, letterSpacing: '0.12em' }} aria-label={t('comp.codeLabel')}>
               {code.code}
             </dd>
-            <CopyButton text={code.code} label="Copy code" />
+            <CopyButton text={code.code} label={t('comp.copyCode')} />
           </dl>
           <p className="small secondary">
-            <Expiry at={code.expires_at} /> Connecting on another computer? <CopyButton text={link!} label="Copy the link" /> and open it there.
+            <Expiry at={code.expires_at} /> {t('comp.another')} <CopyButton text={link!} label={t('comp.copyLink')} /> {t('comp.openThere')}
           </p>
         </>
       )}
@@ -128,25 +130,27 @@ function MyComputers() {
   const { timezone: tz } = useMe();
   const res = useApi('me:devices', (signal) => rd.my.devices(signal));
   return (
-    <Card title="Your computers" subtitle="Each one shows here once it's connected. Only an org admin can remove one.">
-      <Resource {...res} label="Loading your computers">
+    <Card title={t('comp.yours')} subtitle={t('comp.yoursSub')}>
+      <Resource {...res} label={t('comp.loading')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No computers connected yet" />
+            <Empty title={t('comp.none')} />
           ) : (
-            <TableBox label="Your computers">
+            <TableBox label={t('comp.yours')}>
               <table className={tableClass}>
                 <thead>
                   <tr>
-                    <th scope="col">Computer</th>
-                    <th scope="col">App</th>
-                    <th scope="col">Last synced</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('comp.col.computer')}</th>
+                    <th scope="col">{t('comp.col.app')}</th>
+                    <th scope="col">{t('comp.col.synced')}</th>
+                    <th scope="col">{t('comp.col.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((d) => {
-                    const denied = Object.entries(d.permissions).filter(([, v]) => v === 'denied').map(([k]) => k.replace(/_/g, ' '));
+                    const denied = Object.entries(d.permissions)
+                      .filter(([, v]) => v === 'denied')
+                      .map(([k]) => (KNOWN_PERMISSIONS.has(k) ? t(`comp.perm.${k}` as MessageKey) : k.replace(/_/g, ' ')));
                     return (
                       <tr key={d.id}>
                         <th scope="row">
@@ -157,14 +161,14 @@ function MyComputers() {
                           </span>
                         </th>
                         <td className="small mono">v{d.agent_version}</td>
-                        <td className="small">{d.last_sync_at ? formatRelative(d.last_sync_at, tz) : 'Never'}</td>
+                        <td className="small">{d.last_sync_at ? formatRelative(d.last_sync_at, tz) : t('time.never')}</td>
                         <td>
                           {d.credential_status === 'revoked' ? (
-                            <Badge>Removed</Badge>
+                            <Badge>{t('comp.removed')}</Badge>
                           ) : denied.length ? (
-                            <Badge tone="warn">Needs {denied.join(', ')}</Badge>
+                            <Badge tone="warn">{t('comp.needs', { what: denied.join(', ') })}</Badge>
                           ) : (
-                            <Badge tone="solid">Connected</Badge>
+                            <Badge tone="solid">{t('comp.connected')}</Badge>
                           )}
                         </td>
                       </tr>
@@ -185,9 +189,9 @@ export default function MyComputersPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Computers"
-        title="My computers"
-        description="Install Track and connect it yourself. You choose when it records: nothing is collected until you start a session."
+        eyebrow={t('comp.eyebrow')}
+        title={t('comp.title')}
+        description={t('comp.description')}
       />
       <Download />
       <Connect />

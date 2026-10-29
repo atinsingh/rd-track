@@ -61,7 +61,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) — **done** | L | P1/P2 |
-| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French on the employee's core pages; the rest of the screens, emails and the desktop app follow | M | P2 |
+| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French for everything an employee sees on the web and receives (slices 10–11); manager, admin and money screens and the desktop app follow | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
 
@@ -303,6 +303,23 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      shows (a test checks). Other screens, text the server writes (notification and to-do
      titles, emails, API error details) and the desktop app are still English; French
      users are told some pages are.
+
+   **11 done 2026-10-29 (G27)**: the rest of what an employee sees and receives.
+   - *Web*: My time and the timesheet, adding manual time, Insights and its printed copy,
+     Schedule and time off, Expenses and My pay, Screenshots, My computers and Exports are
+     in French (about 480 more catalogue entries). Plurals follow each language's rules
+     (`tPlural`), so French says "0 demande".
+   - *Server text*: notifications are written for each person in their language and
+     formats when they are created (`apps/api/src/i18n`: a typed catalogue like the web's,
+     and `Lang` with dates, times and money per locale); the person's own choice, else the
+     organization's, else English (US formats). Notification emails, invites, password
+     resets, email changes, the erasure confirmation, the computer-setup code and the
+     installer list follow the same rule; client portal links and invoices sent to
+     clients use the agency's. Events carry raw values (week, due time and zone,
+     permission, amount and currency) next to the English labels webhooks already had,
+     so each copy is formatted for its reader. Notifications already sent keep the
+     language they were written in. Signup emails, sent before anyone has an account or a
+     choice, stay English.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

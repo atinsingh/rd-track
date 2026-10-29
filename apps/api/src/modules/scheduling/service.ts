@@ -21,6 +21,7 @@ import { notify as notifyPeople } from '../engine/notify';
 import { currentSubscription } from '../billing/service';
 import { attendanceDay, leaveOn, scheduleDay, summarize, type LeaveRow, type OverrideRow, type PersonCalendar, type SessionSpan, type Settings, type ShiftRow } from './attendance';
 import { addDays, dateInTz, daysBetween, eachDate, isValidTimeZone, utcMidnight } from './tz';
+import type { Localized } from '../../i18n';
 
 // ───────────── plan gates ─────────────
 
@@ -73,7 +74,7 @@ const NOTICE_ROUTE: Record<string, { category: NotificationCategory; link: strin
 };
 
 /** Scheduling and time-off notices go through the one notification service. */
-export async function notify(q: Queryable, orgId: string, userId: string, kind: string, title: string, body: string) {
+export async function notify(q: Queryable, orgId: string, userId: string, kind: string, title: Localized, body: Localized) {
   const route = NOTICE_ROUTE[kind] ?? { category: 'my_requests' as const, link: '/me/schedule' };
   await notifyPeople(q, orgId, [userId], { kind, title, body, ...route });
 }
@@ -333,7 +334,7 @@ export async function createShift(q: Queryable, actor: UserActor, input: ShiftCr
     [actor.organizationId, input.user_id, tz, input.weekdays, input.start_time, input.end_time, s.effective_from, s.effective_to, actor.userId],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'shift.create', targetType: 'shift', targetId: r!.id, targetUserId: input.user_id, requestId });
-  await notify(q, actor.organizationId, input.user_id, 'schedule_change', 'Your schedule was updated', 'A recurring shift was added to your schedule. See My schedule for details.');
+  await notify(q, actor.organizationId, input.user_id, 'schedule_change', (l) => l.t('sched.updated.title'), (l) => l.t('sched.added.body'));
   return getShift(q, actor.organizationId, r!.id);
 }
 
@@ -355,7 +356,7 @@ export async function updateShift(q: Queryable, actor: UserActor, id: string, pa
     [id, next.timezone, next.weekdays, next.start_time, next.end_time, next.effective_from, next.effective_to],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'shift.update', targetType: 'shift', targetId: id, targetUserId: cur.user_id, requestId });
-  await notify(q, actor.organizationId, cur.user_id, 'schedule_change', 'Your schedule was updated', 'One of your recurring shifts changed. See My schedule for details.');
+  await notify(q, actor.organizationId, cur.user_id, 'schedule_change', (l) => l.t('sched.updated.title'), (l) => l.t('sched.changed.body'));
   return getShift(q, actor.organizationId, id);
 }
 
@@ -422,8 +423,8 @@ export async function upsertOverride(q: Queryable, actor: UserActor, input: z.in
     actor.organizationId,
     input.user_id,
     'schedule_change',
-    input.kind === 'cancel' ? `No shift on ${input.date}` : `Your shift on ${input.date} changed`,
-    input.kind === 'cancel' ? 'Your usual shift for that day was cancelled.' : `New time: ${input.start_time}–${input.end_time}.`,
+    (l) => (input.kind === 'cancel' ? l.t('sched.cancelled.title', { date: l.day(input.date) }) : l.t('sched.override.title', { date: l.day(input.date) })),
+    (l) => (input.kind === 'cancel' ? l.t('sched.cancelled.body') : l.t('sched.override.body', { from: input.start_time ?? '', to: input.end_time ?? '' })),
   );
   return (await one<ShiftOverrideDTO>(q, `${OVERRIDE_SELECT} WHERE o.id = $1`, [r!.id]))!;
 }

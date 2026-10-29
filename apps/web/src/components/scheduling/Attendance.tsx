@@ -2,6 +2,7 @@ import { attendanceNeedsMarker, type AttendanceDay, type TeamCalendarDay } from 
 import { Badge } from '@/components/ui/Layout';
 import { cx } from '@/lib/cx';
 import { attendanceDetail, attendanceLabel, calendarCellLabel, shiftTimesLabel } from '@/lib/scheduling';
+import { t } from '@/lib/i18n';
 import s from './scheduling.module.css';
 
 /** Schedule exceptions get the amber marker; everything else stays neutral ink. */
@@ -24,7 +25,7 @@ export function AttendanceCell({ day, tz }: { day: AttendanceDay; tz: string }) 
       <span className={s.cellTitle}>
         {warn ? <span className={s.marker} aria-hidden="true" /> : null}
         {attendanceLabel(day)}
-        {day.late && day.left_early ? ', left early' : ''}
+        {day.late && day.left_early ? t('sched.alsoLeftEarly') : ''}
       </span>
       {sub ? <span className={s.cellSub}>{sub}</span> : null}
       {detail ? <span className="visually-hidden">{detail}</span> : null}
@@ -45,18 +46,18 @@ export function CalendarCell({ day }: { day: TeamCalendarDay }) {
 
 export function AttendanceLegend() {
   return (
-    <div className={s.legend} aria-label="Legend">
+    <div className={s.legend} aria-label={t('sched.legend')}>
       <span>
-        <span className={s.swatch} aria-hidden="true" /> On schedule
+        <span className={s.swatch} aria-hidden="true" /> {t('sched.att.on_time')}
       </span>
       <span>
-        <span className={cx(s.swatch, s.swatchWarn)} aria-hidden="true" /> Started late, left early or nothing recorded
+        <span className={cx(s.swatch, s.swatchWarn)} aria-hidden="true" /> {t('sched.legendWarn')}
       </span>
       <span>
-        <span className={cx(s.swatch, s.swatchLeave)} aria-hidden="true" /> On leave
+        <span className={cx(s.swatch, s.swatchLeave)} aria-hidden="true" /> {t('sched.att.on_leave')}
       </span>
       <span>
-        <span className={cx(s.swatch, s.swatchMuted)} aria-hidden="true" /> Holiday, not scheduled or still to come
+        <span className={cx(s.swatch, s.swatchMuted)} aria-hidden="true" /> {t('sched.legendMuted')}
       </span>
     </div>
   );

@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
-import { useT } from '@/lib/i18n';
+import { tPlural, useT } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import type { NavGroup } from '@/lib/nav';
 import { paletteItems, paletteSections, searchPalette } from '@/lib/palette';
@@ -165,7 +165,7 @@ export function CommandPalette({ open, onClose, groups }: { open: boolean; onClo
           ) : null}
           {directory.error ? <p className={s.note}>{t('palette.directoryFailed')}</p> : null}
           <p className="visually-hidden" aria-live="polite">
-            {query.trim() ? t(ordered.length === 1 ? 'palette.count.one' : 'palette.count.other', { n: ordered.length }) : ''}
+            {query.trim() ? tPlural(ordered.length, 'palette.count.one', 'palette.count.other') : ''}
           </p>
           <div className={s.foot} aria-hidden="true">
             <span>

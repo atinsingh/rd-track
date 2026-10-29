@@ -123,12 +123,11 @@ export async function remindExpiringTokens(deps: Deps): Promise<number> {
   for (const t of soon) {
     await withScope(t.organization_id, () =>
       withTx(deps.pool, async (tx) => {
-        const date = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(t.expires_at));
         await notify(tx, t.organization_id, [t.user_id], {
           kind: 'api_token_expiring',
           category: 'security',
-          title: `API token “${t.name}” expires on ${date}`,
-          body: 'Create a new token and update the integration that uses it before then; calls with the old one will be refused.',
+          title: (l) => l.t('token.expiring.title', { name: t.name, date: l.day(t.expires_at) }),
+          body: (l) => l.t('token.expiring.body'),
           link: t.kind === 'organization' ? '/admin/developers' : '/me/settings#api-tokens',
         });
         await tx.query('UPDATE api_tokens SET expiry_notified_at = $2 WHERE id = $1', [t.id, now.toISOString()]);

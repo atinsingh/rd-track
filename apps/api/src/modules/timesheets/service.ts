@@ -31,6 +31,7 @@ import { assertCanView, assertSameOrgUser, isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
 import { publish } from '../engine/events';
 import { notify as notifyPeople } from '../engine/notify';
+import type { Localized, ServerMessageKey } from '../../i18n';
 
 /**
  * Weekly timesheets (submit → approve/reject, approval locks the week), work limits and
@@ -479,7 +480,7 @@ export async function pendingTimesheets(deps: Deps, q: Queryable, actor: UserAct
 
 // ───────────────────────── state changes ─────────────────────────
 
-async function notify(q: Queryable, orgId: string, userId: string, title: string, body: string) {
+async function notify(q: Queryable, orgId: string, userId: string, title: Localized, body: Localized) {
   await notifyPeople(q, orgId, [userId], { kind: 'timesheet_review', category: 'my_requests', title, body, link: '/me/time' });
 }
 
@@ -597,18 +598,14 @@ export async function reviewTimesheet(
     requestId,
     metadata: { period_start: row.period_start, ...(snapshot ? { total_seconds: snapshot.total_seconds } : {}) },
   });
-  const what = `Your timesheet for the week of ${row.period_start}`;
-  const titles: Record<ReviewVerb, string> = {
-    approve: `${what} was approved`,
-    reject: `${what} was sent back`,
-    reopen: `${what} was reopened`,
+  const titles: Record<ReviewVerb, ServerMessageKey> = { approve: 'ts.approved.title', reject: 'ts.rejected.title', reopen: 'ts.reopened.title' };
+  const vars = { name: actor.displayName, note: note ?? '' };
+  const bodies: Record<ReviewVerb, ServerMessageKey> = {
+    approve: note ? 'ts.approved.note' : 'ts.approved.body',
+    reject: 'ts.rejected.body',
+    reopen: 'ts.reopened.body',
   };
-  const bodies: Record<ReviewVerb, string> = {
-    approve: note ? `${actor.displayName}: “${note}”` : `${actor.displayName} approved it. The week is now locked.`,
-    reject: `${actor.displayName}: “${note ?? ''}”. Make any corrections and submit it again.`,
-    reopen: `${actor.displayName}: “${note ?? ''}”. You can propose corrections for that week again, then resubmit.`,
-  };
-  await notify(q, actor.organizationId, row.user_id, titles[verb], bodies[verb]);
+  await notify(q, actor.organizationId, row.user_id, (l) => l.t(titles[verb], { week: l.day(row.period_start) }), (l) => l.t(bodies[verb], vars));
   if (verb !== 'reopen') {
     await publish(q, {
       organizationId: actor.organizationId,

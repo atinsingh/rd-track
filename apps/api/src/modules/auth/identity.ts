@@ -19,6 +19,7 @@ import { audit } from '../audit/service';
 import { ssoRequiredFor } from '../sso/service';
 import { publish } from '../engine/events';
 import { notify } from '../engine/notify';
+import { langOfUser, type Lang, type Localized } from '../../i18n';
 import { isValidTimeZone } from '../scheduling/tz';
 import { mustUseMfa } from './service';
 
@@ -90,7 +91,7 @@ export async function startUserSession(deps: Deps, q: Queryable, u: { id: string
   return token;
 }
 
-async function securityNotice(q: Queryable, orgId: string, userId: string, kind: string, title: string, body: string) {
+async function securityNotice(q: Queryable, orgId: string, userId: string, kind: string, title: Localized, body: Localized) {
   await notify(q, orgId, [userId], { kind, category: 'security', title, body, link: '/me/settings' });
 }
 
@@ -123,15 +124,17 @@ export async function inviteUser(deps: Deps, q: Queryable, p: { orgId: string; u
     requestId: p.requestId,
   });
   const org = await orgName(q, p.orgId);
+  const l = await langOfUser(q, p.userId);
   return actionEmail({
+    l,
     to: u.email,
     orgName: org,
-    title: `${p.invitedBy?.displayName ?? org} invited you to RoundDigital Track`,
-    body: `Join ${org} on Track. Choose your password to sign in. Before anything is measured, you'll see exactly what is collected about you, and nothing is collected outside a work session you start.`,
-    actionLabel: 'Accept the invite',
+    title: l.t('invite.title', { inviter: p.invitedBy?.displayName ?? org }),
+    body: l.t('invite.body', { org }),
+    actionLabel: l.t('invite.action'),
     url: `${deps.config.webUrl}/invite?token=${raw}`,
-    expires: `in ${INVITE_TTL_DAYS} days`,
-    ignore: "If you weren't expecting it, you can ignore this email.",
+    expires: l.t('email.inDays', { n: INVITE_TTL_DAYS }),
+    ignore: l.t('invite.ignore'),
   });
 }
 
@@ -186,15 +189,17 @@ export async function requestPasswordReset(deps: Deps, q: Queryable, email: stri
   if (!u.password_hash) return inviteUser(deps, q, { orgId: u.organization_id, userId: u.id, invitedBy: null, requestId });
   const raw = await issueToken(q, { orgId: u.organization_id, userId: u.id, purpose: 'password_reset', ttlMs: PASSWORD_RESET_TTL_MINUTES * 60_000, now: deps.now() });
   await audit(q, { organizationId: u.organization_id, actor: { kind: 'system' }, action: 'auth.password_reset_requested', targetType: 'user', targetId: u.id, targetUserId: u.id, requestId });
+  const l = await langOfUser(q, u.id);
   return actionEmail({
+    l,
     to: u.email,
     orgName: await orgName(q, u.organization_id),
-    title: 'Reset your RoundDigital Track password',
-    body: 'Someone (hopefully you) asked to reset the password for this account. Choose a new one with the link below; you will be signed out everywhere else.',
-    actionLabel: 'Choose a new password',
+    title: l.t('reset.title'),
+    body: l.t('reset.body'),
+    actionLabel: l.t('reset.action'),
     url: `${deps.config.webUrl}/reset?token=${raw}`,
-    expires: `in ${PASSWORD_RESET_TTL_MINUTES} minutes`,
-    ignore: "If you didn't ask, ignore this email; your password stays the same.",
+    expires: l.t('email.inMinutes', { n: PASSWORD_RESET_TTL_MINUTES }),
+    ignore: l.t('reset.ignore'),
   });
 }
 
@@ -204,7 +209,7 @@ export async function confirmPasswordReset(deps: Deps, q: Queryable, input: { to
   await q.query(`UPDATE users SET password_hash = $2 WHERE id = $1 AND status = 'active'`, [t.user_id, await hashPassword(input.password)]);
   await q.query('UPDATE user_sessions SET revoked_at = $2 WHERE user_id = $1 AND revoked_at IS NULL', [t.user_id, deps.now().toISOString()]);
   await audit(q, { organizationId: t.organization_id, actor: { kind: 'system' }, action: 'auth.password_reset', targetType: 'user', targetId: t.user_id, targetUserId: t.user_id, requestId });
-  await securityNotice(q, t.organization_id, t.user_id, 'password_changed', 'Your password was changed', 'It was reset with an emailed link, and every other sign-in was ended. If this wasn’t you, contact your org admin now.');
+  await securityNotice(q, t.organization_id, t.user_id, 'password_changed', (l) => l.t('sec.passwordChanged.title'), (l) => l.t('sec.passwordReset.body'));
 }
 
 // ───────────── MFA recovery (G5) ─────────────
@@ -237,7 +242,7 @@ export async function regenerateRecoveryCodes(deps: Deps, q: Queryable, actor: U
   if (!actor.mfaVerified) throw errors.mfaRequired();
   const codes = await issueRecoveryCodes(deps, q, actor.organizationId, actor.userId);
   await audit(q, { organizationId: actor.organizationId, actor, action: 'auth.mfa_recovery_codes_issued', targetType: 'user', targetId: actor.userId, requestId });
-  await securityNotice(q, actor.organizationId, actor.userId, 'recovery_codes', 'New recovery codes were created', 'Your earlier recovery codes no longer work.');
+  await securityNotice(q, actor.organizationId, actor.userId, 'recovery_codes', (l) => l.t('sec.newCodes.title'), (l) => l.t('sec.newCodes.body'));
   return codes;
 }
 
@@ -267,8 +272,8 @@ export async function verifyWithRecoveryCode(deps: Deps, q: Queryable, actor: Us
     actor.organizationId,
     actor.userId,
     'recovery_code_used',
-    'A recovery code was used to sign in',
-    `${left} ${left === 1 ? 'code is' : 'codes are'} left. If you've lost your authenticator, create new codes in Settings.`,
+    (l) => l.t('sec.codeUsed.title'),
+    (l) => l.t(left === 1 ? 'sec.codeUsed.body.one' : 'sec.codeUsed.body.other', { n: left }),
   );
   return left;
 }
@@ -293,8 +298,8 @@ export async function adminResetMfa(deps: Deps, q: Queryable, actor: UserActor, 
     actor.organizationId,
     userId,
     'mfa_reset',
-    'Your multi-factor authentication was reset',
-    `${actor.displayName} reset it and signed you out. Sign in again and set it up on your new device.`,
+    (l) => l.t('sec.mfaReset.title'),
+    (l) => l.t('sec.mfaReset.body', { name: actor.displayName }),
   );
 }
 
@@ -327,7 +332,7 @@ export async function changePassword(deps: Deps, q: Queryable, actor: UserActor,
   await q.query('UPDATE users SET password_hash = $2 WHERE id = $1', [actor.userId, await hashPassword(input.new_password)]);
   await q.query('UPDATE user_sessions SET revoked_at = $3 WHERE user_id = $1 AND id <> $2 AND revoked_at IS NULL', [actor.userId, actor.sessionId, deps.now().toISOString()]);
   await audit(q, { organizationId: actor.organizationId, actor, action: 'auth.password_changed', targetType: 'user', targetId: actor.userId, requestId });
-  await securityNotice(q, actor.organizationId, actor.userId, 'password_changed', 'Your password was changed', 'Every other sign-in was ended. If this wasn’t you, reset your password now and tell your org admin.');
+  await securityNotice(q, actor.organizationId, actor.userId, 'password_changed', (l) => l.t('sec.passwordChanged.title'), (l) => l.t('sec.passwordChanged.body'));
 }
 
 /** Sends a confirmation link to the new address and a heads-up to the current one. */
@@ -353,26 +358,28 @@ export async function requestEmailChange(
   });
   await audit(q, { organizationId: actor.organizationId, actor, action: 'user.email_change_requested', targetType: 'user', targetId: actor.userId, requestId });
   const org = await orgName(q, actor.organizationId);
+  const l = await langOfUser(q, actor.userId);
   return [
     actionEmail({
+      l,
       to: input.new_email,
       orgName: org,
-      title: 'Confirm your new email address',
-      body: `Confirm that you want to sign in to RoundDigital Track with this address instead of ${me.email}.`,
-      actionLabel: 'Confirm this address',
+      title: l.t('emailChange.title'),
+      body: l.t('emailChange.body', { email: me.email }),
+      actionLabel: l.t('emailChange.action'),
       url: `${deps.config.webUrl}/email-change?token=${raw}`,
-      expires: `in ${EMAIL_CHANGE_TTL_HOURS} hours`,
-      ignore: "If you didn't ask for this, ignore this email; nothing changes.",
+      expires: l.t('email.inHours', { n: EMAIL_CHANGE_TTL_HOURS }),
+      ignore: l.t('emailChange.ignore'),
     }),
     {
       to: me.email,
-      subject: 'Someone asked to change your RoundDigital Track email',
-      text: `A request was made to change the email for your account to ${input.new_email}. Nothing changes until the new address is confirmed.\n\nIf this wasn't you, change your password now: ${deps.config.webUrl}/reset\n`,
+      subject: l.t('emailChange.oldSubject'),
+      text: l.t('emailChange.oldText', { email: input.new_email, url: `${deps.config.webUrl}/reset` }),
     },
   ];
 }
 
-export async function confirmEmailChange(deps: Deps, q: Queryable, raw: string, requestId?: string): Promise<{ old: string; next: string }> {
+export async function confirmEmailChange(deps: Deps, q: Queryable, raw: string, requestId?: string): Promise<{ old: string; next: string; l: Lang }> {
   const t = await consumeToken(q, 'email_change', raw, deps.now());
   if (!t?.data.new_email) throw invalidLink('email change');
   const next = t.data.new_email;
@@ -380,8 +387,8 @@ export async function confirmEmailChange(deps: Deps, q: Queryable, raw: string, 
   const before = await one<{ email: string }>(q, 'SELECT email FROM users WHERE id = $1', [t.user_id]);
   await q.query(`UPDATE users SET email = $2 WHERE id = $1 AND status = 'active'`, [t.user_id, next]);
   await audit(q, { organizationId: t.organization_id, actor: { kind: 'system' }, action: 'user.email_changed', targetType: 'user', targetId: t.user_id, targetUserId: t.user_id, requestId });
-  await securityNotice(q, t.organization_id, t.user_id, 'email_changed', 'Your sign-in email was changed', `You now sign in with ${next}.`);
-  return { old: before!.email, next };
+  await securityNotice(q, t.organization_id, t.user_id, 'email_changed', (l) => l.t('sec.emailChanged.title'), (l) => l.t('sec.emailChanged.body', { email: next }));
+  return { old: before!.email, next, l: await langOfUser(q, t.user_id) };
 }
 
 export async function accountSecurity(deps: Deps, q: Queryable, actor: UserActor): Promise<AccountSecurity> {

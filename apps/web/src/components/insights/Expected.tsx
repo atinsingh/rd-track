@@ -1,6 +1,7 @@
 import type { ExpectedDay, ExpectedHours } from '@rd/contracts';
 import { formatDuration, formatNumber } from '@/lib/format';
 import { addDays, formatDayMonth, formatShortDay } from '@/lib/time';
+import { t } from '@/lib/i18n';
 import s from './expected.module.css';
 
 /**
@@ -17,19 +18,19 @@ const hours = (sec: number) => {
 export function expectedSource(e: ExpectedHours): string {
   switch (e.source) {
     case 'schedule':
-      return `Expected hours come from your schedule${e.schedule ? ` — ${e.schedule}` : ''}.`;
+      return e.schedule ? t('exp2.fromScheduleNamed', { name: e.schedule }) : t('exp2.fromSchedule');
     case 'work_limits':
-      return `Expected hours come from your work limits — ${hours((e.day_hours ?? 0) * 3600)} a weekday.`;
+      return t('exp2.fromLimits', { hours: hours((e.day_hours ?? 0) * 3600) });
     default:
-      return `Expected hours come from your organization's standard day — ${hours((e.day_hours ?? 0) * 3600)}, Monday to Friday.`;
+      return t('exp2.fromStandard', { hours: hours((e.day_hours ?? 0) * 3600) });
   }
 }
 
 export function differenceText(e: ExpectedHours): string {
   const d = e.tracked_seconds - e.expected_seconds;
-  if (e.expected_seconds === 0) return 'nothing expected';
-  if (Math.abs(d) < 60) return 'as expected';
-  return `${formatDuration(Math.abs(d))} ${d < 0 ? 'under' : 'over'}`;
+  if (e.expected_seconds === 0) return t('exp2.nothingExpected');
+  if (Math.abs(d) < 60) return t('exp2.asExpected');
+  return t(d < 0 ? 'exp2.under' : 'exp2.over', { time: formatDuration(Math.abs(d)) });
 }
 
 /** A bar up to the expected mark; time beyond it carries on past the mark in the same blue. */
@@ -40,7 +41,11 @@ export function ExpectedMeter({ e }: { e: ExpectedHours }) {
     <span
       className={s.meter}
       role="img"
-      aria-label={`Tracked ${formatDuration(e.tracked_seconds)} of ${formatDuration(e.expected_seconds)} expected${e.percent === null ? '' : `, ${e.percent} percent`}`}
+      aria-label={
+        e.percent === null
+          ? t('exp2.meter', { tracked: formatDuration(e.tracked_seconds), expected: formatDuration(e.expected_seconds) })
+          : t('exp2.meterPct', { tracked: formatDuration(e.tracked_seconds), expected: formatDuration(e.expected_seconds), pct: e.percent })
+      }
     >
       <span className={s.meterFill} style={{ width: pct(e.tracked_seconds) }} />
       {e.expected_seconds > 0 ? <span className={s.meterMark} style={{ left: pct(e.expected_seconds) }} /> : null}
@@ -63,11 +68,11 @@ function columns(days: ExpectedDay[], byWeek: boolean): Column[] {
     return days.map((d) => ({
       key: d.date,
       label: formatShortDay(d.date),
-      sub: d.holiday ? 'holiday' : d.expected_seconds > 0 ? `exp ${hours(d.expected_seconds)}` : d.leave_seconds > 0 ? 'time off' : 'off',
+      sub: d.holiday ? t('exp2.holiday') : d.expected_seconds > 0 ? t('exp2.exp', { hours: hours(d.expected_seconds) }) : d.leave_seconds > 0 ? t('exp2.timeOff') : t('exp2.off'),
       tracked: d.tracked_seconds,
       focus: d.focus_seconds,
       expected: d.expected_seconds,
-      title: `${formatShortDay(d.date)}: ${formatDuration(d.tracked_seconds)} tracked, ${formatDuration(d.expected_seconds)} expected${d.holiday ? ` (${d.holiday})` : ''}${d.leave_seconds ? `, ${formatDuration(d.leave_seconds)} time off` : ''}`,
+      title: `${t('exp2.dayTitle', { day: formatShortDay(d.date), tracked: formatDuration(d.tracked_seconds), expected: formatDuration(d.expected_seconds) })}${d.holiday ? t('exp2.dayHoliday', { name: d.holiday }) : ''}${d.leave_seconds ? t('exp2.dayLeave', { time: formatDuration(d.leave_seconds) }) : ''}`,
     }));
   }
   const out: Column[] = [];
@@ -78,11 +83,16 @@ function columns(days: ExpectedDay[], byWeek: boolean): Column[] {
     out.push({
       key: from,
       label: formatDayMonth(from),
-      sub: `exp ${hours(sum((d) => d.expected_seconds))}`,
+      sub: t('exp2.exp', { hours: hours(sum((d) => d.expected_seconds)) }),
       tracked: sum((d) => d.tracked_seconds),
       focus: sum((d) => d.focus_seconds),
       expected: sum((d) => d.expected_seconds),
-      title: `Week of ${formatDayMonth(from)}–${formatDayMonth(addDays(from, 6))}: ${formatDuration(sum((d) => d.tracked_seconds))} tracked, ${formatDuration(sum((d) => d.expected_seconds))} expected`,
+      title: t('exp2.weekTitle', {
+        from: formatDayMonth(from),
+        to: formatDayMonth(addDays(from, 6)),
+        tracked: formatDuration(sum((d) => d.tracked_seconds)),
+        expected: formatDuration(sum((d) => d.expected_seconds)),
+      }),
     });
   }
   return out;
@@ -99,18 +109,18 @@ export function ExpectedChart({ e, byWeek }: { e: ExpectedHours; byWeek: boolean
       <div className={s.legend}>
         <span className={s.key}>
           <span className={s.swatchFocus} aria-hidden="true" />
-          Focus blocks (30 min +)
+          {t('exp2.legendFocus')}
         </span>
         <span className={s.key}>
           <span className={s.swatchOther} aria-hidden="true" />
-          Other tracked time
+          {t('exp2.legendOther')}
         </span>
         <span className={s.key}>
           <span className={s.swatchExpected} aria-hidden="true" />
-          Expected
+          {t('exp2.legendExpected')}
         </span>
       </div>
-      <div className={s.chart} style={grid} role="img" aria-label={`Tracked hours per ${byWeek ? 'week' : 'day'} with expected hours: ${cols.map((c) => c.title).join('; ')}`}>
+      <div className={s.chart} style={grid} role="img" aria-label={t(byWeek ? 'exp2.chartWeek' : 'exp2.chartDay', { cols: cols.map((c) => c.title).join('; ') })}>
         {cols.map((c) => (
           <div key={c.key} className={s.col} title={c.title}>
             <div className={s.stack}>
@@ -130,7 +140,9 @@ export function ExpectedChart({ e, byWeek }: { e: ExpectedHours; byWeek: boolean
           </span>
         ))}
       </div>
-      <p className={s.note}>{expectedSource(e)} Time off and holidays lower them. Being over or under is information for you, not a score.</p>
+      <p className={s.note}>
+        {expectedSource(e)} {t('exp2.note')}
+      </p>
     </>
   );
 }

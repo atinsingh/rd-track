@@ -1,4 +1,5 @@
 import type { DomainEventType, WebhookEventType } from '@rd/contracts';
+import type { Lang } from '../../i18n';
 import { many, one, type Queryable } from '../../db/pool';
 import { emitEvent } from '../webhooks/service';
 import { notify, type NotificationInput } from './notify';
@@ -113,8 +114,18 @@ export async function reviewersOf(q: Queryable, orgId: string, userId: string): 
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : '');
-const day = (iso: unknown) =>
-  typeof iso === 'string' ? new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(iso)) : '';
+/** A date from the event, written for the reader. */
+const day = (l: Lang, iso: unknown) => (typeof iso === 'string' ? l.day(iso) : '');
+/** An amount from the event: formatted for the reader when the event carries cents, else as published. */
+const amountOf = (l: Lang, d: Record<string, unknown>) =>
+  typeof d.amount_cents === 'number' && typeof d.currency === 'string' ? l.money(d.amount_cents, d.currency) : str(d.amount);
+/** A week from the event ("19 Oct"), else its published label. */
+const weekOf = (l: Lang, d: Record<string, unknown>) => (typeof d.week === 'string' ? l.dayMonth(d.week) : str(d.week_label));
+/** When something is due, in the person's own time zone when the event says which. */
+const dueOf = (l: Lang, d: Record<string, unknown>) =>
+  typeof d.due_at === 'string' && typeof d.tz === 'string' ? l.dueTime(Date.parse(d.due_at), d.tz) : str(d.due_label);
+const PERMISSIONS = ['input_monitoring', 'screen_recording'] as const;
+const permissionOf = (d: Record<string, unknown>) => PERMISSIONS.find((p) => p === d.permission);
 
 async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
   const d = e.data;
@@ -125,8 +136,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await reviewersOf(q, e.organizationId, e.subjectUserId!), {
         kind: 'correction_review',
         category: 'approvals',
-        title: `${str(d.user_name)} asked to correct their time`,
-        body: 'Review it in Approvals.',
+        title: (l) => l.t('ev.correctionSubmitted.title', { name: str(d.user_name) }),
+        body: (l) => l.t('ev.reviewInApprovals'),
         link: '/approvals',
       });
       return;
@@ -134,10 +145,13 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'correction_decision',
         category: 'my_requests',
-        title: d.approved ? 'Your time correction was approved' : 'Your time correction was sent back',
-        body: d.approved
-          ? `${str(d.reviewer_name)} approved it.`
-          : `${str(d.reviewer_name)} sent it back${d.note ? `: “${str(d.note)}”` : '.'}`,
+        title: (l) => (d.approved ? l.t('ev.correctionApproved.title') : l.t('ev.correctionSentBack.title')),
+        body: (l) =>
+          d.approved
+            ? l.t('ev.correctionApproved.body', { name: str(d.reviewer_name) })
+            : d.note
+              ? l.t('ev.correctionSentBack.bodyNote', { name: str(d.reviewer_name), note: str(d.note) })
+              : l.t('ev.correctionSentBack.body', { name: str(d.reviewer_name) }),
         link: '/me/time',
       });
       return;
@@ -145,8 +159,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await reviewersOf(q, e.organizationId, e.subjectUserId!), {
         kind: 'timesheet_submitted',
         category: 'approvals',
-        title: `${str(d.user_name)} submitted their timesheet`,
-        body: `Week of ${day(d.period_start)}. Review it in Approvals.`,
+        title: (l) => l.t('ev.timesheetSubmitted.title', { name: str(d.user_name) }),
+        body: (l) => l.t('ev.timesheetSubmitted.body', { week: day(l, d.period_start) }),
         link: '/approvals',
       });
       return;
@@ -156,8 +170,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'deletion_declined',
         category: 'privacy',
-        title: 'Your screenshot deletion request was declined',
-        body: `${str(d.reviewer_name)} declined it. The screenshot keeps its normal retention date.`,
+        title: (l) => l.t('ev.deletionDeclined.title'),
+        body: (l) => l.t('ev.deletionDeclined.body', { name: str(d.reviewer_name) }),
         link: '/me/privacy',
       });
       return;
@@ -165,8 +179,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'deletion_completed',
         category: 'privacy',
-        title: 'Your screenshot was deleted',
-        body: 'The image and its preview are gone from storage. The deletion is in your access log.',
+        title: (l) => l.t('ev.deletionDone.title'),
+        body: (l) => l.t('ev.deletionDone.body'),
         link: '/me/privacy',
       });
       return;
@@ -174,27 +188,33 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'device_revoked',
         category: 'devices',
-        title: `${str(d.device_name)} was disconnected from Track`,
-        body: 'Your org admin disconnected this computer. It no longer tracks or sends anything.',
+        title: (l) => l.t('ev.deviceRevoked.title', { device: str(d.device_name) }),
+        body: (l) => l.t('ev.deviceRevoked.body'),
         link: '/me',
       });
       return;
-    case 'device.permission_missing':
+    case 'device.permission_missing': {
+      const perm = permissionOf(d);
       await send(subject, {
         kind: 'device_permission',
         category: 'devices',
-        title: `${str(d.device_name)} needs a permission`,
-        body: `Track can't measure ${str(d.what)} until you allow “${str(d.permission_label)}” in system settings. Nothing else is collected.`,
+        title: (l) => l.t('ev.permission.title', { device: str(d.device_name) }),
+        body: (l) =>
+          l.t('ev.permission.body', {
+            what: perm ? l.t(`perm.what.${perm}`) : str(d.what),
+            permission: perm ? l.t(`perm.${perm}`) : str(d.permission_label),
+          }),
         link: '/me',
       });
       return;
+    }
     case 'support_grant.requested': {
       const hours = Number(d.hours);
       await send(await orgAdmins(q, e.organizationId), {
         kind: 'support_request',
         category: 'security',
-        title: 'RoundDigital support asks to look at your setup',
-        body: `${str(d.operator_name)} asked for ${hours} ${hours === 1 ? 'hour' : 'hours'} of read-only access to your configuration (people, teams, devices, policies, audit log; never activity or screenshots): “${str(d.reason)}”. Approve or decline in Support access.`,
+        title: (l) => l.t('ev.supportRequest.title'),
+        body: (l) => l.t(hours === 1 ? 'ev.supportRequest.body.one' : 'ev.supportRequest.body.other', { operator: str(d.operator_name), n: hours, reason: str(d.reason) }),
         link: '/admin/support',
       });
       return;
@@ -204,8 +224,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await orgAdmins(q, e.organizationId), {
         kind: 'trial_ending',
         category: 'billing',
-        title: `Your Pro trial ends in ${days} ${days === 1 ? 'day' : 'days'}`,
-        body: `Choose a plan before ${day(d.ends_at)} to keep everything you've set up. Up to 2 people can stay on Free.`,
+        title: (l) => l.t(days === 1 ? 'ev.trialEnding.title.one' : 'ev.trialEnding.title.other', { n: days }),
+        body: (l) => l.t('ev.trialEnding.body', { date: day(l, d.ends_at) }),
         link: '/admin/billing',
       });
       return;
@@ -214,8 +234,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await orgAdmins(q, e.organizationId), {
         kind: 'payment_failed',
         category: 'billing',
-        title: 'A payment failed — update your payment method',
-        body: `Everything keeps working until ${day(d.grace_ends_at)}. After that, agents stop tracking and tell people why.`,
+        title: (l) => l.t('ev.paymentFailed.title'),
+        body: (l) => l.t('ev.paymentFailed.body', { date: day(l, d.grace_ends_at) }),
         link: '/admin/billing',
       });
       return;
@@ -223,8 +243,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await orgAdmins(q, e.organizationId), {
         kind: 'grace_ending',
         category: 'billing',
-        title: 'Tracking stops in 3 days',
-        body: `The grace period ends on ${day(d.grace_ends_at)}. Choose a plan or update payment to keep tracking.`,
+        title: (l) => l.t('ev.graceEnding.title'),
+        body: (l) => l.t('ev.graceEnding.body', { date: day(l, d.grace_ends_at) }),
         link: '/admin/billing',
       });
       return;
@@ -232,8 +252,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await orgAdmins(q, e.organizationId), {
         kind: 'subscription_inactive',
         category: 'billing',
-        title: 'Your subscription is inactive — nothing is being collected',
-        body: 'Agents stopped tracking and show a notice. Reports and exports stay readable. Choose a plan to resume.',
+        title: (l) => l.t('ev.inactive.title'),
+        body: (l) => l.t('ev.inactive.body'),
         link: '/admin/billing',
       });
       return;
@@ -241,8 +261,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'timesheet_due',
         category: 'my_requests',
-        title: `Your timesheet for the week of ${str(d.week_label)} is due ${str(d.due_label)}`,
-        body: 'Check the week and submit it for approval.',
+        title: (l) => l.t('ev.timesheetDue.title', { week: weekOf(l, d), due: dueOf(l, d) }),
+        body: (l) => l.t('ev.timesheetDue.body'),
         link: '/me/time',
       });
       return;
@@ -250,8 +270,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'timesheet_overdue',
         category: 'my_requests',
-        title: `Your timesheet for the week of ${str(d.week_label)} is overdue`,
-        body: `It was due ${str(d.due_label)}. Submit it so your reviewer can approve it.`,
+        title: (l) => l.t('ev.timesheetOverdue.title', { week: weekOf(l, d) }),
+        body: (l) => l.t('ev.timesheetOverdue.body', { due: dueOf(l, d) }),
         link: '/me/time',
       });
       return;
@@ -261,8 +281,11 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'timesheet_escalated',
         category: 'approvals',
-        title: `${count} ${count === 1 ? 'timesheet is' : 'timesheets are'} overdue for the week of ${str(d.week_label)}`,
-        body: `${names.join(', ')}${count > names.length ? ` and ${count - names.length} more` : ''} haven't submitted yet.`,
+        title: (l) => l.t(count === 1 ? 'ev.escalated.title.one' : 'ev.escalated.title.other', { n: count, week: weekOf(l, d) }),
+        body: (l) =>
+          l.t('ev.escalated.body', {
+            names: count > names.length ? l.t('ev.escalated.more', { names: names.join(', '), n: count - names.length }) : names.join(', '),
+          }),
         link: str(d.link) || '/team',
       });
       return;
@@ -271,8 +294,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: 'device_stale',
         category: 'devices',
-        title: `${str(d.device_name)} hasn’t synced for a few working days`,
-        body: `Last seen ${day(d.last_seen_at)}. If you've been working on it, open Track so your time arrives. If you no longer use it, ask your org admin to remove it.`,
+        title: (l) => l.t('ev.deviceStale.title', { device: str(d.device_name) }),
+        body: (l) => l.t('ev.deviceStale.body', { date: day(l, d.last_seen_at) }),
         link: '/me',
       });
       return;
@@ -284,7 +307,7 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(await reviewersOf(q, e.organizationId, e.subjectUserId!), {
         kind: 'expense_review',
         category: 'approvals',
-        title: `${str(d.user_name)} claimed an expense of ${str(d.amount)}`,
+        title: (l) => l.t('ev.expenseClaimed.title', { name: str(d.user_name), amount: amountOf(l, d) }),
         body: str(d.note),
         link: '/approvals',
       });
@@ -293,8 +316,11 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       await send(subject, {
         kind: d.approved ? 'expense_approved' : 'expense_sent_back',
         category: 'my_requests',
-        title: d.approved ? `Your expense of ${str(d.amount)} was approved` : `${str(d.reviewer_name)} sent back your expense of ${str(d.amount)}`,
-        body: d.approved ? 'It is paid with the next payroll.' : str(d.review_note) || 'Open it to see why.',
+        title: (l) =>
+          d.approved
+            ? l.t('ev.expenseApproved.title', { amount: amountOf(l, d) })
+            : l.t('ev.expenseSentBack.title', { name: str(d.reviewer_name), amount: amountOf(l, d) }),
+        body: (l) => (d.approved ? l.t('ev.expenseApproved.body') : str(d.review_note) || l.t('ev.expenseSentBack.body')),
         link: '/me/expenses',
       });
       return;

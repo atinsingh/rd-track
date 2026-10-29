@@ -8,6 +8,7 @@ import { enrollmentCode, normalizeEnrollmentCode, randomToken, sha256Hex } from 
 import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertEntitlement } from '../billing/service';
+import { langOfUser } from '../../i18n';
 
 /**
  * G26 (P2): the organization's own logo, and deploying the desktop app with MDM.
@@ -152,19 +153,20 @@ export async function requestEnrollmentCode(deps: Deps, q: Queryable, deployment
       targetUserId: u.id,
       metadata: { deployment_key_id: k.id },
     });
+    const l = await langOfUser(q, u.id);
     return {
       to: u.email,
-      subject: `Your code to connect this computer to ${u.org_name}`,
+      subject: l.t('code.subject', { org: u.org_name }),
       text: [
-        `Hi ${u.display_name},`,
+        l.t('code.hi', { name: u.display_name }),
         '',
-        `Enter this code in RoundDigital Track on the computer you're setting up:`,
+        l.t('code.enter'),
         '',
         `    ${code}`,
         '',
-        `It works once, in the next ${CODE_TTL_MIN} minutes. Nothing is recorded until you start a session yourself.`,
+        l.t('code.once', { n: CODE_TTL_MIN }),
         '',
-        "If you didn't ask for it, you can ignore this email.",
+        l.t('code.ignore'),
       ].join('\n'),
     };
   });

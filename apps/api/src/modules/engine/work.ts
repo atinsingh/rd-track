@@ -15,6 +15,7 @@ import { audit } from '../audit/service';
 import { currentSubscription } from '../billing/service';
 import { dateInTz, isValidTimeZone, isoWeekday, zonedTimeToMs } from '../scheduling/tz';
 import { publish, reviewersOf } from './events';
+import { langOfUser } from '../../i18n';
 
 /**
  * Engine slice 3: work items and rules (docs/design/07-product-review.md §3).
@@ -154,7 +155,7 @@ export async function runTimesheetRules(deps: Pick<Deps, 'now' | 'pool'>): Promi
         const tz = isValidTimeZone(p.timezone) ? p.timezone : 'UTC';
         for (const { week } of await unsubmittedWeeks(q, orgId, p, now, (w) => reminderAt(rule, w, tz))) {
           const due = dueAt(rule, week, tz);
-          const base = { organizationId: orgId, subjectUserId: p.id, data: { week, week_label: weekLabel(week), due_at: new Date(due).toISOString(), due_label: dueLabel(due, tz) } };
+          const base = { organizationId: orgId, subjectUserId: p.id, data: { week, week_label: weekLabel(week), due_at: new Date(due).toISOString(), due_label: dueLabel(due, tz), tz } };
           if (now >= reminderAt(rule, week, tz) && now < due) {
             if (await publish(q, { ...base, type: 'timesheet.due_soon', dedupeKey: `ts_due:${p.id}:${week}` })) n++;
           }
@@ -238,6 +239,7 @@ export async function todosFor(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
   const me = await one<Person & { tracking_enabled: boolean }>(q, 'SELECT id, display_name, timezone, tracking_enabled FROM users WHERE id = $1', [actor.userId]);
   if (!me) return items;
   const tz = isValidTimeZone(me.timezone) ? me.timezone : 'UTC';
+  const l = await langOfUser(q, actor.userId);
   const sub = await currentSubscription(q, actor.organizationId, deps.now());
   if (me.tracking_enabled && (sub.status === 'trialing' || hasEntitlement(sub.plan, 'timesheets'))) {
     const rule = await getTimesheetRule(q, actor.organizationId);
@@ -248,8 +250,8 @@ export async function todosFor(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
       items.push({
         id: `timesheet:${week}`,
         kind: sentBack ? 'resubmit_timesheet' : 'submit_timesheet',
-        title: sentBack ? `Fix and resubmit your timesheet for the week of ${weekLabel(week)}` : `Submit your timesheet for the week of ${weekLabel(week)}`,
-        body: sentBack ? 'Your reviewer sent it back with a note.' : due ? `Due ${dueLabel(due, tz)}.` : 'Check the week and submit it for approval.',
+        title: l.t(sentBack ? 'todo.resubmit' : 'todo.submit', { week: l.dayMonth(week) }),
+        body: sentBack ? l.t('todo.sentBack') : due ? l.t('todo.due', { due: l.dueTime(due, tz) }) : l.t('todo.check'),
         link: `/me/time?week=${week}`,
         due_at: due ? new Date(due).toISOString() : null,
         overdue: due !== null && now >= due,
@@ -266,21 +268,21 @@ export async function todosFor(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
     items.push({
       id: 'connect_computer',
       kind: 'connect_computer',
-      title: 'Connect your computer',
-      body: 'Install the Track app and connect it with a one-time code. Nothing is recorded until you start a session.',
+      title: l.t('todo.connect.title'),
+      body: l.t('todo.connect.body'),
       link: '/me/computers',
       due_at: null,
       overdue: false,
     });
   }
   for (const d of devices) {
-    for (const [key, label] of [['input_monitoring', 'Input Monitoring'], ['screen_recording', 'Screen Recording']] as const) {
+    for (const key of ['input_monitoring', 'screen_recording'] as const) {
       if (d.permissions?.[key] === 'denied') {
         items.push({
           id: `permission:${d.id}:${key}`,
           kind: 'allow_permission',
-          title: `Allow ${label} for Track on ${d.name}`,
-          body: 'In system settings, under Privacy & Security. Nothing else is collected.',
+          title: l.t('todo.allow.title', { permission: l.t(`perm.${key}`), device: d.name }),
+          body: l.t('todo.allow.body'),
           link: '/me/privacy',
           due_at: null,
           overdue: false,
@@ -291,8 +293,8 @@ export async function todosFor(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
       items.push({
         id: `stale:${d.id}`,
         kind: 'open_agent',
-        title: `Open Track on ${d.name}`,
-        body: 'It hasn’t synced for a few working days. If you no longer use it, ask your org admin to remove it.',
+        title: l.t('todo.open.title', { device: d.name }),
+        body: l.t('todo.open.body'),
         link: '/me',
         due_at: null,
         overdue: false,

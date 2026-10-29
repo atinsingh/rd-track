@@ -15,6 +15,7 @@ import { toCsv } from '../../lib/csv';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { dateRange, groupSeconds, timeWithBillRates, userTimezone } from './time';
+import { langOfOrg } from '../../i18n';
 
 /**
  * Invoices from tracked time (Stage 3). A draft is built from a client and a period: one
@@ -308,11 +309,6 @@ export async function markInvoiceUnpaid(q: Queryable, actor: UserActor, id: stri
   return getInvoice(q, orgId, id);
 }
 
-const hoursText = (h: number) => h.toFixed(2);
-/** "1 Oct 2026": calendar dates, so formatted in UTC whatever the server's zone. */
-const dateText = (d: string) => new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
-const moneyText = (cents: number, currency: string) =>
-  new Intl.NumberFormat('en', { style: 'currency', currency }).format(cents / 100);
 
 /**
  * Emails an issued invoice to the client (its billing contact unless `to` is given) and
@@ -333,19 +329,23 @@ export async function prepareInvoiceEmail(
   const to = body.to ?? inv.client.contact_email;
   if (!to) throw errors.validation('This client has no billing email. Add one to the client, or enter an address.');
   const sender = await one<{ email: string }>(q, 'SELECT email FROM users WHERE id = $1', [actor.userId]);
-  const label = (l: InvoiceDTO['lines'][number]) => [l.project_name, l.user_name, l.description].filter(Boolean).join(' · ') || 'Time';
+  const label = (line: InvoiceDTO['lines'][number]) => [line.project_name, line.user_name, line.description].filter(Boolean).join(' · ') || 'Time';
+  // The client is the agency's: the email is in the agency's language and formats (G27).
+  const l = await langOfOrg(q, orgId);
+  const money = (cents: number) => l.money(cents, inv.currency);
   const message = invoiceEmail({
+    l,
     to,
     replyTo: sender!.email,
     orgName: inv.organization_name,
     number: inv.number!,
     clientName: inv.client.name,
-    period: `${dateText(inv.period_from)} – ${dateText(inv.period_to)}`,
-    due: inv.due_date ? dateText(inv.due_date) : null,
-    lines: inv.lines.map((l) => ({ label: label(l), hours: hoursText(l.hours), rate: moneyText(l.rate_cents, inv.currency), amount: moneyText(l.amount_cents, inv.currency) })),
-    subtotal: moneyText(inv.subtotal_cents, inv.currency),
-    tax: inv.tax_cents ? `${moneyText(inv.tax_cents, inv.currency)} (${(inv.tax_rate_bp / 100).toFixed(2)}%)` : null,
-    total: moneyText(inv.total_cents, inv.currency),
+    period: `${l.day(inv.period_from)} – ${l.day(inv.period_to)}`,
+    due: inv.due_date ? l.day(inv.due_date) : null,
+    lines: inv.lines.map((line) => ({ label: label(line), hours: l.number(line.hours, 2), rate: money(line.rate_cents), amount: money(line.amount_cents) })),
+    subtotal: money(inv.subtotal_cents),
+    tax: inv.tax_cents ? `${money(inv.tax_cents)} (${new Intl.NumberFormat(l.locale, { style: 'percent', minimumFractionDigits: 2 }).format(inv.tax_rate_bp / 10_000)})` : null,
+    total: money(inv.total_cents),
     notes: inv.notes,
     message: body.message?.trim() || null,
   });
