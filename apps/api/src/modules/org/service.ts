@@ -1,13 +1,14 @@
-import type { ProjectDTO, UserDTO } from '@rd/contracts';
+import { userImportRow, type AdminProjectDTO, type ProjectDTO, type UserDTO, type UserImportResponse, type UserImportResult } from '@rd/contracts';
 import type { Deps, UserActor } from '../../context';
-import { many, one, type Queryable } from '../../db/pool';
+import { many, one, withTx, type Queryable } from '../../db/pool';
 import type { EmailMessage } from '../../email/sender';
 import { hashPassword } from '../../lib/crypto';
-import { errors } from '../../lib/errors';
+import { AppError, errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { inviteUser } from '../auth/identity';
 import { publish } from '../engine/events';
 import { assertSeatAvailable } from '../billing/service';
+import { isValidTimeZone } from '../scheduling/tz';
 
 const USER_SELECT = `
   SELECT u.id, u.email, u.display_name, u.org_role, u.status, u.tracking_enabled, u.mfa_enabled, u.timezone, u.created_at,
@@ -78,6 +79,12 @@ export async function updateUser(
   if ((patch.org_role === 'super_admin' || before.org_role === 'super_admin') && actor.orgRole !== 'super_admin') {
     throw errors.forbidden();
   }
+  if (patch.org_role && patch.org_role !== before.org_role) {
+    // Nobody changes their own role (another admin can), and the last admin can't stop being one.
+    if (id === actor.userId) throw errors.validation('Ask another admin to change your role');
+    if (before.org_role === 'org_admin' && before.status === 'active') await assertAnotherAdmin(q, actor.organizationId, id);
+  }
+  if (patch.timezone !== undefined && !isValidTimeZone(patch.timezone)) throw errors.validation('Choose a valid time zone');
   if (patch.tracking_enabled === true && !before.tracking_enabled && before.status === 'active') {
     await assertSeatAvailable(q, actor.organizationId, deps.now());
   }
@@ -97,6 +104,30 @@ export async function updateUser(
     requestId,
     metadata: { fields: Object.keys(patch) },
   });
+  return getUser(q, actor.organizationId, id);
+}
+
+async function assertAnotherAdmin(q: Queryable, orgId: string, exceptId: string) {
+  const r = await one<{ n: number }>(
+    q,
+    `SELECT count(*)::int AS n FROM users WHERE organization_id = $1 AND id <> $2 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')`,
+    [orgId, exceptId],
+  );
+  if (!r?.n) throw errors.conflict('last_admin', 'Your organization needs at least one other active admin first');
+}
+
+/**
+ * Brings a deactivated person back (G14). They sign in with their old password (or accept
+ * a fresh invite), enrol their computer again and are added back to teams; nothing that
+ * deactivation ended comes back by itself.
+ */
+export async function reactivateUser(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<UserDTO> {
+  const user = await getUser(q, actor.organizationId, id);
+  if (user.status === 'active') throw errors.conflict('already_active', 'This person is already active');
+  if (user.org_role === 'super_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
+  if (user.tracking_enabled) await assertSeatAvailable(q, actor.organizationId, deps.now());
+  await q.query(`UPDATE users SET status = 'active', deactivated_at = NULL WHERE organization_id = $1 AND id = $2`, [actor.organizationId, id]);
+  await audit(q, { organizationId: actor.organizationId, actor, action: 'user.reactivate', targetType: 'user', targetId: id, targetUserId: id, requestId });
   return getUser(q, actor.organizationId, id);
 }
 
@@ -162,7 +193,7 @@ export async function listTeams(q: Queryable, orgId: string): Promise<AdminTeam[
                                  ORDER BY u.display_name)
                  FROM team_memberships m JOIN users u ON u.id = m.user_id
                  WHERE m.team_id = t.id AND m.valid_to IS NULL), '[]') AS members
-     FROM teams t WHERE t.organization_id = $1 ORDER BY t.name`,
+     FROM teams t WHERE t.organization_id = $1 AND t.archived_at IS NULL ORDER BY t.name`,
     [orgId],
   );
 }
@@ -174,9 +205,46 @@ export async function createTeam(q: Queryable, actor: UserActor, name: string, r
      ON CONFLICT (organization_id, name) DO NOTHING RETURNING id`,
     [actor.organizationId, name],
   );
-  if (!r) throw errors.conflict('name_taken', 'A team with this name already exists');
+  if (!r) {
+    // Creating a team with an archived team's name brings that team back.
+    const archived = await one<{ id: string }>(
+      q,
+      `UPDATE teams SET archived_at = NULL WHERE organization_id = $1 AND name = $2 AND archived_at IS NOT NULL RETURNING id`,
+      [actor.organizationId, name],
+    );
+    if (!archived) throw errors.conflict('name_taken', 'A team with this name already exists');
+    await audit(q, { organizationId: actor.organizationId, actor, action: 'team.restore', targetType: 'team', targetId: archived.id, requestId });
+    return { id: archived.id, name };
+  }
   await audit(q, { organizationId: actor.organizationId, actor, action: 'team.create', targetType: 'team', targetId: r.id, requestId });
   return { id: r.id, name };
+}
+
+async function activeTeam(q: Queryable, orgId: string, teamId: string) {
+  const t = await one<{ id: string; name: string; archived_at: string | null }>(q, 'SELECT id, name, archived_at FROM teams WHERE id = $1 AND organization_id = $2', [teamId, orgId]);
+  if (!t || t.archived_at) throw errors.notFound('Team');
+  return t;
+}
+
+export async function renameTeam(q: Queryable, actor: UserActor, teamId: string, name: string, requestId?: string) {
+  const t = await activeTeam(q, actor.organizationId, teamId);
+  if (t.name === name) return { id: teamId, name };
+  if (await one(q, 'SELECT 1 FROM teams WHERE organization_id = $1 AND name = $2', [actor.organizationId, name])) {
+    throw errors.conflict('name_taken', 'A team with this name already exists');
+  }
+  await q.query('UPDATE teams SET name = $2 WHERE id = $1', [teamId, name]);
+  await audit(q, { organizationId: actor.organizationId, actor, action: 'team.rename', targetType: 'team', targetId: teamId, requestId, metadata: { from: t.name, to: name } });
+  return { id: teamId, name };
+}
+
+/** Only an empty team can be archived, so nobody silently loses their manager or their access. */
+export async function archiveTeam(deps: Pick<Deps, 'now'>, q: Queryable, actor: UserActor, teamId: string, requestId?: string) {
+  await activeTeam(q, actor.organizationId, teamId);
+  const n = await one<{ n: number }>(q, 'SELECT count(*)::int AS n FROM team_memberships WHERE team_id = $1 AND valid_to IS NULL', [teamId]);
+  if (n?.n) throw errors.conflict('team_not_empty', 'Move or remove everyone in this team first');
+  await q.query('UPDATE teams SET archived_at = $2 WHERE id = $1', [teamId, deps.now().toISOString()]);
+  await audit(q, { organizationId: actor.organizationId, actor, action: 'team.archive', targetType: 'team', targetId: teamId, requestId });
+  return { ok: true as const };
 }
 
 /** Adds or changes a membership; a role change closes the old row and opens a new one (IAM-07). */
@@ -188,7 +256,7 @@ export async function setTeamMember(
   role: 'member' | 'manager',
   requestId?: string,
 ) {
-  await assertInOrg(q, actor.organizationId, 'teams', teamId, 'Team');
+  await activeTeam(q, actor.organizationId, teamId);
   await assertInOrg(q, actor.organizationId, 'users', userId, 'User');
   const current = await one<{ id: string; role: string }>(
     q,
@@ -318,6 +386,170 @@ export async function setProjectMember(
     requestId,
     metadata: { role },
   });
+}
+
+/** The admin list adds who is on each project (members' names aren't shown to employees). */
+export async function listAdminProjects(q: Queryable, orgId: string): Promise<AdminProjectDTO[]> {
+  return many<AdminProjectDTO>(
+    q,
+    `SELECT p.id, p.name, p.client_ref, p.status,
+       COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY t.name)
+                 FROM tasks t WHERE t.project_id = p.id AND t.status = 'active'), '[]') AS tasks,
+       COALESCE((SELECT json_agg(json_build_object('user_id', u.id, 'display_name', u.display_name, 'role', m.role) ORDER BY u.display_name)
+                 FROM project_memberships m JOIN users u ON u.id = m.user_id
+                 WHERE m.project_id = p.id AND m.valid_to IS NULL), '[]') AS members
+     FROM projects p WHERE p.organization_id = $1 ORDER BY p.name`,
+    [orgId],
+  );
+}
+
+export async function updateProject(
+  q: Queryable,
+  actor: UserActor,
+  projectId: string,
+  patch: { name?: string; client_ref?: string | null; status?: 'active' | 'archived' },
+  requestId?: string,
+): Promise<ProjectDTO> {
+  await assertInOrg(q, actor.organizationId, 'projects', projectId, 'Project');
+  if (patch.name && (await one(q, 'SELECT 1 FROM projects WHERE organization_id = $1 AND name = $2 AND id <> $3', [actor.organizationId, patch.name, projectId]))) {
+    throw errors.conflict('name_taken', 'A project with this name already exists');
+  }
+  await q.query(
+    `UPDATE projects SET name = COALESCE($2, name), status = COALESCE($3, status),
+       client_ref = CASE WHEN $4::boolean THEN $5 ELSE client_ref END WHERE id = $1`,
+    [projectId, patch.name ?? null, patch.status ?? null, patch.client_ref !== undefined, patch.client_ref || null],
+  );
+  const action = patch.status === 'archived' ? 'project.archive' : patch.status === 'active' ? 'project.restore' : 'project.update';
+  await audit(q, { organizationId: actor.organizationId, actor, action, targetType: 'project', targetId: projectId, requestId, metadata: { fields: Object.keys(patch) } });
+  return (await listProjects(q, actor.organizationId, [projectId]))[0]!;
+}
+
+export async function updateTask(
+  q: Queryable,
+  actor: UserActor,
+  projectId: string,
+  taskId: string,
+  patch: { name?: string; status?: 'active' | 'archived' },
+  requestId?: string,
+) {
+  const t = await one<{ id: string }>(q, 'SELECT id FROM tasks WHERE id = $1 AND project_id = $2 AND organization_id = $3', [taskId, projectId, actor.organizationId]);
+  if (!t) throw errors.notFound('Task');
+  if (patch.name && (await one(q, 'SELECT 1 FROM tasks WHERE project_id = $1 AND name = $2 AND id <> $3', [projectId, patch.name, taskId]))) {
+    throw errors.conflict('name_taken', 'A task with this name already exists');
+  }
+  await q.query('UPDATE tasks SET name = COALESCE($2, name), status = COALESCE($3, status) WHERE id = $1', [taskId, patch.name ?? null, patch.status ?? null]);
+  await audit(q, {
+    organizationId: actor.organizationId,
+    actor,
+    action: patch.status === 'archived' ? 'task.archive' : 'task.update',
+    targetType: 'task',
+    targetId: taskId,
+    requestId,
+  });
+  return { ok: true as const };
+}
+
+export async function removeProjectMember(q: Queryable, actor: UserActor, projectId: string, userId: string, requestId?: string) {
+  await assertInOrg(q, actor.organizationId, 'projects', projectId, 'Project');
+  await q.query('UPDATE project_memberships SET valid_to = now() WHERE project_id = $1 AND user_id = $2 AND valid_to IS NULL', [projectId, userId]);
+  await audit(q, {
+    organizationId: actor.organizationId,
+    actor,
+    action: 'project.member_removed',
+    targetType: 'project',
+    targetId: projectId,
+    targetUserId: userId,
+    requestId,
+  });
+}
+
+// ───────────── CSV import (G14) ─────────────
+
+/** Rolls back a dry run after every row was tried. */
+class DryRunDone extends Error {}
+/** Rolls back one rejected row, carrying why. */
+class RowRejected extends Error {
+  constructor(readonly result: UserImportResult) {
+    super(result.message);
+  }
+}
+
+/**
+ * Invites people from CSV rows. Every row goes through createUser (same seat, email and
+ * role rules as one invite), each in its own transaction, so one bad row never blocks the
+ * others. A dry run tries every row in one transaction, each behind a savepoint so the
+ * rows see each other (duplicates, seats), then rolls everything back.
+ */
+export async function importUsers(deps: Deps, actor: UserActor, rows: readonly unknown[], dryRun: boolean, requestId?: string): Promise<UserImportResponse> {
+  const results: UserImportResult[] = [];
+  const seen = new Set<string>();
+  const invites: EmailMessage[] = [];
+
+  const tryRow = async (q: Queryable, i: number, raw: unknown): Promise<UserImportResult> => {
+    const email = typeof (raw as { email?: unknown })?.email === 'string' ? (raw as { email: string }).email.trim() : null;
+    const parsed = userImportRow.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0]!;
+      return { row: i + 1, email, ok: false, code: 'validation_failed', message: `${issue.path.join('.') || 'row'}: ${issue.message}` };
+    }
+    const r = parsed.data;
+    const key = r.email.toLowerCase();
+    if (seen.has(key)) return { row: i + 1, email: r.email, ok: false, code: 'duplicate_row', message: 'This email appears earlier in the file' };
+    seen.add(key);
+    if (!isValidTimeZone(r.timezone)) return { row: i + 1, email: r.email, ok: false, code: 'validation_failed', message: `timezone: ${r.timezone} is not a time zone` };
+    try {
+      const { user, invite } = await createUser(deps, q, actor, { ...r, password: undefined }, requestId);
+      let team: UserImportResult['team'];
+      if (r.team) {
+        const existing = await one<{ id: string }>(q, 'SELECT id FROM teams WHERE organization_id = $1 AND name = $2 AND archived_at IS NULL', [actor.organizationId, r.team]);
+        const teamId = existing?.id ?? (await createTeam(q, actor, r.team, requestId)).id;
+        await setTeamMember(q, actor, teamId, user.id, 'member', requestId);
+        team = existing ? 'joined' : 'created';
+      }
+      if (invite) invites.push(invite);
+      return { row: i + 1, email: r.email, ok: true, user_id: dryRun ? undefined : user.id, ...(team ? { team } : {}) };
+    } catch (e) {
+      if (e instanceof AppError) return { row: i + 1, email: r.email, ok: false, code: e.code, message: e.message };
+      throw e;
+    }
+  };
+
+  if (dryRun) {
+    try {
+      await withTx(deps.pool, async (tx) => {
+        for (const [i, raw] of rows.entries()) {
+          await tx.query('SAVEPOINT import_row');
+          const res = await tryRow(tx, i, raw);
+          await tx.query(res.ok ? 'RELEASE SAVEPOINT import_row' : 'ROLLBACK TO SAVEPOINT import_row');
+          results.push(res);
+        }
+        throw new DryRunDone();
+      });
+    } catch (e) {
+      if (!(e instanceof DryRunDone)) throw e;
+    }
+  } else {
+    for (const [i, raw] of rows.entries()) {
+      // Per row: a failed row rolls back alone. The invite goes out after its row commits.
+      const before = invites.length;
+      let res: UserImportResult;
+      try {
+        res = await withTx(deps.pool, async (tx) => {
+          const r = await tryRow(tx, i, raw);
+          if (!r.ok) throw new RowRejected(r);
+          return r;
+        });
+      } catch (e) {
+        if (!(e instanceof RowRejected)) throw e;
+        res = e.result;
+        invites.length = before;
+      }
+      results.push(res);
+      if (res.ok && invites.length > before) await deps.email.send(invites[invites.length - 1]!);
+    }
+  }
+  const ok = results.filter((r) => r.ok).length;
+  return { dry_run: dryRun, ok, failed: results.length - ok, results };
 }
 
 export async function assertInOrg(q: Queryable, orgId: string, table: 'teams' | 'projects' | 'users' | 'tasks' | 'devices', id: string, what: string) {

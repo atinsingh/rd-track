@@ -108,3 +108,14 @@
   color: var(--text);
   user-select: all;
 }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}

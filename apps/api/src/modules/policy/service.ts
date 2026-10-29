@@ -140,7 +140,7 @@ export async function listPolicies(q: Queryable, orgId: string): Promise<PolicyL
   const rows = await many<{ scope_type: ScopeType; scope_id: string; scope_name: string }>(
     q,
     `SELECT 'organization' AS scope_type, id AS scope_id, name AS scope_name, 0 AS ord FROM organizations WHERE id = $1
-     UNION ALL SELECT 'team', id, name, 1 FROM teams WHERE organization_id = $1
+     UNION ALL SELECT 'team', id, name, 1 FROM teams WHERE organization_id = $1 AND archived_at IS NULL
      UNION ALL SELECT 'project', id, name, 2 FROM projects WHERE organization_id = $1 AND status = 'active'
      UNION ALL SELECT 'device', d.id, d.name || ' (' || u.display_name || ')', 3
        FROM devices d JOIN users u ON u.id = d.user_id

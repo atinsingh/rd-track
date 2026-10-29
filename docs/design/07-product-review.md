@@ -48,8 +48,8 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G11 | Buyer | No terms / DPA acceptance at signup | S | P0 |
 | G12 | Admin | Enrolment codes admin-only, one per person; no deep link; no self-enrolment | M | P1 |
 | G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) | M | P1 |
-| G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV | S/M | P1 |
-| G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed | S | P1 |
+| G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV — **done** | S/M | P1 |
+| G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed — **done** | S | P1 |
 | G16 | Admin | No setup checklist after signup — **done** | M | P1 |
 | G17 | Admin | No tenant export, contract-end deletion or deletion certificate | M | P1 |
 | G18 | Emp | Deletion requests cover screenshots only; no "download my data" | M | P1 |
@@ -147,8 +147,16 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    budgets near their limit. Issued invoices can be emailed to the client and marked paid
    (amounts stay locked). Setup and health builds its checklist from the data and shows
    seats, reviewers, computers to check and hours by team (teams of 5+ only). Auditors
-   filter by who acted or whose data it was and download CSV. Next: 4b People and Teams,
-   4c agent download and self-enrolment.
+   filter by who acted or whose data it was and download CSV.
+
+   **4b done 2026-10-29**: People can be searched and filtered (active, invited,
+   deactivated), edited (name, role, time zone; nobody changes their own role and the last
+   admin stays one) and reactivated. A CSV import checks every row with a dry run (same
+   rules as one invite: email, role, seats, duplicates) before anyone is emailed, then
+   invites row by row, creating teams by name. Teams can be renamed and archived once
+   empty (creating one with the same name brings it back; migration 013); projects can
+   be renamed, re-referenced, archived and restored; tasks renamed or archived; project
+   members removed. Next: 4c agent download and self-enrolment.
 5. **Platform console and data lifecycle.** The operator console (`/platform`) with
    support grants end to end, tenant offboarding with export and deletion certificate,
    employee data export and erasure (G2, G17, G18). Then SSO / SCIM (G26).

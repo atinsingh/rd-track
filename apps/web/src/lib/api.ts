@@ -1,6 +1,8 @@
 import type {
   AccountSecurity,
   InviteInfo,
+  AdminProjectDTO,
+  UserImportResponse,
   AdminOverview,
   AuditPerson,
   MoneyOverview,
@@ -443,13 +445,22 @@ export const rd = {
     updateUser: (id: string, body: UpdateUserBody) =>
       patch<UserDTO | undefined>(`/v1/admin/users/${enc(id)}`, body).then((u) => u ?? null),
     deactivateUser: (id: string) => ok(post(`/v1/admin/users/${enc(id)}/deactivate`)),
+    reactivateUser: (id: string) => post<UserDTO>(`/v1/admin/users/${enc(id)}/reactivate`),
+    importUsers: (rows: readonly unknown[], dryRun: boolean) => post<UserImportResponse>('/v1/admin/users/import', { rows, dry_run: dryRun }),
+    renameTeam: (id: string, name: string) => patch<{ id: string; name: string }>(`/v1/admin/teams/${enc(id)}`, { name }),
+    archiveTeam: (id: string) => ok(post(`/v1/admin/teams/${enc(id)}/archive`)),
+    updateProject: (id: string, body: { name?: string; client_ref?: string | null; status?: 'active' | 'archived' }) =>
+      patch<ProjectDTO>(`/v1/admin/projects/${enc(id)}`, body),
+    updateTask: (projectId: string, taskId: string, body: { name?: string; status?: 'active' | 'archived' }) =>
+      ok(patch(`/v1/admin/projects/${enc(projectId)}/tasks/${enc(taskId)}`, body)),
+    removeProjectMember: (projectId: string, userId: string) => ok(del(`/v1/admin/projects/${enc(projectId)}/members/${enc(userId)}`)),
     teams: (signal?: AbortSignal) => list<TeamSummary>('/v1/admin/teams', { signal }),
     createTeam: (name: string) => post<TeamSummary>('/v1/admin/teams', { name }),
     addTeamMember: (teamId: string, userId: string, role: 'member' | 'manager') =>
       ok(post(`/v1/admin/teams/${enc(teamId)}/members`, { user_id: userId, role })),
     removeTeamMember: (teamId: string, userId: string) =>
       ok(del(`/v1/admin/teams/${enc(teamId)}/members/${enc(userId)}`)),
-    projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/admin/projects', { signal }),
+    projects: (signal?: AbortSignal) => list<AdminProjectDTO>('/v1/admin/projects', { signal }),
     createProject: (name: string, clientRef?: string) =>
       post<ProjectDTO>('/v1/admin/projects', clientRef ? { name, client_ref: clientRef } : { name }),
     addTask: (projectId: string, name: string) => ok(post(`/v1/admin/projects/${enc(projectId)}/tasks`, { name })),

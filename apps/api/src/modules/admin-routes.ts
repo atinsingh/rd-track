@@ -7,9 +7,15 @@ import {
   enrollmentCodeRequest,
   policyUpdateRequest,
   projectMemberRequest,
+  projectUpdateRequest,
+  taskUpdateRequest,
   teamMemberRequest,
+  teamUpdateRequest,
   updateUserRequest,
+  userImportRequest,
+  type AdminProjectDTO,
   type ScopeType,
+  type UserImportResponse,
 } from '@rd/contracts';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -65,6 +71,15 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { id: string } }>('/v1/admin/users/:id/deactivate', user, async (req) =>
     withTx(pool, (tx) => org.deactivateUser(deps, tx, admin(req), req.params.id, req.id)),
   );
+  app.post<{ Params: { id: string } }>('/v1/admin/users/:id/reactivate', user, async (req) =>
+    withTx(pool, (tx) => org.reactivateUser(deps, tx, admin(req), parse(z.uuid(), req.params.id), req.id)),
+  );
+  /** CSV import (G14): each row is its own invite; `dry_run` checks every row and changes nothing. */
+  app.post('/v1/admin/users/import', user, async (req): Promise<UserImportResponse> => {
+    const a = admin(req);
+    const { rows, dry_run } = parse(userImportRequest, req.body);
+    return org.importUsers(deps, a, rows, dry_run, req.id);
+  });
 
   // ───────── teams & projects ─────────
   app.get('/v1/admin/teams', user, async (req) => ({ items: await org.listTeams(pool, admin(req).organizationId) }));
@@ -77,11 +92,30 @@ export async function adminRoutes(app: FastifyInstance, deps: Deps) {
     await withTx(pool, (tx) => org.setTeamMember(tx, admin(req), req.params.id, body.user_id, body.role, req.id));
     return { ok: true };
   });
+  app.patch<{ Params: { id: string } }>('/v1/admin/teams/:id', user, async (req) => {
+    const { name } = parse(teamUpdateRequest, req.body);
+    return withTx(pool, (tx) => org.renameTeam(tx, admin(req), parse(z.uuid(), req.params.id), name, req.id));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/teams/:id/archive', user, async (req) =>
+    withTx(pool, (tx) => org.archiveTeam(deps, tx, admin(req), parse(z.uuid(), req.params.id), req.id)),
+  );
   app.delete<{ Params: { id: string; userId: string } }>('/v1/admin/teams/:id/members/:userId', user, async (req) => {
     await withTx(pool, (tx) => org.removeTeamMember(tx, admin(req), req.params.id, req.params.userId, req.id));
     return { ok: true };
   });
-  app.get('/v1/admin/projects', user, async (req) => ({ items: await org.listProjects(pool, reader(req).organizationId) }));
+  app.get('/v1/admin/projects', user, async (req): Promise<{ items: AdminProjectDTO[] }> => ({ items: await org.listAdminProjects(pool, reader(req).organizationId) }));
+  app.patch<{ Params: { id: string } }>('/v1/admin/projects/:id', user, async (req) => {
+    const body = parse(projectUpdateRequest, req.body);
+    return withTx(pool, (tx) => org.updateProject(tx, admin(req), parse(z.uuid(), req.params.id), body, req.id));
+  });
+  app.patch<{ Params: { id: string; taskId: string } }>('/v1/admin/projects/:id/tasks/:taskId', user, async (req) => {
+    const body = parse(taskUpdateRequest, req.body);
+    return withTx(pool, (tx) => org.updateTask(tx, admin(req), parse(z.uuid(), req.params.id), parse(z.uuid(), req.params.taskId), body, req.id));
+  });
+  app.delete<{ Params: { id: string; userId: string } }>('/v1/admin/projects/:id/members/:userId', user, async (req) => {
+    await withTx(pool, (tx) => org.removeProjectMember(tx, admin(req), parse(z.uuid(), req.params.id), parse(z.uuid(), req.params.userId), req.id));
+    return { ok: true };
+  });
   app.post('/v1/admin/projects', user, async (req, reply) => {
     const body = parse(createProjectRequest, req.body);
     return reply.code(201).send(await withTx(pool, (tx) => org.createProject(tx, admin(req), body.name, body.client_ref, req.id)));

@@ -3,10 +3,12 @@
 import Link from 'next/link';
 import { useMemo, useState, type FormEvent } from 'react';
 import { ORG_ROLES, createUserRequest, type OrgRole, type UserDTO } from '@rd/contracts';
+import { EditUserDialog } from '@/components/people/EditUserDialog';
+import { ImportPeopleDialog } from '@/components/people/ImportPeopleDialog';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
-import { Checkbox, SelectField, TextField } from '@/components/ui/Field';
+import { Checkbox, Segmented, SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridClass, tableClass } from '@/components/ui/Layout';
 import { rd, type ApiError } from '@/lib/api';
 import { byName, plural } from '@/lib/format';
@@ -159,6 +161,10 @@ export default function AdminUsersPage() {
   const [rowNote, setRowNote] = useState<string | null>(null);
   const [resettingMfa, setResettingMfa] = useState<UserDTO | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [editing, setEditing] = useState<UserDTO | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [search, setSearch] = useState('');
+  const [show, setShow] = useState<'active' | 'invited' | 'deactivated' | 'all'>('active');
 
   if (!access.isAdmin) return <NoAccess what="People are managed by org admins." />;
 
@@ -184,6 +190,18 @@ export default function AdminUsersPage() {
     }
   };
 
+  const reactivate = async (u: UserDTO) => {
+    setRowNote(null);
+    setBusyId(u.id);
+    const r = await rowAction.run(() => rd.admin.reactivateUser(u.id));
+    setBusyId(null);
+    if (r) {
+      replace(r);
+      sub.reload();
+      setRowNote(`${u.display_name} is active again. Add them back to their teams, and they enrol their computer again.`);
+    }
+  };
+
   const resend = async (u: UserDTO) => {
     setRowNote(null);
     setBusyId(u.id);
@@ -206,6 +224,12 @@ export default function AdminUsersPage() {
   };
 
   const list = users.data ?? [];
+  const stateOf = (u: UserDTO) => (u.status !== 'active' ? 'deactivated' : u.invite_pending ? 'invited' : 'active');
+  const needle = search.trim().toLowerCase();
+  const matches = (u: UserDTO) =>
+    (show === 'all' || stateOf(u) === show) &&
+    (!needle || u.display_name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle) || u.teams.some((t) => t.name.toLowerCase().includes(needle)));
+  const countOf = (k: 'active' | 'invited' | 'deactivated') => list.filter((u) => stateOf(u) === k).length;
   const active = list.filter((u) => u.status === 'active');
   const tracking = active.filter((u) => u.tracking_enabled).length;
 
@@ -220,9 +244,12 @@ export default function AdminUsersPage() {
             : 'Everyone in your organization.'
         }
         actions={
-          <Button variant="primary" onClick={() => setAdding(true)}>
-            Invite a person →
-          </Button>
+          <>
+            <Button onClick={() => setImporting(true)}>Import CSV…</Button>
+            <Button variant="primary" onClick={() => setAdding(true)}>
+              Invite a person →
+            </Button>
+          </>
         }
       />
       {sub.data ? (
@@ -238,11 +265,29 @@ export default function AdminUsersPage() {
         <Banner role="status" title={rowNote} actions={<Button size="sm" variant="quiet" onClick={() => setRowNote(null)}>Dismiss</Button>} />
       ) : null}
 
-      <Card title="Everyone">
+      <Card
+        title="Everyone"
+        actions={
+          <Segmented<typeof show>
+            legend="Show"
+            name="people-show"
+            value={show}
+            onChange={setShow}
+            options={[
+              { value: 'active', label: `Active ${countOf('active')}` },
+              { value: 'invited', label: `Invited ${countOf('invited')}` },
+              { value: 'deactivated', label: `Deactivated ${countOf('deactivated')}` },
+              { value: 'all', label: 'All' },
+            ]}
+          />
+        }
+      >
+        <TextField label="Search" placeholder="Name, email or team" value={search} onChange={(e) => setSearch(e.target.value)} type="search" />
         <Resource {...users} label="Loading people">
-          {(rows) =>
-            rows.length === 0 ? (
-              <Empty title="No people yet" />
+          {(all) => {
+            const rows = all.filter(matches);
+            return rows.length === 0 ? (
+              <Empty title={all.length === 0 ? 'No people yet' : 'Nobody matches'} />
             ) : (
               <TableBox label="People">
                 <table className={tableClass} style={{ minWidth: 860 }}>
@@ -299,6 +344,15 @@ export default function AdminUsersPage() {
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <span className={s.rowActions}>
+                              {inactive ? (
+                                <Button size="sm" variant="quiet" disabled={busyId === u.id} onClick={() => void reactivate(u)}>
+                                  {busyId === u.id ? 'Reactivating…' : 'Reactivate'}
+                                </Button>
+                              ) : (
+                                <Button size="sm" variant="quiet" onClick={() => setEditing(u)} aria-label={`Edit ${u.display_name}`}>
+                                  Edit
+                                </Button>
+                              )}
                               {!inactive && u.invite_pending ? (
                                 <Button size="sm" variant="quiet" disabled={busyId === u.id} onClick={() => void resend(u)}>
                                   {busyId === u.id ? 'Sending…' : 'Resend invite'}
@@ -322,11 +376,23 @@ export default function AdminUsersPage() {
                   </tbody>
                 </table>
               </TableBox>
-            )
-          }
+            );
+          }}
         </Resource>
       </Card>
 
+      {editing ? (
+        <EditUserDialog user={editing} isSelf={editing.id === me.user.id} roleLabel={ROLE_LABEL} onClose={() => setEditing(null)} onSaved={replace} />
+      ) : null}
+      <ImportPeopleDialog
+        open={importing}
+        onClose={() => setImporting(false)}
+        defaultTz={timezone}
+        onDone={() => {
+          users.reload();
+          sub.reload();
+        }}
+      />
       <CreateUserDialog
         open={adding}
         onClose={() => setAdding(false)}

@@ -363,6 +363,57 @@ export const createProjectRequest = z.strictObject({
 });
 export const createTaskRequest = z.strictObject({ name: z.string().min(1).max(200) });
 export const projectMemberRequest = teamMemberRequest;
+
+// ───────── People and Teams pages (slice 4b, G14–G15) ─────────
+
+const structureName = z.string().trim().min(1).max(200);
+export const teamUpdateRequest = z.strictObject({ name: structureName });
+export const projectUpdateRequest = z.strictObject({
+  name: structureName.optional(),
+  client_ref: z.string().trim().max(200).nullable().optional(),
+  /** Archived projects leave everyone's project picker; their time stays on record. */
+  status: z.enum(['active', 'archived']).optional(),
+});
+export const taskUpdateRequest = z.strictObject({ name: structureName.optional(), status: z.enum(['active', 'archived']).optional() });
+
+/** The admin view of a project adds who is on it. */
+export interface AdminProjectDTO extends ProjectDTO {
+  members: { user_id: string; display_name: string; role: 'member' | 'manager' }[];
+}
+
+/** One CSV row of people to invite. Rows are checked one by one, so one bad row never blocks the rest. */
+export const userImportRow = z.strictObject({
+  email: z.email().max(320),
+  display_name: z.string().trim().min(1).max(200),
+  org_role: z.enum(ORG_ROLES).default('employee'),
+  timezone: z.string().min(1).max(64).default('UTC'),
+  tracking_enabled: z.boolean().default(true),
+  /** A team to join as a member; created if it doesn't exist yet. */
+  team: z.string().trim().min(1).max(200).optional(),
+});
+export type UserImportRow = z.input<typeof userImportRow>;
+export const USER_IMPORT_MAX_ROWS = 500;
+export const userImportRequest = z.strictObject({
+  rows: z.array(z.unknown()).min(1).max(USER_IMPORT_MAX_ROWS),
+  /** Check every row (format, duplicates, existing people, seats) without inviting anyone. */
+  dry_run: z.boolean().default(false),
+});
+export interface UserImportResult {
+  /** 1-based, matching the file's data rows. */
+  row: number;
+  email: string | null;
+  ok: boolean;
+  code?: string;
+  message?: string;
+  user_id?: string;
+  team?: 'joined' | 'created';
+}
+export interface UserImportResponse {
+  dry_run: boolean;
+  ok: number;
+  failed: number;
+  results: UserImportResult[];
+}
 export interface ProjectDTO {
   id: string;
   name: string;

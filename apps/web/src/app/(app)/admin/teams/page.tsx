@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import type { ProjectDTO, TeamSummary, UserDTO } from '@rd/contracts';
+import { useState, type FormEvent, type ReactNode } from 'react';
+import type { AdminProjectDTO, TeamSummary, UserDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { SelectField, TextField } from '@/components/ui/Field';
@@ -47,6 +47,32 @@ function AddMemberForm({ users, exclude, onAdd, label }: { users: UserDTO[]; exc
   );
 }
 
+/** Rename in place: a small form behind a button, so a slip never renames anything. */
+function RenameForm({ label, value, onSave, extra }: { label: string; value: string; onSave: (name: string) => Promise<boolean>; extra?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(value);
+  if (!open)
+    return (
+      <Button size="sm" variant="quiet" onClick={() => setOpen(true)}>
+        Rename…
+      </Button>
+    );
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (name.trim() && (await onSave(name.trim()))) setOpen(false);
+  };
+  return (
+    <form className={s.inlineForm} onSubmit={submit}>
+      <TextField label={label} value={name} maxLength={200} onChange={(e) => setName(e.target.value)} autoFocus />
+      {extra}
+      <Button type="submit" variant="primary" disabled={!name.trim()}>
+        Save
+      </Button>
+      <Button onClick={() => setOpen(false)}>Cancel</Button>
+    </form>
+  );
+}
+
 function TeamItem({ team, users, onChanged }: { team: AdminTeam; users: UserDTO[]; onChanged: () => void }) {
   const action = useAction();
   const members = (
@@ -67,6 +93,14 @@ function TeamItem({ team, users, onChanged }: { team: AdminTeam; users: UserDTO[
   const remove = async (userId: string) => {
     const r = await action.run(() => rd.admin.removeTeamMember(team.id, userId));
     if (r) onChanged();
+  };
+  const rename = async (name: string) => {
+    const r = await action.run(() => rd.admin.renameTeam(team.id, name));
+    if (r) onChanged();
+    return !!r;
+  };
+  const archive = async () => {
+    if (await action.run(() => rd.admin.archiveTeam(team.id))) onChanged();
   };
   return (
     <li className={s.item}>
@@ -96,6 +130,13 @@ function TeamItem({ team, users, onChanged }: { team: AdminTeam; users: UserDTO[
           )}
           <AddMemberForm users={users} exclude={new Set(members.map((m) => m.user.id))} onAdd={add} label={team.name} />
           <p className="small muted">Moving someone between teams keeps their history: the old membership is closed, a new one opens.</p>
+          <div className={s.rowActions}>
+            <RenameForm label="Team name" value={team.name} onSave={rename} />
+            <Button size="sm" variant="quiet" onClick={archive} disabled={action.busy || members.length > 0} title={members.length ? 'Remove everyone first' : undefined}>
+              Archive team
+            </Button>
+          </div>
+          {members.length > 0 ? <p className="small muted">A team can be archived once nobody is in it, so no one silently loses their manager.</p> : null}
           <ActionError error={action.error} />
         </div>
       </details>
@@ -103,53 +144,111 @@ function TeamItem({ team, users, onChanged }: { team: AdminTeam; users: UserDTO[
   );
 }
 
-function ProjectItem({ project, users, onChanged }: { project: ProjectDTO; users: UserDTO[]; onChanged: () => void }) {
+function ProjectItem({ project, users, onChanged }: { project: AdminProjectDTO; users: UserDTO[]; onChanged: () => void }) {
   const action = useAction();
   const [task, setTask] = useState('');
-  const [added, setAdded] = useState<string | null>(null);
+  const [clientRef, setClientRef] = useState(project.client_ref ?? '');
+  const archived = project.status === 'archived';
+  const run = async (fn: () => Promise<unknown>) => {
+    const r = await action.run(fn);
+    if (r) onChanged();
+    return !!r;
+  };
   const addTask = async (e: FormEvent) => {
     e.preventDefault();
     const name = task.trim();
-    if (!name) return;
-    const r = await action.run(() => rd.admin.addTask(project.id, name));
-    if (r) {
-      setTask('');
-      onChanged();
-    }
+    if (name && (await run(() => rd.admin.addTask(project.id, name)))) setTask('');
   };
-  const addMember = async (userId: string, role: Role) => {
-    const r = await action.run(() => rd.admin.addProjectMember(project.id, userId, role));
-    if (r) setAdded(users.find((u) => u.id === userId)?.display_name ?? 'Person');
-    return !!r;
-  };
+  const managers = project.members.filter((m) => m.role === 'manager').map((m) => m.display_name);
   return (
     <li className={s.item}>
       <details>
         <summary>
-          <span className={s.summaryName}>{project.name}</span>
+          <span className={s.summaryName}>
+            {project.name} {archived ? <Badge>Archived</Badge> : null}
+          </span>
           <span className="small muted">
             {project.client_ref ? `${project.client_ref} · ` : ''}
-            {plural(project.tasks.length, 'task')}
-            {project.status === 'archived' ? ' · archived' : ''}
+            {plural(project.tasks.length, 'task')} · {plural(project.members.length, 'member')}
+            {managers.length ? ` · managed by ${managers.join(', ')}` : ''}
           </span>
         </summary>
         <div className={s.detail}>
-          <div className={s.chips} aria-label="Tasks">
-            {project.tasks.length ? project.tasks.map((t) => <Badge key={t.id}>{t.name}</Badge>) : <span className="secondary">No tasks yet.</span>}
-          </div>
-          <form className={s.inlineForm} onSubmit={addTask}>
-            <TextField label="New task" value={task} maxLength={200} onChange={(e) => setTask(e.target.value)} />
-            <Button type="submit" disabled={!task.trim() || action.busy}>
-              Add task
+          {archived ? (
+            <p className="secondary">Archived: nobody can pick it for new time. Everything recorded on it stays.</p>
+          ) : (
+            <>
+              <div className={s.chips} aria-label="Tasks">
+                {project.tasks.length ? (
+                  project.tasks.map((t) => (
+                    <span key={t.id} className={s.chip}>
+                      <Badge>{t.name}</Badge>
+                      <Button
+                        size="sm"
+                        variant="quiet"
+                        aria-label={`Archive task ${t.name}`}
+                        title="Archive: leaves the picker, keeps its time"
+                        onClick={() => void run(() => rd.admin.updateTask(project.id, t.id, { status: 'archived' }))}
+                        disabled={action.busy}
+                      >
+                        ×
+                      </Button>
+                    </span>
+                  ))
+                ) : (
+                  <span className="secondary">No tasks yet.</span>
+                )}
+              </div>
+              <form className={s.inlineForm} onSubmit={addTask}>
+                <TextField label="New task" value={task} maxLength={200} onChange={(e) => setTask(e.target.value)} />
+                <Button type="submit" disabled={!task.trim() || action.busy}>
+                  Add task
+                </Button>
+              </form>
+              {project.members.length ? (
+                <ul className={s.members} aria-label={`People on ${project.name}`}>
+                  {project.members.map((m) => (
+                    <li key={m.user_id} className={s.member}>
+                      <span>
+                        {m.display_name} {m.role === 'manager' ? <Badge>Manager</Badge> : null}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => void run(() => rd.admin.removeProjectMember(project.id, m.user_id))}
+                        disabled={action.busy}
+                        aria-label={`Remove ${m.display_name} from ${project.name}`}
+                      >
+                        Remove
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="small muted">No members: everyone can book time to it.</p>
+              )}
+              <AddMemberForm
+                users={users}
+                exclude={new Set(project.members.filter((m) => m.role === 'manager').map((m) => m.user_id))}
+                onAdd={(userId, role) => run(() => rd.admin.addProjectMember(project.id, userId, role))}
+                label={project.name}
+              />
+              <p className="small muted">Project managers see time on this project only — no computer activity or screenshots.</p>
+            </>
+          )}
+          <div className={s.rowActions}>
+            {!archived ? (
+              <RenameForm
+                label="Project name"
+                value={project.name}
+                onSave={(name) => run(() => rd.admin.updateProject(project.id, { name, client_ref: clientRef.trim() || null }))}
+                extra={<TextField label="Client reference" value={clientRef} maxLength={200} onChange={(e) => setClientRef(e.target.value)} />}
+              />
+            ) : null}
+            <Button size="sm" variant="quiet" onClick={() => void run(() => rd.admin.updateProject(project.id, { status: archived ? 'active' : 'archived' }))} disabled={action.busy}>
+              {archived ? 'Restore project' : 'Archive project'}
             </Button>
-          </form>
-          <AddMemberForm users={users} exclude={new Set()} onAdd={addMember} label={project.name} />
-          {added ? (
-            <p role="status" className="small">
-              {added} added to {project.name}.
-            </p>
-          ) : null}
-          <p className="small muted">Project managers see time on this project only — no computer activity or screenshots.</p>
+          </div>
           <ActionError error={action.error} />
         </div>
       </details>
@@ -232,7 +331,7 @@ export default function TeamsAndProjectsPage() {
           withClient
           onCreate={async (name, client) => {
             const r = await createProject.run(() => rd.admin.createProject(name, client));
-            if (r) projects.mutate((prev) => [...(prev ?? []), r]);
+            if (r) projects.mutate((prev) => [...(prev ?? []), { ...r, members: [] }]);
             return !!r;
           }}
         />
@@ -243,8 +342,9 @@ export default function TeamsAndProjectsPage() {
               <Empty title="No projects yet" />
             ) : (
               <ul className={s.list}>
+                {/* Active first, then archived, each by name. */}
                 {[...list]
-                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .sort((a, b) => (a.status === b.status ? a.name.localeCompare(b.name) : a.status === 'active' ? -1 : 1))
                   .map((p) => (
                     <ProjectItem key={p.id} project={p} users={users.data ?? []} onChanged={projects.reload} />
                   ))}

@@ -87,7 +87,7 @@ export async function orgWeekSummary(deps: Pick<Deps, 'now'>, q: Queryable, orgI
      FROM teams t
      LEFT JOIN team_memberships m ON m.team_id = t.id AND m.valid_to IS NULL
      LEFT JOIN users u ON u.id = m.user_id AND u.status = 'active'
-     WHERE t.organization_id = $1
+     WHERE t.organization_id = $1 AND t.archived_at IS NULL
      ORDER BY t.name`,
     [orgId],
   );
