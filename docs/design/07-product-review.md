@@ -60,10 +60,10 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G23 | Finance | Invoices have no paid state and no send-to-client — **done** | S/M | P1 |
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
-| G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) promised but missing | L | P1/P2 |
+| G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) — **done** | L | P1/P2 |
 | G27 | All | Hard-coded English; mixed date and money formats | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
-| G29 | Eng | `notify.policy_expansion` job kind with no producer or handler | S | P2 |
+| G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
 
 ## 3. The engine (build once, every role uses it)
 
@@ -240,6 +240,23 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    the app's Settings, off until the person turns it on. Code signing and notarization run
    in the release workflow as soon as the certificates and the updater key are added as
    secrets (agent/README.md); getting them is RoundDigital's to do.
+
+   **8 done 2026-10-29 (G26 P2, G29)**:
+   - *Logo* (every plan): an org admin uploads a PNG, JPEG or WebP up to 512 KB under
+     Settings › Logo (presigned upload, private object, short-lived links; migration 024).
+     It shows under the product mark in the menu (on a white chip so dark logos stay
+     readable), in the client portal and on invoices. Replacing or removing it deletes the
+     old object; closing the organization deletes it with everything else.
+   - *Deploy with MDM* (Pro, `mdm`): Admin › Devices creates deployment keys (shown once,
+     revocable, last used) and the files IT pushes with the app: `deployment.json`, a macOS
+     script and a Windows PowerShell script that installs the MSI quietly. The app reads the
+     file from `/Library/Application Support/RoundDigital Track/` or
+     `%ProgramData%\RoundDigital Track\` and, until connected, asks for a work email; the
+     server emails that person an ordinary one-time code (`POST /v1/devices/enrollment-requests`,
+     the same answer whether or not the email exists, one code a minute per person). A key
+     alone never connects a computer, and nothing is recorded until the person starts a
+     session. "I have a code from my administrator" keeps the usual way.
+   - G29 was already gone: policy changes notify people through the notify service.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

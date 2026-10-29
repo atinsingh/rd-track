@@ -20,6 +20,7 @@ import { one, withTx } from '../../db/pool';
 import { clearSessionCookie, SESSION_COOKIE, setSessionCookie, userOf } from '../../http';
 import { parse } from '../../lib/validate';
 import { managedProjectIds, managedTeamIds } from '../authz';
+import { logoUrl } from '../branding/service';
 import { subscriptionDTO } from '../billing/service';
 import * as identity from './identity';
 import * as auth from './service';
@@ -154,7 +155,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     const { org_name, ...user } = u!;
     return {
       user,
-      organization: { id: actor.organizationId, name: org_name, plan: sub.plan, license: sub.license },
+      organization: { id: actor.organizationId, name: org_name, plan: sub.plan, license: sub.license, logo_url: await logoUrl(deps, pool, actor.organizationId) },
       mfa_verified: actor.mfaVerified,
       managed_team_ids: await managedTeamIds(pool, actor.userId),
       managed_project_ids: await managedProjectIds(pool, actor.userId),

@@ -5,7 +5,7 @@ import { invoiceState, setupProgress, totalsByCurrency, weekDelta } from './work
 
 const me = (role: Me['user']['org_role'], opts: { tracks?: boolean; teams?: string[]; entitlements?: Me['entitlements'] } = {}): Me => ({
   user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: opts.tracks ?? true, mfa_enabled: false },
-  organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active' },
+  organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active', logo_url: null },
   mfa_verified: true,
   managed_team_ids: opts.teams ?? [],
   managed_project_ids: [],

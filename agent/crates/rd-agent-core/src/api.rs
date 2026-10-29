@@ -47,6 +47,15 @@ impl Os {
     }
 }
 
+/// `POST /v1/devices/enrollment-requests` request (G26).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmailCodeRequest {
+    /// The key from the deployment file.
+    pub deployment_key: String,
+    /// The person's work email.
+    pub email: String,
+}
+
 /// `POST /v1/devices/enroll` request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EnrollRequest {
@@ -615,6 +624,19 @@ impl ApiClient {
             Some(Self::json(req)?),
             false,
         )
+    }
+
+    /// `POST /v1/devices/enrollment-requests` (public, G26): on a computer IT deployed, asks
+    /// the server to email the person a one-time code. The answer is the same whether or not
+    /// the email belongs to someone who can connect.
+    pub fn request_email_code(&self, req: &EmailCodeRequest) -> Result<(), ApiError> {
+        let _: serde_json::Value = self.call(
+            Method::Post,
+            self.url("/devices/enrollment-requests"),
+            Some(Self::json(req)?),
+            false,
+        )?;
+        Ok(())
     }
 
     /// `POST /v1/device/heartbeat`.

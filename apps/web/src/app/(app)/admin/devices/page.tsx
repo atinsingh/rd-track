@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { enrollmentLink, type AgentUpdateMode, type DeviceDTO, type EnrollmentCodeResponse, type PermissionState } from '@rd/contracts';
 import { CopyButton } from '@/components/CopyButton';
+import { MdmDeployment } from '@/components/devices/MdmDeployment';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
@@ -378,6 +379,7 @@ export default function DevicesPage() {
       </Card>
 
       <AppUpdates />
+      {access.entitlements.includes('mdm') ? <MdmDeployment tz={tz} /> : null}
       <EnrollDialog
         open={enrolling}
         onClose={() => {

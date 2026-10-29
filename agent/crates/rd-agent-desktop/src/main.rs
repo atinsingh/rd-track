@@ -209,6 +209,13 @@ fn quit_app(app: AppHandle) {
     quit(app);
 }
 
+/// On a computer IT deployed (G26): emails the person a one-time code.
+#[tauri::command]
+async fn request_email_code(ctl: State<'_, Arc<Controller>>, email: String) -> Result<(), String> {
+    let ctl = ctl.inner().clone();
+    blocking(move || ctl.request_email_code(&email)).await
+}
+
 #[tauri::command]
 fn reenroll(app: AppHandle, ctl: Ctl<'_>) -> AppView {
     ctl.reenroll();
@@ -389,6 +396,7 @@ fn main() {
             hide_window,
             quit_app,
             reenroll,
+            request_email_code,
             install_update,
             get_open_at_login,
             set_open_at_login,

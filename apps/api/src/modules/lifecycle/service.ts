@@ -48,6 +48,7 @@ const ORG_TABLES: { table: string; drop?: string[] }[] = [
   { table: 'shift_overrides' },
   { table: 'clients' },
   { table: 'client_contacts', drop: ['password_hash', 'link_token_hash'] },
+  { table: 'deployment_keys', drop: ['key_hash'] },
   { table: 'pay_rates' },
   { table: 'bill_rates' },
   { table: 'project_budgets' },
@@ -302,7 +303,8 @@ export async function purgeOrganization(deps: Deps, q: Queryable, orgId: string)
        UNION ALL SELECT object_key FROM export_jobs WHERE organization_id = $1 AND object_key IS NOT NULL
        UNION ALL SELECT object_key FROM payroll_exports WHERE organization_id = $1 AND object_key IS NOT NULL
        UNION ALL SELECT object_key FROM data_exports WHERE organization_id = $1 AND object_key IS NOT NULL
-       UNION ALL SELECT receipt_key FROM expenses WHERE organization_id = $1 AND receipt_key IS NOT NULL`,
+       UNION ALL SELECT receipt_key FROM expenses WHERE organization_id = $1 AND receipt_key IS NOT NULL
+       UNION ALL SELECT logo_key FROM organizations WHERE id = $1 AND logo_key IS NOT NULL`,
       [orgId],
     )
   ).map((r) => r.key);

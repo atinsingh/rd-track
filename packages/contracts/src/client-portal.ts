@@ -43,7 +43,7 @@ export interface ClientLinkInfo {
 export interface ClientPortalMe {
   contact: { id: string; display_name: string; email: string };
   client: { id: string; name: string; currency: string; show_people: boolean };
-  organization: { name: string };
+  organization: { name: string; logo_url: string | null };
 }
 
 export interface ClientPortalProject {

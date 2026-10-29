@@ -16,6 +16,7 @@ import { hashPassword, randomToken, sha256Hex, verifyPassword } from '../../lib/
 import { AppError, errors } from '../../lib/errors';
 import { projectReport } from '../activity/queries';
 import { audit } from '../audit/service';
+import { logoUrl } from '../branding/service';
 import { listBudgets } from '../money/budgets';
 import { getInvoice } from '../money/invoices';
 import { hasMoneyPlan } from '../money/time';
@@ -209,7 +210,7 @@ export async function logout(q: Queryable, token: string, now: Date): Promise<vo
 
 // ───────────── what the client sees ─────────────
 
-export async function portalMe(q: Queryable, actor: ClientActor): Promise<ClientPortalMe> {
+export async function portalMe(deps: Pick<Deps, 'store'>, q: Queryable, actor: ClientActor): Promise<ClientPortalMe> {
   const r = await one<{ email: string; client_name: string; currency: string; show_people: boolean; org_name: string }>(
     q,
     `SELECT c.email, cl.name AS client_name, cl.currency, cl.portal_show_people AS show_people, o.name AS org_name
@@ -219,7 +220,7 @@ export async function portalMe(q: Queryable, actor: ClientActor): Promise<Client
   return {
     contact: { id: actor.contactId, display_name: actor.displayName, email: r!.email },
     client: { id: actor.clientId, name: r!.client_name, currency: r!.currency, show_people: r!.show_people },
-    organization: { name: r!.org_name },
+    organization: { name: r!.org_name, logo_url: await logoUrl(deps, q, actor.organizationId) },
   };
 }
 
@@ -289,9 +290,9 @@ export async function portalInvoices(q: Queryable, actor: ClientActor): Promise<
   );
 }
 
-export async function portalInvoice(q: Queryable, actor: ClientActor, id: string): Promise<ClientPortalInvoice> {
+export async function portalInvoice(deps: Pick<Deps, 'store'>, q: Queryable, actor: ClientActor, id: string): Promise<ClientPortalInvoice> {
   const inv = await getInvoice(q, actor.organizationId, id).catch(() => null);
   if (!inv || inv.client_id !== actor.clientId || inv.status === 'draft') throw errors.notFound('Invoice');
   const { sent_at: _a, sent_to: _b, payment_note: _c, unrated_seconds: _d, created_at: _e, ...rest } = inv;
-  return rest;
+  return { ...rest, organization_logo_url: await logoUrl(deps, q, actor.organizationId) };
 }

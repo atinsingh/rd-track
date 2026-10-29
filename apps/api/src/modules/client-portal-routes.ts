@@ -81,10 +81,10 @@ export async function clientPortalRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // ───────── what the client sees ─────────
-  app.get('/v1/client-portal/me', client, async (req) => portal.portalMe(pool, clientOf(req)));
+  app.get('/v1/client-portal/me', client, async (req) => portal.portalMe(deps, pool, clientOf(req)));
   app.get<{ Querystring: { from?: string; to?: string; tz?: string } }>('/v1/client-portal/report', client, async (req) =>
     withTx(pool, (tx) => portal.portalReport(deps, tx, clientOf(req), parseRange(req.query, 366), tz(req.query.tz), req.id)),
   );
   app.get('/v1/client-portal/invoices', client, async (req) => ({ items: await portal.portalInvoices(pool, clientOf(req)) }));
-  app.get<{ Params: { id: string } }>('/v1/client-portal/invoices/:id', client, async (req) => portal.portalInvoice(pool, clientOf(req), id(req)));
+  app.get<{ Params: { id: string } }>('/v1/client-portal/invoices/:id', client, async (req) => portal.portalInvoice(deps, pool, clientOf(req), id(req)));
 }

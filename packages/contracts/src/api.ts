@@ -46,7 +46,14 @@ export interface Me {
     tracking_enabled: boolean;
     mfa_enabled: boolean;
   };
-  organization: { id: string; name: string; plan: PlanId; license: LicenseState };
+  organization: {
+    id: string;
+    name: string;
+    plan: PlanId;
+    license: LicenseState;
+    /** The organization's own logo (G26), a short-lived link; null when none is set. */
+    logo_url: string | null;
+  };
   mfa_verified: boolean;
   managed_team_ids: string[];
   managed_project_ids: string[];

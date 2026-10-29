@@ -1,6 +1,7 @@
 'use client';
 
 import type { ClientPortalInvoice } from '@rd/contracts';
+import { OrgLogo } from '@/components/OrgLogo';
 import { formatMoney } from '@/lib/format';
 import { formatPercentBp } from '@/lib/money';
 import { formatDayLabel } from '@/lib/time';
@@ -16,6 +17,7 @@ export function InvoiceSheet({ inv }: { inv: ClientPortalInvoice }) {
     <article className={s.sheet} aria-label={`Invoice ${inv.number ?? 'draft'}`}>
       <header className={s.head}>
         <div>
+          <OrgLogo url={inv.organization_logo_url ?? null} name={inv.organization_name} plain />
           <span className={s.label}>{inv.organization_name}</span>
           <h1 className={s.title}>{inv.number ? `Invoice ${inv.number}` : 'Draft invoice'}</h1>
         </div>

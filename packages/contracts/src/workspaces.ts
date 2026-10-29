@@ -104,6 +104,53 @@ export interface DeviceUpdateResponse {
   mode: 'prompt' | 'auto';
 }
 
+// ───────────── branding and MDM deployment (G26) ─────────────
+
+export const LOGO_MAX_BYTES = 512 * 1024;
+export const LOGO_CONTENT_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export const logoUploadRequest = z.strictObject({
+  content_type: z.enum(LOGO_CONTENT_TYPES),
+  size_bytes: z.number().int().min(1).max(LOGO_MAX_BYTES),
+});
+export interface LogoUploadResponse {
+  upload_id: string;
+  url: string;
+  headers: Record<string, string>;
+}
+export const logoSetRequest = z.strictObject({ upload_id: z.uuid() });
+export interface BrandingDTO {
+  logo_url: string | null;
+  logo_updated_at: string | null;
+}
+
+/** A key for the deployment file IT puts on managed computers (Pro, `mdm`). */
+export const deploymentKeyCreateRequest = z.strictObject({ name: z.string().trim().min(1).max(100) });
+export interface DeploymentKeyDTO {
+  id: string;
+  name: string;
+  hint: string;
+  created_by_name: string | null;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+export interface DeploymentKeyCreated extends DeploymentKeyDTO {
+  /** Shown once. */
+  key: string;
+  /** The server address to put in the deployment file. */
+  server_url: string;
+}
+/** What the deployment file holds: `deployment.json` in the app's system-wide folder. */
+export interface DeploymentFile {
+  server: string;
+  deployment_key: string;
+}
+/** `POST /v1/devices/enrollment-requests` (public): emails a one-time code to the person, if they can connect. */
+export const emailCodeRequest = z.strictObject({
+  deployment_key: z.string().min(20).max(200),
+  email: z.email().max(320),
+});
+
 /** The scheme the desktop app registers; `rdtrack://enroll?server=…&code=…` fills its sign-in form. */
 export const AGENT_LINK_SCHEME = 'rdtrack';
 export function enrollmentLink(server: string, code: string): string {

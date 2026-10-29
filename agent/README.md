@@ -389,6 +389,25 @@ session is open; a running session is never interrupted) or *hold* (nothing offe
 test a release first, or when IT deploys the MSI, which the updater does not replace). The
 update server must be `https://`.
 
+### Deploying with MDM (Pro)
+
+Admin › Devices › *Deploy with MDM* creates a deployment key and the files to push with
+the app (Jamf, Kandji, Intune, Group Policy):
+
+* `deployment.json` — `{"server": "https://…", "deployment_key": "rddk_…"}` — placed at
+  `/Library/Application Support/RoundDigital Track/deployment.json` (macOS) or
+  `%ProgramData%\RoundDigital Track\deployment.json` (Windows); `RD_TRACK_DEPLOYMENT_FILE`
+  overrides the path. The app ignores a file without an `https://` server or an `rddk_` key,
+  and tolerates the byte-order mark Windows PowerShell writes.
+* `rdtrack-deploy-macos.sh` writes that file (run as root after installing the DMG's app).
+* `Install-RDTrack.ps1` installs the MSI next to it quietly (`/qn`) and writes the file.
+
+On first launch the app asks for the person's work email and calls
+`POST /v1/devices/enrollment-requests`; the server emails *that person* an ordinary
+one-time code, which they type in. The key alone never connects a computer, the answer is
+the same whether or not the email exists, and "I have a code from my administrator" keeps
+the usual flow. Revoking a key stops new requests; computers already connected stay.
+
 ### First run on employee machines
 
 * **macOS.** The DMG installs a menu-bar app (no Dock icon, `LSUIElement`). Requirements:

@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
+import { OrgLogo } from '@/components/OrgLogo';
 import { ErrorState, Loading } from '@/components/ui/DataState';
 import { clientPortal } from '@/lib/portal';
 import { useApi } from '@/lib/useApi';
@@ -41,6 +42,7 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
             <Image src="/brand/rd-logo-reversed.png" alt="RoundDigital" width={112} height={24} />
             <span className={s.tag}>Client portal</span>
           </Link>
+          <OrgLogo url={me.data.organization.logo_url} name={me.data.organization.name} />
           <span className={s.who}>
             {me.data.contact.display_name} · {me.data.client.name}
             <button type="button" className={s.signOut} onClick={() => void signOut()}>

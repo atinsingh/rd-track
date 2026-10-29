@@ -17,6 +17,7 @@ import { authenticateDirectory } from './modules/scim/service';
 import { authenticateToken } from './modules/api-tokens/service';
 import { apiEndpoint } from './modules/api-tokens/surface';
 import { developerRoutes } from './modules/developer-routes';
+import { brandingRoutes } from './modules/branding-routes';
 import { authenticateClient } from './modules/client-portal/service';
 import { clientPortalRoutes } from './modules/client-portal-routes';
 import { expensesRoutes } from './modules/expenses-routes';
@@ -222,6 +223,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => moneyRoutes(s, deps));
   await app.register(async (s) => platformRoutes(s, deps));
   await app.register(async (s) => clientPortalRoutes(s, deps));
+  await app.register(async (s) => brandingRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;
 }

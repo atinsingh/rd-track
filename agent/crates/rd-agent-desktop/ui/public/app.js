@@ -21,6 +21,8 @@ const enrollForm = { server: "", code: "", name: "" };
 // The enrolment link last applied to the form, so typing over it isn't undone on the next view.
 let appliedLink = "";
 let fromLink = false;
+// IT deployed this computer (G26): connect with a work email and an emailed code.
+const managed = { step: "email", email: "", useAdminCode: false };
 /** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
 function linkParts(text) {
     const t = text.trim();
@@ -420,7 +422,36 @@ function noticeButtons(review) {
         h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, "Start session →"),
     ];
 }
+function managedEnrollView(v, server) {
+    const field = (label, value, set, attrs) => h("label", { class: "field" }, label, h("input", { value, disabled: busy, oninput: (e) => set(e.target.value), ...attrs }));
+    const askForCode = (e) => {
+        e.preventDefault();
+        void run(async () => {
+            await invoke("request_email_code", { email: managed.email.trim() });
+            managed.step = "code";
+        });
+    };
+    const connect = (e) => {
+        e.preventDefault();
+        void run(async () => {
+            view = await invoke("enroll", { serverUrl: server, code: enrollForm.code, deviceName: opt(enrollForm.name.trim()) });
+            enrollForm.code = "";
+        });
+    };
+    const other = h("div", { class: "small-links" }, managed.step === "code"
+        ? h("button", { class: "link", type: "button", onclick: () => { managed.step = "email"; error = null; render(); } }, "Send another code")
+        : h("span", {}), h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, "I have a code from my administrator"));
+    const head = [
+        h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+        h("span", { class: "eyebrow" }, "Set up this computer"),
+    ];
+    if (managed.step === "email")
+        return h("form", { class: "popover", onsubmit: askForCode }, ...head, h("h1", { class: "title" }, "Connect with your work email"), h("p", { class: "muted" }, `Your IT team set this computer up for ${server}. Enter your work email and we'll send you a one-time code. Nothing is recorded until you start a session.`), v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error), field("Work email", managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Sending…" : "Email me a code")), other);
+    return h("form", { class: "popover", onsubmit: connect }, ...head, h("h1", { class: "title" }, "Check your email"), h("p", { class: "muted" }, `If ${managed.email} can connect a computer, a code is on its way. It works once, for 30 minutes.`), field("Code from the email", enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }), field("Device name (optional)", enrollForm.name, (s) => (enrollForm.name = s), { placeholder: "Defaults to this computer's name" }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")), other);
+}
 function enrollView(v) {
+    if (v.deployment && !managed.useAdminCode)
+        return managedEnrollView(v, v.deployment.server_url);
     const p = v.enroll_prefill;
     if (p && `${p.server_url} ${p.code}` !== appliedLink) {
         appliedLink = `${p.server_url} ${p.code}`;

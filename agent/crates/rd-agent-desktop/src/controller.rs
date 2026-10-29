@@ -96,6 +96,8 @@ pub struct AppView {
     pub server_url: Option<String>,
     /// Filled in from an `rdtrack://enroll` link while not enrolled.
     pub enroll_prefill: Option<EnrollPrefill>,
+    /// IT deployed this computer for an organization (G26): connect with a work email.
+    pub deployment: Option<DeploymentView>,
     /// Simulated platform (Linux development build).
     pub simulated: bool,
     /// App version.
@@ -119,6 +121,14 @@ struct Inner {
     tray: Option<(TrayState, String, Option<String>)>,
     update: Option<String>,
     enroll_prefill: Option<EnrollPrefill>,
+    deployment: Option<config::Deployment>,
+}
+
+/// What the enrolment screen shows of the deployment file (never the key).
+#[derive(Debug, Clone, Serialize)]
+pub struct DeploymentView {
+    /// The organization's Track address.
+    pub server_url: String,
 }
 
 /// The agent controller (shared via Tauri state).
@@ -193,7 +203,9 @@ impl Controller {
                 false
             }
             Ok(false) => {
-                lock(&self.inner).phase = Some(Phase::Enroll);
+                let mut i = lock(&self.inner);
+                i.phase = Some(Phase::Enroll);
+                i.deployment = config::load_deployment(&config::deployment_file());
                 true
             }
             Err(e) => {
@@ -354,7 +366,17 @@ impl Controller {
         let mut i = lock(&self.inner);
         if matches!(i.phase, Some(Phase::Revoked) | Some(Phase::Error)) {
             i.phase = Some(Phase::Enroll);
+            i.deployment = config::load_deployment(&config::deployment_file());
         }
+    }
+
+    /// On a computer IT deployed: asks the server to email the person a code (blocking).
+    pub fn request_email_code(&self, email: &str) -> Result<(), String> {
+        let deployment = lock(&self.inner)
+            .deployment
+            .clone()
+            .ok_or("this computer wasn't set up by your IT team")?;
+        setup::request_email_code(&deployment, email)
     }
 
     /// Fetches the project list (blocking; call off the UI thread).
@@ -713,6 +735,9 @@ impl Controller {
             projects_supported: i.projects_supported,
             server_url: i.server_url.clone(),
             enroll_prefill: i.enroll_prefill.clone(),
+            deployment: i.deployment.as_ref().map(|d| DeploymentView {
+                server_url: d.server.clone(),
+            }),
             simulated: self.simulated,
             version: env!("CARGO_PKG_VERSION"),
         }

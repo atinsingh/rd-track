@@ -263,6 +263,8 @@ export interface InvoiceDTO extends InvoiceSummaryDTO {
   payment_note: string | null;
   sent_to: string | null;
   lines: InvoiceLineDTO[];
+  /** The organization's logo for the printed invoice (G26), a short-lived link. */
+  organization_logo_url?: string | null;
   /** Draft only: time in the period that had no bill rate in the invoice currency. */
   unrated_seconds: number;
 }

@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, type ReactNode } from 'react';
+import { OrgLogo } from '@/components/OrgLogo';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
 import { onApprovalsChanged } from '@/lib/events';
@@ -112,6 +113,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <div id="rail-drawer" className={cx(s.drawer, menuOpen && s.drawerOpen)}>
+          <OrgLogo url={me.organization.logo_url} name={me.organization.name} className={s.orgLogo} />
           <button
             type="button"
             className={s.search}

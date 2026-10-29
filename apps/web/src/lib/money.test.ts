@@ -42,7 +42,7 @@ describe('money inputs', () => {
 describe('money navigation', () => {
   const me = (role: Me['user']['org_role'], entitlements: Me['entitlements']): Me => ({
     user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: true, mfa_enabled: true },
-    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active' },
+    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active', logo_url: null },
     mfa_verified: true,
     managed_team_ids: [],
     managed_project_ids: [],
