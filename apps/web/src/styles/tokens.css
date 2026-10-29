@@ -78,7 +78,7 @@
   --target: 44px;
   --target-sm: 36px;
   --gutter: 40px;
-  --rail-width: 240px;
+  --rail-width: 256px;
 }
 
 @media (max-width: 720px) {

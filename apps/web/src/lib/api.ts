@@ -25,7 +25,9 @@ import type {
   Me,
   MfaEnrollResponse,
   MyPolicyResponse,
-  NotificationDTO,
+  NotificationCategory,
+  NotificationPreferencesResponse,
+  NotificationsResponse,
   Page,
   PartialPolicySettings,
   PolicyListResponse,
@@ -325,7 +327,7 @@ export const rd = {
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
-    signup: (body: { org_name: string; display_name: string; email: string; password: string }) =>
+    signup: (body: { org_name: string; display_name: string; email: string; password: string; accept_terms: true }) =>
       post<{ ok: true }>('/v1/signup', body, { redirectOnAuth: false }),
     verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
@@ -354,8 +356,13 @@ export const rd = {
         target_id: screenshotId,
         reason,
       }),
-    notifications: (signal?: AbortSignal) => list<NotificationDTO>('/v1/me/notifications', { signal }),
+    notifications: (signal?: AbortSignal) => get<NotificationsResponse>('/v1/me/notifications', { signal }),
+    unreadCount: (signal?: AbortSignal) => get<{ unread: number }>('/v1/me/notifications/unread-count', { signal }),
     markRead: (id: string) => ok(post(`/v1/me/notifications/${enc(id)}/read`)),
+    markAllRead: () => post<{ marked: number }>('/v1/me/notifications/read-all'),
+    notificationPreferences: (signal?: AbortSignal) => get<NotificationPreferencesResponse>('/v1/me/notification-preferences', { signal }),
+    setNotificationPreferences: (items: { category: NotificationCategory; in_app: boolean; email: boolean }[]) =>
+      put<NotificationPreferencesResponse>('/v1/me/notification-preferences', { items }),
     policy: (signal?: AbortSignal) => get<MyPolicyResponse>('/v1/me/policy', { signal }),
     accessLog: (signal?: AbortSignal) => list<AuditEventDTO>('/v1/me/access-log', { signal }),
     projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/me/projects', { signal }),

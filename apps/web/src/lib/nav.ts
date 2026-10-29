@@ -106,6 +106,7 @@ const GROUPS: NavGroup[] = [
       { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
       { href: '/me/privacy', label: "What's collected", capability: 'me', keywords: 'privacy data deletion' },
+      { href: '/me/settings', label: 'Settings', capability: 'me', keywords: 'notifications email preferences account' },
       { href: '/exports', label: 'Exports', capability: 'exports', keywords: 'csv download payroll' },
     ],
   },

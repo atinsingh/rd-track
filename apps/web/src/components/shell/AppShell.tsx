@@ -15,6 +15,7 @@ import { timesheetsApi } from '@/lib/timesheets';
 import { useApi } from '@/lib/useApi';
 import { CommandPalette } from './CommandPalette';
 import { LicenceBanner } from './LicenceBanner';
+import { NotificationBell } from './NotificationBell';
 import s from './shell.module.css';
 
 const COLLAPSED_KEY = 'rd.nav.collapsed';
@@ -110,15 +111,18 @@ export function AppShell({ children }: { children: ReactNode }) {
               TRACK
             </span>
           </Link>
-          <button
-            type="button"
-            className={s.menuBtn}
-            aria-expanded={menuOpen}
-            aria-controls="rail-drawer"
-            onClick={() => setMenuFor(menuOpen ? null : pathname)}
-          >
-            {menuOpen ? 'Close' : 'Menu'}
-          </button>
+          <div className={s.barActions}>
+            <NotificationBell />
+            <button
+              type="button"
+              className={s.menuBtn}
+              aria-expanded={menuOpen}
+              aria-controls="rail-drawer"
+              onClick={() => setMenuFor(menuOpen ? null : pathname)}
+            >
+              {menuOpen ? 'Close' : 'Menu'}
+            </button>
+          </div>
         </div>
         <div id="rail-drawer" className={cx(s.drawer, menuOpen && s.drawerOpen)}>
           <button

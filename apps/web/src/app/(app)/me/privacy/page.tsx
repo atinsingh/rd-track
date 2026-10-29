@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty, ErrorState, Loading, Resource } from '@/components/ui/DataState';
 import { Badge, Banner, Card, PageHeader, TableBox, dlClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { announceNotificationsChanged } from '@/lib/events';
 import { humanize } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { formatDateTime } from '@/lib/time';
@@ -78,8 +79,9 @@ function describeAccess(e: AuditEventDTO): string {
   return e.result === 'denied' ? `${text} — access was denied` : text;
 }
 
+/** Unread notices about this person's data stay on this page; everything else is in the bell. */
 function NotificationsBanner({ items, onRead }: { items: NotificationDTO[]; onRead: (id: string) => void }) {
-  const unread = items.filter((n) => !n.read_at);
+  const unread = items.filter((n) => !n.read_at && n.category === 'privacy');
   if (unread.length === 0) return null;
   return (
     <>
@@ -109,9 +111,10 @@ export default function PrivacyPage() {
   const notes = useApi('me:notifications', (signal) => rd.my.notifications(signal));
 
   const markRead = async (id: string) => {
-    notes.mutate((prev) => prev?.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)));
+    notes.mutate((prev) => prev && { ...prev, items: prev.items.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)) });
     try {
       await rd.my.markRead(id);
+      announceNotificationsChanged();
     } catch {
       notes.reload();
     }
@@ -136,7 +139,7 @@ export default function PrivacyPage() {
         }
       />
 
-      {notes.data ? <NotificationsBanner items={notes.data} onRead={markRead} /> : null}
+      {notes.data ? <NotificationsBanner items={notes.data.items} onRead={markRead} /> : null}
 
       {policy.error ? (
         <ErrorState error={policy.error} onRetry={policy.reload} />

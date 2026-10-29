@@ -1,0 +1,25 @@
+.center {
+  text-align: center;
+  width: 96px;
+}
+.about {
+  text-align: left;
+  font-weight: 400;
+}
+.label {
+  display: block;
+  font-weight: 600;
+  color: var(--text);
+}
+.hint {
+  display: block;
+  font-size: 13px;
+  color: var(--text-2);
+}
+/* 44px hit area around an 18px box. */
+.check {
+  width: 18px;
+  height: 18px;
+  margin: 13px;
+  accent-color: var(--text);
+}

@@ -54,7 +54,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 20px;
+  padding: 0 0 0 20px;
   text-decoration: none;
   min-height: 32px;
 }
@@ -105,6 +105,11 @@
 }
 .menuBtn {
   display: none;
+}
+.barActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .nav {
   display: flex;
@@ -333,7 +338,11 @@
 
 @media (min-width: 901px) {
   .bar {
-    display: contents;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-right: 12px;
   }
   .drawer {
     display: contents;
