@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { DayView } from '@/components/day/DayView';
+import { TodoList } from '@/components/day/TodoList';
 import { ScheduleNote } from '@/components/scheduling/ScheduleNote';
 import { Button } from '@/components/ui/Button';
 import { Banner, PageHeader } from '@/components/ui/Layout';
@@ -40,6 +41,7 @@ export default function MyDayPage() {
         </Banner>
       ) : null}
       <ScheduleNote date={date} tz={tz} />
+      <TodoList />
       {notice ? (
         <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
           Track its status in <a href="/me/time">My time</a>.

@@ -19,7 +19,18 @@ import s from '../admin.module.css';
 const EVENT_LABELS: Record<WebhookEventType, string> = {
   'session.started': 'Session started',
   'session.stopped': 'Session stopped',
+  'time_correction.submitted': 'Time correction submitted',
   'time_correction.approved': 'Time correction approved',
+  'time_correction.rejected': 'Time correction sent back',
+  'timesheet.submitted': 'Timesheet submitted',
+  'timesheet.approved': 'Timesheet approved',
+  'timesheet.rejected': 'Timesheet sent back',
+  'time_off.requested': 'Time off requested',
+  'time_off.approved': 'Time off approved',
+  'time_off.rejected': 'Time off declined',
+  'user.invited': 'Person invited',
+  'user.deactivated': 'Person deactivated',
+  'device.revoked': 'Computer removed',
   'export.ready': 'Export ready',
 };
 

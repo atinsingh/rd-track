@@ -1,6 +1,9 @@
 import type {
   AccountSecurity,
   InviteInfo,
+  InboxCounts,
+  TimesheetRule,
+  TodosResponse,
   RecoveryCodesResponse,
   BillingInterval,
   DirectoryResponse,
@@ -389,6 +392,7 @@ export const rd = {
     projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/me/projects', { signal }),
     directory: (signal?: AbortSignal) => get<DirectoryResponse>('/v1/me/directory', { signal }),
     insights: (r: Range, tz: string, signal?: AbortSignal) => get<PersonalInsights>('/v1/me/insights', { query: { ...r, tz }, signal }),
+    todos: (signal?: AbortSignal) => get<TodosResponse>('/v1/me/todos', { signal }),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {
@@ -449,6 +453,8 @@ export const rd = {
       list<DeletionRequestDTO>('/v1/admin/deletion-requests', { signal }),
     approveDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/approve`)),
     rejectDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/reject`)),
+    timesheetRule: (signal?: AbortSignal) => get<TimesheetRule>('/v1/admin/timesheet-rule', { signal }),
+    setTimesheetRule: (rule: TimesheetRule) => put<TimesheetRule>('/v1/admin/timesheet-rule', rule),
     appCategories: (signal?: AbortSignal) => list<AppCategoryDTO>('/v1/admin/app-categories', { signal }),
     setAppCategory: (body: { app_identifier: string; category: AppCategory; team_id?: string | null }) =>
       put<AppCategoryDTO>('/v1/admin/app-categories', body),
@@ -478,6 +484,8 @@ export const rd = {
     portal: () => post<{ url: string }>('/v1/billing/portal', {}),
   },
   approvals: {
+    /** What's waiting on the signed-in reviewer, for the badge. */
+    counts: (signal?: AbortSignal) => get<InboxCounts>('/v1/inbox/counts', { signal }),
     batch: (body: { action: 'approve' | 'reject'; note?: string; items: { type: ApprovalType; id: string }[] }) =>
       post<ApprovalsBatchResponse>('/v1/approvals/batch', body),
   },

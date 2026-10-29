@@ -53,16 +53,16 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G16 | Admin | No setup checklist after signup | M | P1 |
 | G17 | Admin | No tenant export, contract-end deletion or deletion certificate | M | P1 |
 | G18 | Emp | Deletion requests cover screenshots only; no "download my data" | M | P1 |
-| G19 | Manager | No timesheet due dates, reminders or escalation | M | P1 |
+| G19 | Manager | No timesheet due dates, reminders or escalation — **done** | M | P1 |
 | G20 | Org admin | No organization-wide summary without being a manager | M | P1 |
 | G21 | Finance | No finance role; Money needs full `org_admin` | M | P1 |
 | G22 | Finance | Payroll export buried in Rates and budgets | S | P1 |
 | G23 | Finance | Invoices have no paid state and no send-to-client | S/M | P1 |
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day | S | P1 |
-| G25 | Integrations | Webhooks cover 4 events | S | P1 |
+| G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1), MDM packages and tenant logo (P2) promised but missing | L | P1/P2 |
 | G27 | All | Hard-coded English; mixed date and money formats | M | P2 |
-| G28 | Admin | Deletion requests outside the unified inbox | S | P2 |
+| G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler | S | P2 |
 
 ## 3. The engine (build once, every role uses it)
@@ -120,9 +120,21 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
 2. **Identity on the engine** — **done 2026-10-29**. Invites (also removes the
    operator-visible password, G1), password reset, MFA recovery codes and admin MFA
    reset, account settings (G3–G5, G13).
-3. **Work items and rules.** The server-side inbox with reviewer fallback, deletion
-   requests in it, employee to-dos, timesheet deadlines and escalation, device-health
-   alerts, a larger webhook catalogue (G19, G25, G28).
+3. **Work items and rules** — **done 2026-10-29**. The server-side inbox with reviewer
+   fallback, deletion requests in it, employee to-dos, timesheet deadlines and escalation,
+   device-health alerts, a larger webhook catalogue (G19, G25, G28).
+
+   As built, work items are computed on read rather than stored as a projection: one
+   `GET /v1/inbox/counts` drives the badge, `GET /v1/me/todos` feeds the To do card on
+   My day, and both disappear the moment the underlying thing is done. The deadline rule
+   (`timesheet_rules`, set under Admin › Work limits) runs hourly as `rules.run`: a
+   reminder the working day before, an overdue notice at the deadline, and one digest per
+   reviewer after the escalation delay. People with no tracked time that week are never
+   chased, and nothing is ever submitted for them. Computers that haven't synced for three
+   working days notify their owner first (`device.stale`). Webhooks now follow the domain
+   events: corrections, timesheets and time off (submitted / approved / sent back),
+   people invited or deactivated, computers removed, sessions and exports — ids and dates
+   only.
 4. **Role workspaces.** Role homes; admin checklist; agent download and self-enrolment;
    complete People and Teams pages; finance role and Money home; auditor tools;
    organization summary (G10, G12, G14–G16, G20–G24).

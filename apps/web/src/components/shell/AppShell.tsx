@@ -10,8 +10,6 @@ import { onApprovalsChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { activeHref, can, groupOf, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
-import { sched } from '@/lib/scheduling';
-import { timesheetsApi } from '@/lib/timesheets';
 import { useApi } from '@/lib/useApi';
 import { CommandPalette } from './CommandPalette';
 import { LicenceBanner } from './LicenceBanner';
@@ -69,24 +67,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const pending = useApi(access.managesTeams || access.isAdmin ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
-  const reviewsTimesheets = can(access, 'approvals') && access.entitlements.includes('timesheets');
-  const pendingSheets = useApi(reviewsTimesheets ? 'nav:timesheets-pending' : null, (signal) => timesheetsApi.pending(signal));
-  const reviewsTimeOff = can(access, 'approvals') && access.entitlements.includes('time_off');
-  const pendingLeave = useApi(reviewsTimeOff ? 'nav:timeoff-pending' : null, (signal) => sched.review.pending(signal));
-  const pendingCount = (pending.data?.length ?? 0) + (pendingSheets.data?.length ?? 0) + (pendingLeave.data?.length ?? 0);
-  const { reload: reloadCorrections } = pending;
-  const { reload: reloadSheets } = pendingSheets;
-  const { reload: reloadLeave } = pendingLeave;
-  useEffect(
-    () =>
-      onApprovalsChanged(() => {
-        reloadCorrections();
-        reloadSheets();
-        reloadLeave();
-      }),
-    [reloadCorrections, reloadSheets, reloadLeave],
-  );
+  const counts = useApi(can(access, 'approvals') ? 'nav:inbox-counts' : null, (signal) => rd.approvals.counts(signal));
+  const pendingCount = counts.data?.total ?? 0;
+  const { reload: reloadCounts } = counts;
+  useEffect(() => onApprovalsChanged(reloadCounts), [reloadCounts]);
 
   const signOut = async () => {
     try {

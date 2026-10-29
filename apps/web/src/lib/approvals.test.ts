@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CorrectionDTO, TimeOffRequestDTO, TimesheetDTO } from '@rd/contracts';
+import type { CorrectionDTO, DeletionRequestDTO, TimeOffRequestDTO, TimesheetDTO } from '@rd/contracts';
 import { batchSummary, inTab, inboxItems } from './approvals';
 
 const correction = (over: Partial<CorrectionDTO>): CorrectionDTO =>
@@ -33,6 +33,18 @@ describe('approvals inbox', () => {
     expect(inTab(items, 'time').map((i) => i.id)).toEqual(['c1', 'c2']);
     expect(inTab(items, 'timeoff').map((i) => i.id)).toEqual(['o1']);
     expect(inTab(items, 'all')).toHaveLength(4);
+  });
+  it('adds pending deletion requests under their own tab, never decided ones', () => {
+    const del = (over: Partial<DeletionRequestDTO>): DeletionRequestDTO => ({
+      id: 'd1', requester_id: 'u3', requester_name: 'Sam Rivera', target_type: 'screenshot', target_id: 's1', reason: 'Personal tab open',
+      status: 'pending', reviewer_id: null, created_at: '2026-10-25T08:00:00Z', completed_at: null, ...over,
+    });
+    const withDeletions = inboxItems([], [sheet], [], 'UTC', [del({}), del({ id: 'd2', status: 'approved' })]);
+    expect(withDeletions.map((i) => [i.type, i.who, i.kindLabel, i.amount])).toEqual([
+      ['deletion_request', 'Sam Rivera', 'Deletion request', '1 screenshot'],
+      ['timesheet', 'Jun Park', 'Timesheet', '34h 02m'],
+    ]);
+    expect(inTab(withDeletions, 'privacy').map((i) => i.id)).toEqual(['d1']);
   });
   it('summarises a batch result, naming why items failed', () => {
     expect(batchSummary({ approved: 3, rejected: 0, failed: 0, results: [] })).toBe('3 approved');

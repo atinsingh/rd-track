@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent } from 'react';
-import type { CorrectionDTO, CorrectionValues } from '@rd/contracts';
+import type { CorrectionDTO, CorrectionValues, DeletionRequestDTO } from '@rd/contracts';
 import { TimeOffReviewCard } from '@/components/scheduling/TimeOffApprovals';
 import { TimesheetReviewCard } from '@/components/timesheet/TimesheetApprovals';
 import { Button } from '@/components/ui/Button';
@@ -86,6 +86,41 @@ function Review({ c, tz, projectName, onDone }: { c: CorrectionDTO; tz: string; 
   );
 }
 
+function DeletionReview({ d, tz, onDone }: { d: DeletionRequestDTO; tz: string; onDone: () => void }) {
+  const action = useAction();
+  const decide = async (approve: boolean) => {
+    const r = await action.run(() => (approve ? rd.admin.approveDeletion(d.id) : rd.admin.rejectDeletion(d.id)));
+    if (r) onDone();
+  };
+  return (
+    <Card title={`${d.requester_name} · Deletion request`} subtitle={`Submitted ${formatDateTime(d.created_at, tz)}`}>
+      <dl className={dlClass}>
+        <dt>Screenshot</dt>
+        <dd className="mono" title={d.target_id}>
+          {d.target_id.slice(0, 8)}…
+        </dd>
+      </dl>
+      <p>
+        <span className="label-mono">Reason</span>
+        <br />“{d.reason}”
+      </p>
+      <p className="small secondary">
+        You decide without seeing the image. Approving deletes it permanently unless it is under a legal hold; the audit log keeps the screenshot id and
+        the outcome. Rejecting keeps it until its retention date. {d.requester_name} is told either way.
+      </p>
+      <ActionError error={action.error} />
+      <div className={formActionsClass}>
+        <Button onClick={() => decide(false)} disabled={action.busy}>
+          Reject
+        </Button>
+        <Button variant="primary" onClick={() => decide(true)} disabled={action.busy}>
+          Approve and delete
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export default function ApprovalsPage() {
   const { access, timezone: tz, me } = useMe();
   const timesheets = access.entitlements.includes('timesheets');
@@ -94,6 +129,7 @@ export default function ApprovalsPage() {
   const corrections = useApi(access.managesTeams || access.isAdmin ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
   const sheets = useApi(timesheets ? 'timesheets:pending' : null, (signal) => timesheetsApi.pending(signal));
   const leave = useApi(timeOffReview ? 'timeoff:pending' : null, (signal) => sched.review.pending(signal));
+  const deletions = useApi(access.isAdmin ? 'admin:deletion-requests' : null, (signal) => rd.admin.deletionRequests(signal));
   const projects = useApi(access.managesTeams ? 'projects:managed' : null, (signal) => rd.projects.list(signal).catch(() => []));
   const [tab, setTab] = useState<InboxTab>('all');
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -103,15 +139,18 @@ export default function ApprovalsPage() {
   const [note, setNote] = useState('');
   const batch = useAction();
 
-  if (!can(access, 'approvals')) return <NoAccess what="Approvals are for team managers." />;
+  if (!can(access, 'approvals')) return <NoAccess what="Approvals are for team managers and org admins." />;
 
-  const sources = [corrections, sheets, leave];
+  const sources = [corrections, sheets, leave, deletions];
   const error = sources.find((x) => x.error)?.error;
   const loading = sources.some((x) => x.loading && !x.data);
-  const items = inboxItems(corrections.data ?? [], sheets.data ?? [], leave.data ?? [], tz);
+  const items = inboxItems(corrections.data ?? [], sheets.data ?? [], leave.data ?? [], tz, deletions.data ?? []);
+  // Deletion requests reach org admins only.
+  const tabs = INBOX_TABS.filter((t) => t.key !== 'privacy' || access.isAdmin);
   const visible = inTab(items, tab);
-  const counts = Object.fromEntries(INBOX_TABS.map((t) => [t.key, inTab(items, t.key).length])) as Record<InboxTab, number>;
+  const counts = Object.fromEntries(tabs.map((t) => [t.key, inTab(items, t.key).length])) as Record<InboxTab, number>;
   const chosen = items.filter((i) => selected.has(itemKey(i)));
+  const chosenDeletions = chosen.filter((i) => i.type === 'deletion_request').length;
   const focused = visible.find((i) => itemKey(i) === focus) ?? visible[0] ?? null;
   const allVisibleChosen = visible.length > 0 && visible.every((i) => selected.has(itemKey(i)));
   const projectName = (id: string | null) => {
@@ -125,9 +164,11 @@ export default function ApprovalsPage() {
     const c = ids('correction');
     const t = ids('timesheet');
     const o = ids('time_off');
+    const d = ids('deletion_request');
     corrections.mutate((prev) => prev?.filter((x) => !c.has(x.id)));
     sheets.mutate((prev) => prev?.filter((x) => !x.id || !t.has(x.id)));
     leave.mutate((prev) => prev?.filter((x) => !o.has(x.id)));
+    deletions.mutate((prev) => prev?.filter((x) => !d.has(x.id)));
     const keys = new Set(done.map(itemKey));
     setSelected((prev) => new Set([...prev].filter((k) => !keys.has(k))));
     if (done.length) announceApprovalsChanged();
@@ -189,7 +230,7 @@ export default function ApprovalsPage() {
       ) : null}
 
       <div role="tablist" aria-label="Request type" className={s.tabs}>
-        {INBOX_TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.key}
             type="button"
@@ -209,7 +250,10 @@ export default function ApprovalsPage() {
       {chosen.length > 0 ? (
         <section aria-label="Selected requests" className={s.selectionBar}>
           <strong>{chosen.length} selected</strong>
-          <span className={s.selectionNote}>Each is checked on its own; anything that can&apos;t be done is listed after.</span>
+          <span className={s.selectionNote}>
+            Each is checked on its own; anything that can&apos;t be done is listed after.
+            {chosenDeletions ? ` Approving deletes ${plural(chosenDeletions, 'screenshot')} permanently.` : ''}
+          </span>
           <span className={s.grow} />
           <Button size="sm" variant="quiet" onClick={() => setSelected(new Set())}>
             Clear
@@ -230,7 +274,10 @@ export default function ApprovalsPage() {
         <Loading label="Loading approvals" />
       ) : visible.length === 0 ? (
         <Card>
-          <Empty title="Nothing to review">When someone submits a timesheet, adds or corrects time, or asks for time off, it shows up here.</Empty>
+          <Empty title="Nothing to review">
+            When someone submits a timesheet, adds or corrects time, asks for time off{access.isAdmin ? ' or asks to delete a screenshot' : ''}, it shows up
+            here.
+          </Empty>
         </Card>
       ) : (
         <div className={s.inbox}>
@@ -294,6 +341,8 @@ export default function ApprovalsPage() {
               <TimesheetReviewCard key={itemKey(focused)} t={sheets.data!.find((t) => t.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
             ) : focused?.type === 'time_off' ? (
               <TimeOffReviewCard key={itemKey(focused)} r={leave.data!.find((r) => r.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
+            ) : focused?.type === 'deletion_request' ? (
+              <DeletionReview key={itemKey(focused)} d={deletions.data!.find((d) => d.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
             ) : null}
           </div>
         </div>

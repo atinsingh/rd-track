@@ -1,4 +1,4 @@
-import type { ApprovalType, CorrectionDTO, TimeOffRequestDTO, TimesheetDTO } from '@rd/contracts';
+import type { ApprovalType, CorrectionDTO, DeletionRequestDTO, TimeOffRequestDTO, TimesheetDTO } from '@rd/contracts';
 import { formatDuration } from './format';
 import { dateSpanLabel, formatHours } from './scheduling';
 import { addDays, dateInTz, formatDayMonth, formatShortDay, formatTime } from './time';
@@ -8,7 +8,7 @@ export interface InboxItem {
   type: ApprovalType;
   id: string;
   /** Tab it belongs to. */
-  group: 'timesheets' | 'time' | 'timeoff';
+  group: 'timesheets' | 'time' | 'timeoff' | 'privacy';
   who: string;
   what: string;
   kindLabel: string;
@@ -23,6 +23,7 @@ export const INBOX_TABS = [
   { key: 'timesheets', label: 'Timesheets' },
   { key: 'time', label: 'Time and corrections' },
   { key: 'timeoff', label: 'Time off' },
+  { key: 'privacy', label: 'Deletion requests' },
 ] as const;
 export type InboxTab = (typeof INBOX_TABS)[number]['key'];
 
@@ -60,16 +61,27 @@ function timeOffItem(r: TimeOffRequestDTO): InboxItem {
   };
 }
 
-/** Every pending request in one list, oldest first. */
+function deletionItem(d: DeletionRequestDTO): InboxItem {
+  return {
+    type: 'deletion_request', id: d.id, group: 'privacy', who: d.requester_name,
+    what: 'Delete a screenshot of themselves', kindLabel: 'Deletion request', amount: '1 screenshot', submittedAt: d.created_at, flag: null,
+  };
+}
+
+/** Every pending request in one list, oldest first. Deletion requests reach org admins only. */
 export function inboxItems(
   corrections: readonly CorrectionDTO[],
   timesheets: readonly TimesheetDTO[],
   timeOff: readonly TimeOffRequestDTO[],
   tz: string,
+  deletions: readonly DeletionRequestDTO[] = [],
 ): InboxItem[] {
-  return [...timesheets.filter((t) => t.id).map(timesheetItem), ...corrections.map((c) => correctionItem(c, tz)), ...timeOff.map(timeOffItem)].sort(
-    (a, b) => a.submittedAt.localeCompare(b.submittedAt),
-  );
+  return [
+    ...timesheets.filter((t) => t.id).map(timesheetItem),
+    ...corrections.map((c) => correctionItem(c, tz)),
+    ...timeOff.map(timeOffItem),
+    ...deletions.filter((d) => d.status === 'pending').map(deletionItem),
+  ].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
 }
 
 export function inTab(items: readonly InboxItem[], tab: InboxTab): InboxItem[] {

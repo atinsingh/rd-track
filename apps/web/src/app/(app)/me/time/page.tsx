@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues, SessionDTO } from '@rd/contracts';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
@@ -43,7 +44,13 @@ const STATUS_TONE = { pending: 'outline', approved: 'solid', rejected: 'outline'
 export default function MyTimePage() {
   const { timezone } = useMe();
   const [tz, setTz] = useState(timezone);
-  const [day, setDay] = useState(() => todayInTz(timezone));
+  const params = useSearchParams();
+  // ?week=YYYY-MM-DD opens that week (links from to-dos and reminders).
+  const [day, setDay] = useState(() => {
+    const today = todayInTz(timezone);
+    const q = params.get('week');
+    return q && /^\d{4}-\d{2}-\d{2}$/.test(q) && q <= today ? q : today;
+  });
   const [sheet, setSheet] = useState<{ session: SessionDTO | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const week = startOfWeek(day);

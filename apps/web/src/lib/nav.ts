@@ -51,8 +51,8 @@ export function can(a: Access, c: Capability): boolean {
     case 'team':
       return a.managesTeams;
     case 'approvals':
-      // Org admins review corrections, timesheets and time off for people without a team manager.
-      return a.managesTeams || (a.isAdmin && (a.entitlements.includes('correction_approvals') || a.entitlements.includes('timesheets') || timeOff));
+      // Org admins review deletion requests, and corrections, timesheets and time off for people without a team manager.
+      return a.managesTeams || (a.isAdmin && (timeOff || (['correction_approvals', 'timesheets', 'screenshots'] as const).some((e) => a.entitlements.includes(e))));
     case 'projects':
       return a.managesProjects;
     case 'admin':
@@ -141,7 +141,7 @@ const GROUPS: NavGroup[] = [
       { href: '/admin/schedules', label: 'Schedules', capability: 'adminSchedules', keywords: 'shifts hours' },
       { href: '/admin/holidays', label: 'Holidays', capability: 'adminHolidays' },
       { href: '/admin/time-off', label: 'Time-off policies', capability: 'adminTimeOff', keywords: 'leave accrual' },
-      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits', keywords: 'overtime daily weekly' },
+      { href: '/admin/work-limits', label: 'Work limits', capability: 'work_limits', keywords: 'overtime daily weekly timesheet deadline reminder due' },
       { href: '/admin/requests', label: 'Deletion requests', capability: 'admin', keywords: 'privacy' },
     ],
   },

@@ -1,11 +1,11 @@
 'use client';
 
 import { useState } from 'react';
-import type { WorkLimitsResponse } from '@rd/contracts';
+import type { TimesheetRule, WorkLimitsResponse } from '@rd/contracts';
 import ts from '@/components/timesheet/timesheet.module.css';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
-import { SelectField, TextField } from '@/components/ui/Field';
+import { Checkbox, SelectField, TextField } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, TableBox, formActionsClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { byName } from '@/lib/format';
@@ -69,6 +69,87 @@ function OrgDefault({ data, onSaved }: { data: WorkLimitsResponse; onSaved: (r: 
       <div className={formActionsClass}>
         <Button variant="primary" onClick={save} disabled={action.busy || !from}>
           Save default
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+/** Engine rule (G19): when a week's timesheet is due, with a reminder, an overdue notice and an escalation. */
+function DeadlineRule({ rule, onSaved }: { rule: TimesheetRule; onSaved: (r: TimesheetRule) => void }) {
+  const [draft, setDraft] = useState(rule);
+  const [saved, setSaved] = useState(false);
+  const action = useAction();
+  const set = (patch: Partial<TimesheetRule>) => {
+    setSaved(false);
+    setDraft((d) => ({ ...d, ...patch }));
+  };
+  const save = async () => {
+    const r = await action.run(() => rd.admin.setTimesheetRule(draft));
+    if (r) {
+      setSaved(true);
+      onSaved(r);
+    }
+  };
+  const day = WEEKDAYS[draft.due_weekday - 1];
+  return (
+    <Card
+      title="Timesheet deadline"
+      subtitle={rule.enabled ? `Due ${WEEKDAYS[rule.due_weekday - 1]} ${rule.due_time} after each week` : 'Off: nobody is reminded'}
+    >
+      <Checkbox
+        label="Remind people to submit their week"
+        hint="Times are in each person's own time zone. People with no tracked time that week are never chased."
+        checked={draft.enabled}
+        onChange={(e) => set({ enabled: e.target.checked })}
+      />
+      <div className={ts.limits}>
+        <SelectField
+          label="Due on the following"
+          value={draft.due_weekday}
+          disabled={!draft.enabled}
+          onChange={(e) => set({ due_weekday: Number(e.target.value) })}
+        >
+          {WEEKDAYS.map((d, i) => (
+            <option key={d} value={i + 1}>
+              {d}
+            </option>
+          ))}
+        </SelectField>
+        <TextField label="At" type="time" value={draft.due_time} disabled={!draft.enabled} onChange={(e) => set({ due_time: e.target.value })} required />
+        <SelectField
+          label="Tell reviewers"
+          value={draft.escalate_after_hours}
+          disabled={!draft.enabled}
+          onChange={(e) => set({ escalate_after_hours: Number(e.target.value) })}
+        >
+          <option value={0}>Never</option>
+          <option value={4}>4 hours after the deadline</option>
+          <option value={24}>1 day after the deadline</option>
+          <option value={48}>2 days after the deadline</option>
+          <option value={72}>3 days after the deadline</option>
+        </SelectField>
+      </div>
+      {draft.enabled ? (
+        <p className="small secondary">
+          The working day before, people get a reminder. On {day} at {draft.due_time} anyone who hasn&apos;t submitted is told it&apos;s overdue
+          {draft.escalate_after_hours
+            ? `; ${draft.escalate_after_hours} hours later their reviewer gets one summary listing who is still missing`
+            : ''}
+          . Nothing is ever submitted for them.
+        </p>
+      ) : null}
+      <ActionError error={action.error} />
+      {saved ? (
+        <p role="status" className="small secondary">
+          Saved.
+        </p>
+      ) : null}
+      <div className={formActionsClass}>
+        <Button variant="primary" onClick={save} disabled={action.busy || !/^\d{2}:\d{2}$/.test(draft.due_time)}>
+          Save deadline
         </Button>
       </div>
     </Card>
@@ -170,6 +251,7 @@ export default function WorkLimitsPage() {
   const { access, timezone: tz } = useMe();
   const entitled = access.entitlements.includes('timesheets');
   const limits = useApi(access.isAdmin && entitled ? 'admin:work-limits' : null, (signal) => timesheetsApi.workLimits(signal));
+  const rule = useApi(access.isAdmin && entitled ? 'admin:timesheet-rule' : null, (signal) => rd.admin.timesheetRule(signal));
   if (!access.isAdmin) return <NoAccess what="Work limits are set by org admins." />;
   if (!entitled) return <NoAccess what="Work limits and overtime are part of the Standard and Pro plans. Change the plan in Billing." />;
   const saved = (r: WorkLimitsResponse) => limits.mutate(() => r);
@@ -179,12 +261,15 @@ export default function WorkLimitsPage() {
       <PageHeader
         eyebrow="Admin · Timesheets"
         title="Work limits"
-        description="Daily and weekly limits used for overtime on timesheets. Employees see their own limits and overtime first; their managers see the same figures."
+        description="When timesheets are due, and the daily and weekly limits used for overtime. Employees see their own limits and overtime first; their managers see the same figures."
       />
       <Banner tag="NOTE">
         Overtime is time over a limit, counted once: daily overtime first, then any remaining time over the weekly limit. It
         is for planning and pay, never a measure of performance.
       </Banner>
+      <Resource {...rule} label="Loading the timesheet deadline">
+        {(r) => <DeadlineRule rule={r} onSaved={(next) => rule.mutate(() => next)} />}
+      </Resource>
       <Resource {...limits} label="Loading work limits">
         {(data) => (
           <>
