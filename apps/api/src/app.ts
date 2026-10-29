@@ -17,6 +17,7 @@ import { authenticateDirectory } from './modules/scim/service';
 import { authenticateToken } from './modules/api-tokens/service';
 import { apiEndpoint } from './modules/api-tokens/surface';
 import { developerRoutes } from './modules/developer-routes';
+import { expensesRoutes } from './modules/expenses-routes';
 import { audit } from './modules/audit/service';
 import { withScope } from './db/tenant-scope';
 import { scimRoutes } from './modules/scim-routes';
@@ -200,6 +201,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => ssoRoutes(s, deps));
   await app.register(async (s) => scimRoutes(s, deps));
   await app.register(async (s) => developerRoutes(s, deps));
+  await app.register(async (s) => expensesRoutes(s, deps));
   await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));

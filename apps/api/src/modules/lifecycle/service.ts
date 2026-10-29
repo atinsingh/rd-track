@@ -52,6 +52,8 @@ const ORG_TABLES: { table: string; drop?: string[] }[] = [
   { table: 'project_budgets' },
   { table: 'invoices' },
   { table: 'invoice_lines' },
+  { table: 'expenses', drop: ['receipt_key'] },
+  { table: 'payroll_adjustments' },
   { table: 'policies' },
   { table: 'policy_versions' },
   { table: 'app_categories' },
@@ -298,7 +300,8 @@ export async function purgeOrganization(deps: Deps, q: Queryable, orgId: string)
       `SELECT object_key AS key FROM screenshots WHERE organization_id = $1 AND object_key IS NOT NULL
        UNION ALL SELECT object_key FROM export_jobs WHERE organization_id = $1 AND object_key IS NOT NULL
        UNION ALL SELECT object_key FROM payroll_exports WHERE organization_id = $1 AND object_key IS NOT NULL
-       UNION ALL SELECT object_key FROM data_exports WHERE organization_id = $1 AND object_key IS NOT NULL`,
+       UNION ALL SELECT object_key FROM data_exports WHERE organization_id = $1 AND object_key IS NOT NULL
+       UNION ALL SELECT receipt_key FROM expenses WHERE organization_id = $1 AND receipt_key IS NOT NULL`,
       [orgId],
     )
   ).map((r) => r.key);

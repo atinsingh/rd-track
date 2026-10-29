@@ -77,8 +77,9 @@ export function Payroll({ tz, today }: { tz: string; today: string }) {
           />
         </div>
         <p className="small muted">
-          Uses all recorded time (agent-tracked and approved manual time). Hours are rounded to the minute, then to two decimals. Files expire after 24
-          hours; each download is recorded in the access log of everyone in the file.
+          Uses all recorded time (agent-tracked and approved manual time). Hours are rounded to the minute, then to two decimals. Approved expenses not yet
+          paid, and the bonuses and deductions set under Rates, get their own columns. Files expire after 24 hours; each download is recorded in the access
+          log of everyone in the file.
         </p>
         <ActionError error={create.error} />
         <div className={formActionsClass}>

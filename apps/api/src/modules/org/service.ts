@@ -317,7 +317,7 @@ export async function removeTeamMember(q: Queryable, actor: OrgActor, teamId: st
 // ───────────── projects & tasks ─────────────
 
 const PROJECT_SELECT = `
-  SELECT p.id, p.name, p.client_ref, p.status,
+  SELECT p.id, p.name, p.client_ref, p.status, (SELECT c.name FROM clients c WHERE c.id = p.client_id) AS client_name,
     COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY t.name)
               FROM tasks t WHERE t.project_id = p.id AND t.status = 'active'), '[]') AS tasks
   FROM projects p`;
@@ -406,7 +406,7 @@ export async function setProjectMember(
 export async function listAdminProjects(q: Queryable, orgId: string): Promise<AdminProjectDTO[]> {
   return many<AdminProjectDTO>(
     q,
-    `SELECT p.id, p.name, p.client_ref, p.status,
+    `SELECT p.id, p.name, p.client_ref, p.status, (SELECT c.name FROM clients c WHERE c.id = p.client_id) AS client_name,
        COALESCE((SELECT json_agg(json_build_object('id', t.id, 'name', t.name) ORDER BY t.name)
                  FROM tasks t WHERE t.project_id = p.id AND t.status = 'active'), '[]') AS tasks,
        COALESCE((SELECT json_agg(json_build_object('user_id', u.id, 'display_name', u.display_name, 'role', m.role) ORDER BY u.display_name)

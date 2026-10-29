@@ -166,12 +166,22 @@ export class LocalObjectStore implements ObjectStore {
       return null;
     }
   }
-  async put(key: string, body: Buffer | string, _contentType?: string) {
+  async put(key: string, body: Buffer | string, contentType?: string) {
     const p = this.path(key);
     await mkdir(dirname(p), { recursive: true });
     await writeFile(p, body);
+    if (contentType) await writeFile(`${p}.content-type`, contentType);
+  }
+  /** The type it was uploaded with, as S3 keeps it. */
+  async contentType(key: string): Promise<string | null> {
+    try {
+      return (await readFile(`${this.path(key)}.content-type`, 'utf8')).trim() || null;
+    } catch {
+      return null;
+    }
   }
   async delete(key: string) {
     await rm(this.path(key), { force: true });
+    await rm(`${this.path(key)}.content-type`, { force: true });
   }
 }

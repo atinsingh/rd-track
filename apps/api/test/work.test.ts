@@ -34,7 +34,7 @@ describe('inbox counts', () => {
     await trackWeek(org, 'emp2', '2026-10-27');
     expect((await org.users.emp2!.client.post('/v1/me/timesheets/2026-10-26/submit', {})).status).toBe(200);
 
-    expect((await org.users.manager!.client.get('/v1/inbox/counts')).body).toEqual({ corrections: 1, timesheets: 1, time_off: 0, deletion_requests: 0, total: 2 });
+    expect((await org.users.manager!.client.get('/v1/inbox/counts')).body).toEqual({ corrections: 1, timesheets: 1, time_off: 0, deletion_requests: 0, expenses: 0, total: 2 });
     // Admins review everyone (including the manager's own correction).
     expect((await org.admin.get('/v1/inbox/counts')).body).toMatchObject({ corrections: 2, timesheets: 1, total: 3 });
     expect((await org.users.emp!.client.get('/v1/inbox/counts')).body.total).toBe(0);

@@ -10,6 +10,8 @@ import {
   invoiceUpdateRequest,
   invoiceVoidRequest,
   payRateCreateRequest,
+  payrollAdjustmentEndRequest,
+  payrollAdjustmentRequest,
   payrollExportRequest,
   projectBudgetRequest,
   projectClientRequest,
@@ -24,6 +26,7 @@ import { parse } from '../lib/validate';
 import { deleteProjectBudget, getProjectBudget, listBudgets, putProjectBudget } from './money/budgets';
 import * as cr from './money/clients-rates';
 import * as inv from './money/invoices';
+import * as adj from './money/adjustments';
 import { createPayrollExport, getPayrollExport, listPayrollExports } from './money/payroll';
 import { assertMoneyPlan } from './money/time';
 
@@ -190,5 +193,31 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
   app.get<{ Params: { id: string } }>('/v1/admin/payroll-exports/:id', user, async (req) => {
     const a = await admin(req);
     return withTx(pool, (tx) => getPayrollExport(deps, tx, a, id(req), req.id));
+  });
+
+  // ───────── payroll adjustments (F8) ─────────
+  app.get<{ Querystring: { user_id?: string } }>('/v1/admin/payroll-adjustments', user, async (req) => {
+    const a = await admin(req);
+    return { items: await withTx(pool, (tx) => adj.listAdjustmentsAsAdmin(tx, a, parse(optionalUuid, req.query).user_id, req.id)) };
+  });
+  app.post('/v1/admin/payroll-adjustments', user, async (req, reply) => {
+    const a = await admin(req);
+    const body = parse(payrollAdjustmentRequest, req.body);
+    return reply.code(201).send(await withTx(pool, (tx) => adj.createAdjustment(tx, a, body, req.id)));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/payroll-adjustments/:id/end', user, async (req) => {
+    const a = await admin(req);
+    const { effective_to } = parse(payrollAdjustmentEndRequest, req.body);
+    return withTx(pool, (tx) => adj.endAdjustment(tx, a, id(req), effective_to, req.id));
+  });
+  app.delete<{ Params: { id: string } }>('/v1/admin/payroll-adjustments/:id', user, async (req) => {
+    const a = await admin(req);
+    await withTx(pool, (tx) => adj.deleteAdjustment(tx, a, id(req), req.id));
+    return { ok: true };
+  });
+  app.get('/v1/me/payroll-adjustments', user, async (req) => {
+    const a = userOf(req);
+    await assertMoneyPlan(deps, pool, a.organizationId);
+    return { items: await adj.listAdjustments(pool, a.organizationId, a.userId) };
   });
 }

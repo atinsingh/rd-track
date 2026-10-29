@@ -1,0 +1,130 @@
+/* Expenses (Stage 4 F7): totals, the claim form and your claims. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 18px 20px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--glass-shadow);
+}
+.tileLabel {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.tileValue {
+  font-family: var(--font-display);
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.tileSub {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 960px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.form,
+.list {
+  min-width: 0;
+}
+.formBody {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.drop,
+.dropFilled {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 16px;
+  text-align: center;
+  border: 1px dashed var(--control-border);
+  border-radius: var(--radius-control);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.dropFilled {
+  border-style: solid;
+  color: var(--text);
+}
+.drop:hover,
+.dropFilled:hover {
+  background: var(--glass-strong);
+}
+.drop:focus-within,
+.dropFilled:focus-within {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+.dropTitle {
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.dropHint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.fileError {
+  margin: -6px 0 0;
+  font-size: 13px;
+  color: var(--warn-text);
+}
+
+.what {
+  display: block;
+  font-weight: 500;
+}
+.meta {
+  display: block;
+  font-size: 12px;
+  color: var(--text-3);
+}
+.status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+.withdrawn {
+  color: var(--text-3);
+}
+
+.strong {
+  border-color: var(--text);
+  color: var(--text);
+}

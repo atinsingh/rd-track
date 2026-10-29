@@ -31,6 +31,8 @@ const PERSON_TABLES: { table: string; where: string; drop?: string[] }[] = [
   { table: 'timesheets', where: 'user_id = $2' },
   { table: 'time_off_requests', where: 'user_id = $2' },
   { table: 'time_off_ledger', where: 'user_id = $2' },
+  { table: 'expenses', where: 'user_id = $2', drop: ['receipt_key'] },
+  { table: 'payroll_adjustments', where: 'user_id = $2' },
   { table: 'shifts', where: 'user_id = $2' },
   { table: 'team_memberships', where: 'user_id = $2' },
   { table: 'project_memberships', where: 'user_id = $2' },
@@ -210,6 +212,10 @@ export async function erasePerson(deps: Deps, q: Queryable, requestId: string): 
   for (const s of shots) if (await deleteScreenshot(deps, q, s.id, 'erasure')) deleted.screenshots++;
   const heldShots = (await one<{ n: number }>(q, 'SELECT count(*)::int AS n FROM screenshots WHERE user_id = $1 AND deleted_at IS NULL', [userId]))!.n;
   if (heldShots) kept.screenshots = heldShots;
+  // Claims never approved go, receipts and all; approved ones stay as payroll and invoice records, like time records.
+  const claims = await many<{ receipt_key: string | null }>(q, `DELETE FROM expenses WHERE user_id = $1 AND status <> 'approved' RETURNING receipt_key`, [userId]);
+  for (const c of claims) if (c.receipt_key) await deps.store.delete(c.receipt_key);
+  deleted.expenses = claims.length;
   for (const table of ['notifications', 'notification_preferences', 'auth_tokens', 'mfa_recovery_codes', 'enrollment_codes', 'user_sessions']) {
     deleted[table] = (await q.query(`DELETE FROM ${table} WHERE user_id = $1`, [userId])).rowCount ?? 0;
   }

@@ -280,6 +280,24 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
     // published for integrations and history.
     case 'timesheet.decided':
     case 'time_off.requested':
+    case 'expense.submitted':
+      await send(await reviewersOf(q, e.organizationId, e.subjectUserId!), {
+        kind: 'expense_review',
+        category: 'approvals',
+        title: `${str(d.user_name)} claimed an expense of ${str(d.amount)}`,
+        body: str(d.note),
+        link: '/approvals',
+      });
+      return;
+    case 'expense.decided':
+      await send(subject, {
+        kind: d.approved ? 'expense_approved' : 'expense_sent_back',
+        category: 'my_requests',
+        title: d.approved ? `Your expense of ${str(d.amount)} was approved` : `${str(d.reviewer_name)} sent back your expense of ${str(d.amount)}`,
+        body: d.approved ? 'It is paid with the next payroll.' : str(d.review_note) || 'Open it to see why.',
+        link: '/me/expenses',
+      });
+      return;
     case 'time_off.decided':
     case 'user.invited':
     case 'user.deactivated':

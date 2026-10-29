@@ -26,6 +26,8 @@ interface DraftLine {
   description: string;
   hours: string;
   rate: string;
+  /** Kept so a line billing an expense (F7) stays linked to it. */
+  expense_id?: string | null;
 }
 
 const toDraft = (inv: InvoiceDTO): DraftLine[] =>
@@ -36,6 +38,7 @@ const toDraft = (inv: InvoiceDTO): DraftLine[] =>
     description: l.description,
     hours: l.hours.toFixed(2),
     rate: centsToInput(l.rate_cents),
+    expense_id: l.expense_id,
   }));
 
 function Totals({ subtotal, taxBp, currency }: { subtotal: number; taxBp: number; currency: string }) {
@@ -73,6 +76,7 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
       description: l.description.trim(),
       hours: parsed[i]!.hours!,
       rate_cents: parsed[i]!.rate!,
+      expense_id: l.expense_id ?? null,
     }));
     const r = await save.run(() => rd.money.setInvoiceLines(inv.id, body));
     if (r) {

@@ -13,6 +13,7 @@ export type Capability =
   | 'exports'
   | 'webhooks'
   | 'developers'
+  | 'expenses'
   | 'schedule'
   | 'teamSchedule'
   | 'adminSchedules'
@@ -64,8 +65,8 @@ export function can(a: Access, c: Capability): boolean {
     case 'team':
       return a.managesTeams;
     case 'approvals':
-      // Org admins review deletion requests, and corrections, timesheets and time off for people without a team manager.
-      return a.managesTeams || (a.isAdmin && (timeOff || (['correction_approvals', 'timesheets', 'screenshots'] as const).some((e) => a.entitlements.includes(e))));
+      // Org admins review deletion requests, and corrections, timesheets, time off and expenses for people without a team manager.
+      return a.managesTeams || (a.isAdmin && (timeOff || (['correction_approvals', 'timesheets', 'screenshots', 'expenses'] as const).some((e) => a.entitlements.includes(e))));
     case 'projects':
       return a.managesProjects;
     case 'admin':
@@ -74,6 +75,8 @@ export function can(a: Access, c: Capability): boolean {
       return a.isAdmin && a.entitlements.includes('webhooks');
     case 'developers':
       return a.isAdmin;
+    case 'expenses':
+      return a.entitlements.includes('expenses');
     case 'work_limits':
       return a.isAdmin && a.entitlements.includes('timesheets');
     case 'audit':
@@ -122,6 +125,7 @@ const GROUPS: NavGroup[] = [
       { href: '/me/time', label: 'My time', capability: 'tracking', keywords: 'timesheet week corrections manual' },
       { href: '/me/insights', label: 'Insights', capability: 'tracking', keywords: 'focus apps trends' },
       { href: '/me/schedule', label: 'Schedule and time off', capability: 'schedule', keywords: 'leave vacation holiday shifts' },
+      { href: '/me/expenses', label: 'Expenses', capability: 'expenses', keywords: 'claim receipt reimbursement' },
       { href: '/me/screenshots', label: 'Screenshots', capability: 'screenshots' },
       { href: '/me/computers', label: 'My computers', capability: 'tracking', keywords: 'download install app agent enrol connect code' },
       { href: '/me/privacy', label: "What's collected", capability: 'me', keywords: 'privacy data deletion' },

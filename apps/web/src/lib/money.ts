@@ -1,5 +1,6 @@
-import type { BudgetStatus, InvoiceStatus } from '@rd/contracts';
+import type { BudgetStatus, InvoiceStatus, PayrollAdjustmentDTO } from '@rd/contracts';
 import { formatMoney } from './format';
+import { formatDayLabel } from './time';
 
 /** Common ISO 4217 codes offered in pickers; the API accepts any three-letter code. */
 export const CURRENCIES = ['USD', 'CAD', 'EUR', 'GBP', 'AUD', 'NZD', 'CHF', 'SEK', 'NOK', 'DKK', 'JPY', 'INR', 'SGD', 'ZAR'] as const;
@@ -75,3 +76,10 @@ export function latestBy<T extends { effective_from: string }>(rows: readonly T[
   }
   return out;
 }
+
+/** "Once, in the pay period with Thu 15 Oct 2026" / "Every pay period from Tue 1 Sep 2026 until Sat 31 Oct 2026" (F8). */
+export function adjustmentWhen(a: Pick<PayrollAdjustmentDTO, 'recurrence' | 'effective_from' | 'effective_to'>): string {
+  if (a.recurrence === 'once') return `Once, in the pay period with ${formatDayLabel(a.effective_from)}`;
+  return `Every pay period from ${formatDayLabel(a.effective_from)}${a.effective_to ? ` until ${formatDayLabel(a.effective_to)}` : ''}`;
+}
+

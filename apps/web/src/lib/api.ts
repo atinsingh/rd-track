@@ -2,6 +2,11 @@ import type {
   AccountSecurity,
   InviteInfo,
   DataExportDTO,
+  ExpenseCreate,
+  ExpenseDTO,
+  MyExpensesResponse,
+  ReceiptUploadResponse,
+  PayrollAdjustmentDTO,
   ApiTokenCreated,
   ApiTokenDTO,
   ApiTokenRequest,
@@ -325,6 +330,21 @@ const money = {
     post<BillRateDTO>('/v1/admin/rates/bill', body),
   deleteBillRate: (id: string) => ok(del(`/v1/admin/rates/bill/${enc(id)}`)),
   myPayRate: (signal?: AbortSignal) => get<MyPayRateResponse>('/v1/me/pay-rate', { signal }),
+  /** F8: bonuses, deductions and reimbursements. */
+  myAdjustments: (signal?: AbortSignal) => list<PayrollAdjustmentDTO>('/v1/me/payroll-adjustments', { signal }),
+  adjustments: (signal?: AbortSignal) => list<PayrollAdjustmentDTO>('/v1/admin/payroll-adjustments', { signal }),
+  createAdjustment: (body: {
+    user_id: string;
+    kind: PayrollAdjustmentDTO['kind'];
+    amount_cents: number;
+    currency: string;
+    note: string;
+    recurrence: PayrollAdjustmentDTO['recurrence'];
+    effective_from: string;
+    effective_to?: string | null;
+  }) => post<PayrollAdjustmentDTO>('/v1/admin/payroll-adjustments', body),
+  endAdjustment: (id: string, effectiveTo: string) => post<PayrollAdjustmentDTO>(`/v1/admin/payroll-adjustments/${enc(id)}/end`, { effective_to: effectiveTo }),
+  deleteAdjustment: (id: string) => ok(del(`/v1/admin/payroll-adjustments/${enc(id)}`)),
   budgets: (signal?: AbortSignal) => list<ProjectBudgetDTO>('/v1/admin/budgets', { signal }),
   projectBudget: (projectId: string, signal?: AbortSignal) =>
     get<ProjectBudgetResponse>(`/v1/projects/${enc(projectId)}/budget`, { signal }),
@@ -431,6 +451,18 @@ export const rd = {
     requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),
     erasureRequest: (signal?: AbortSignal) => get<{ request: ErasureRequestDTO | null }>('/v1/me/erasure-request', { signal }).then((r) => r.request),
     requestErasure: (reason?: string) => post<ErasureRequestDTO>('/v1/me/erasure-request', reason ? { reason } : {}),
+  },
+  /** Expenses (F7): claims, review, receipts. */
+  expenses: {
+    mine: (from: string, signal?: AbortSignal) => get<MyExpensesResponse>('/v1/me/expenses', { query: { from }, signal }),
+    receiptUpload: (contentType: string, sizeBytes: number) =>
+      post<ReceiptUploadResponse>('/v1/me/expenses/receipt-uploads', { content_type: contentType, size_bytes: sizeBytes }),
+    create: (body: ExpenseCreate) => post<ExpenseDTO>('/v1/me/expenses', body),
+    cancel: (id: string) => post<ExpenseDTO>(`/v1/me/expenses/${enc(id)}/cancel`),
+    pending: (signal?: AbortSignal) => list<ExpenseDTO>('/v1/expenses/pending', { signal }),
+    approve: (id: string, note?: string) => post<ExpenseDTO>(`/v1/expenses/${enc(id)}/approve`, note ? { note } : {}),
+    reject: (id: string, note: string) => post<ExpenseDTO>(`/v1/expenses/${enc(id)}/reject`, { note }),
+    receiptUrl: (id: string) => get<{ url: string }>(`/v1/expenses/${enc(id)}/receipt-url`),
   },
   /** API tokens (F5): admins see every token, others their own. */
   apiTokens: {

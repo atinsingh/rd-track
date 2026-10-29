@@ -5,6 +5,8 @@ import { enqueue } from '../../jobs/queue';
 import { toCsv } from '../../lib/csv';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { reimbursementsFor } from '../expenses/service';
+import { adjustmentsFor } from './adjustments';
 import { assertTimezone, dateRange, groupSeconds, timeWithPayRates, userTimezone } from './time';
 
 /**
@@ -17,6 +19,31 @@ import { assertTimezone, dateRange, groupSeconds, timeWithPayRates, userTimezone
  */
 
 const EXPIRY_MS = 24 * 3600_000;
+
+/** What else a person is owed (or owes) in one currency this period, beside their hours. */
+interface Extra {
+  user_id: string;
+  currency: string;
+  reimbursement: number;
+  bonus: number;
+  deduction: number;
+}
+
+function extraFor(m: Map<string, Extra>, userId: string, currency: string): Extra {
+  const k = `${userId}|${currency}`;
+  let x = m.get(k);
+  if (!x) m.set(k, (x = { user_id: userId, currency, reimbursement: 0, bonus: 0, deduction: 0 }));
+  return x;
+}
+
+/** Puts a person's extras on their first row in the same currency; the rest get rows of their own. */
+function takeExtra(m: Map<string, Extra>, userId: string, currency: string | null): Extra | undefined {
+  if (!currency) return undefined;
+  const k = `${userId}|${currency}`;
+  const x = m.get(k);
+  m.delete(k);
+  return x;
+}
 
 export async function createPayrollExport(
   deps: Deps,
@@ -65,30 +92,58 @@ export async function generatePayrollExport(deps: Deps, q: Queryable, id: string
     (a, b) => a.first.user_name.localeCompare(b.first.user_name) || (a.first.rate_effective_from ?? '').localeCompare(b.first.rate_effective_from ?? ''),
   );
   const money = (c: number) => (c / 100).toFixed(2);
+  // F7: approved expenses this period's file reimburses, per person and currency.
+  const extras = new Map<string, Extra>();
+  for (const r of await reimbursementsFor(q, job.organization_id, { from: job.period_from, to: job.period_to, endsAt: range.to }, job.user_ids)) {
+    extraFor(extras, r.user_id, r.currency).reimbursement += r.cents;
+  }
+  // F8: bonuses, deductions and reimbursements set for the period.
+  for (const a of await adjustmentsFor(q, job.organization_id, { from: job.period_from, to: job.period_to }, job.user_ids)) {
+    extraFor(extras, a.user_id, a.currency)[a.kind] += a.cents;
+  }
+  const extraCols = (x: Extra | undefined) => (x ? [money(x.reimbursement), money(x.bonus), money(x.deduction)] : [null, null, null]);
+  const out: (string | null)[][] = [];
+  const included = new Set<string>();
+  for (const g of groups) {
+    const hours = billableHours(g.seconds);
+    const rate = g.first.rate_cents;
+    const extra = takeExtra(extras, g.first.user_id, g.first.rate_currency);
+    included.add(g.first.user_id);
+    out.push([
+      g.first.user_name,
+      g.first.email,
+      job.period_from,
+      job.period_to,
+      hours.toFixed(2),
+      rate === null ? null : money(rate),
+      g.first.rate_currency ?? extra?.currency ?? null,
+      rate === null ? null : money(lineAmountCents(hours, rate)),
+      g.first.rate_effective_from,
+      ...extraCols(extra),
+    ]);
+  }
+  // Money owed to people with no time in the period, or in another currency: rows of their own.
+  if (extras.size) {
+    const people = await many<{ id: string; display_name: string; email: string }>(q, 'SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[])', [
+      [...new Set([...extras.values()].map((x) => x.user_id))],
+    ]);
+    const byId = new Map(people.map((p) => [p.id, p]));
+    for (const x of [...extras.values()].sort((a, b) => byId.get(a.user_id)!.display_name.localeCompare(byId.get(b.user_id)!.display_name))) {
+      const p = byId.get(x.user_id)!;
+      included.add(p.id);
+      out.push([p.display_name, p.email, job.period_from, job.period_to, null, null, x.currency, null, null, ...extraCols(x)]);
+    }
+  }
   const csv = toCsv(
-    ['employee', 'email', 'period_from', 'period_to', 'hours', 'hourly_rate', 'currency', 'gross_pay', 'rate_effective_from'],
-    groups.map((g) => {
-      const hours = billableHours(g.seconds);
-      const rate = g.first.rate_cents;
-      return [
-        g.first.user_name,
-        g.first.email,
-        job.period_from,
-        job.period_to,
-        hours.toFixed(2),
-        rate === null ? null : money(rate),
-        g.first.rate_currency,
-        rate === null ? null : money(lineAmountCents(hours, rate)),
-        g.first.rate_effective_from,
-      ];
-    }),
+    ['employee', 'email', 'period_from', 'period_to', 'hours', 'hourly_rate', 'currency', 'gross_pay', 'rate_effective_from', 'reimbursements', 'bonus', 'deductions'],
+    out,
   );
   const key = `payroll/${job.organization_id}/${job.id}.csv`;
   await deps.store.put(key, csv, 'text/csv; charset=utf-8');
   await q.query(
     `UPDATE payroll_exports SET status = 'ready', object_key = $2, row_count = $3, included_user_ids = $4, completed_at = now(), expires_at = $5
      WHERE id = $1`,
-    [job.id, key, groups.length, [...new Set(groups.map((g) => g.first.user_id))], new Date(deps.now().getTime() + EXPIRY_MS).toISOString()],
+    [job.id, key, out.length, [...included], new Date(deps.now().getTime() + EXPIRY_MS).toISOString()],
   );
 }
 

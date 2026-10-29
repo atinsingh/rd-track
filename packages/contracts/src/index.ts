@@ -15,3 +15,4 @@ export * from './platform';
 export * from './lifecycle';
 export * from './sso';
 export * from './developers';
+export * from './expenses';

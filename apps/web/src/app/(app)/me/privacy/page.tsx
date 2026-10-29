@@ -52,6 +52,11 @@ const RELATION: Record<string, string> = { team_manager: 'Team manager', project
 const ACTION_TEXT: Record<string, string> = {
   'screenshot.view': 'Opened one of your screenshots',
   'pay_rate.view': 'Viewed your pay rate',
+  'payroll_adjustment.view': 'Viewed your bonuses and deductions',
+  'expense.receipt_view': 'Opened your expense receipt',
+  'payroll_adjustment.create': 'Added a bonus, deduction or reimbursement for you',
+  'payroll_adjustment.end': 'Ended a recurring bonus or deduction of yours',
+  'payroll_adjustment.delete': 'Removed a bonus, deduction or reimbursement of yours',
   'pay_rate.create': 'Set a new pay rate for you',
   'pay_rate.delete': 'Cancelled a scheduled change to your pay rate',
   'bill_rate.create': 'Set a client bill rate for your time',

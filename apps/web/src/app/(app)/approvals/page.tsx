@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type KeyboardEvent } from 'react';
-import type { CorrectionDTO, CorrectionValues, DeletionRequestDTO } from '@rd/contracts';
+import { EXPENSE_CATEGORY_LABELS, type CorrectionDTO, type CorrectionValues, type DeletionRequestDTO, type ExpenseDTO } from '@rd/contracts';
 import { TimeOffReviewCard } from '@/components/scheduling/TimeOffApprovals';
 import { TimesheetReviewCard } from '@/components/timesheet/TimesheetApprovals';
 import { Button } from '@/components/ui/Button';
@@ -12,11 +12,11 @@ import { Badge, Banner, Card, PageHeader, TableBox, dlClass, formActionsClass, n
 import { rd } from '@/lib/api';
 import { INBOX_TABS, batchSummary, inTab, inboxItems, itemKey, type InboxItem, type InboxTab } from '@/lib/approvals';
 import { announceApprovalsChanged } from '@/lib/events';
-import { formatDuration, plural } from '@/lib/format';
+import { formatDuration, formatMoney, plural } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { can } from '@/lib/nav';
 import { sched } from '@/lib/scheduling';
-import { dateInTz, formatDateTime, formatRelative, formatShortDay, formatTime } from '@/lib/time';
+import { dateInTz, formatDateTime, formatDayLabel, formatRelative, formatShortDay, formatTime } from '@/lib/time';
 import { timesheetsApi } from '@/lib/timesheets';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../NoAccess';
@@ -121,6 +121,75 @@ function DeletionReview({ d, tz, onDone }: { d: DeletionRequestDTO; tz: string; 
   );
 }
 
+function ExpenseReview({ e, tz, onDone }: { e: ExpenseDTO; tz: string; onDone: () => void }) {
+  const [note, setNote] = useState('');
+  const action = useAction();
+  const receipt = useAction();
+  const decide = async (approve: boolean) => {
+    const r = await action.run(() => (approve ? rd.expenses.approve(e.id, note.trim() || undefined) : rd.expenses.reject(e.id, note.trim())));
+    if (r) onDone();
+  };
+  const openReceipt = async () => {
+    // Open the tab first so the browser doesn't treat it as a pop-up, then point it at the short-lived link.
+    const tab = window.open('about:blank', '_blank');
+    if (tab) tab.opener = null;
+    const r = await receipt.run(() => rd.expenses.receiptUrl(e.id));
+    if (r && tab) tab.location.href = r.url;
+    else if (r) window.location.assign(r.url);
+    else tab?.close();
+  };
+  return (
+    <Card title={`${e.user_name} · Expense`} subtitle={`Submitted ${formatDateTime(e.created_at, tz)}`}>
+      <dl className={dlClass}>
+        <dt>Amount</dt>
+        <dd className="mono">{formatMoney(e.amount_cents, e.currency)}</dd>
+        <dt>Spent on</dt>
+        <dd>{formatDayLabel(e.spent_on)}</dd>
+        <dt>Category</dt>
+        <dd>{EXPENSE_CATEGORY_LABELS[e.category]}</dd>
+        <dt>Project</dt>
+        <dd>{e.project_name ?? 'No project'}</dd>
+        <dt>Client</dt>
+        <dd>{e.billable && e.client_name ? `Billed to ${e.client_name}` : 'Not billed'}</dd>
+      </dl>
+      <p>
+        <span className="label-mono">Note</span>
+        <br />“{e.note}”
+      </p>
+      {e.has_receipt ? (
+        <div>
+          <Button size="sm" onClick={openReceipt} disabled={receipt.busy}>
+            {receipt.busy ? 'Opening…' : 'Open the receipt'}
+          </Button>
+          <p className="small muted">Opening it is noted in {e.user_name}&apos;s access log.</p>
+          <ActionError error={receipt.error} />
+        </div>
+      ) : (
+        <Banner tone="warn" tag="NO RECEIPT" title="No receipt is attached">
+          You can still approve it, or send it back asking for one.
+        </Banner>
+      )}
+      <TextArea
+        label="Note to the employee (required to send back)"
+        rows={2}
+        maxLength={1000}
+        value={note}
+        onChange={(ev) => setNote(ev.target.value)}
+      />
+      <ActionError error={action.error} />
+      <div className={formActionsClass}>
+        <Button onClick={() => decide(false)} disabled={action.busy || note.trim().length < 3}>
+          Send back
+        </Button>
+        <Button variant="primary" onClick={() => decide(true)} disabled={action.busy}>
+          Approve
+        </Button>
+      </div>
+      <p className="small muted">Approved, it&apos;s paid with the next payroll file{e.billable ? ' and goes on the client’s next draft invoice' : ''}.</p>
+    </Card>
+  );
+}
+
 export default function ApprovalsPage() {
   const { access, timezone: tz, me } = useMe();
   const timesheets = access.entitlements.includes('timesheets');
@@ -130,6 +199,8 @@ export default function ApprovalsPage() {
   const sheets = useApi(timesheets ? 'timesheets:pending' : null, (signal) => timesheetsApi.pending(signal));
   const leave = useApi(timeOffReview ? 'timeoff:pending' : null, (signal) => sched.review.pending(signal));
   const deletions = useApi(access.isAdmin ? 'admin:deletion-requests' : null, (signal) => rd.admin.deletionRequests(signal));
+  const expenseReview = access.entitlements.includes('expenses') && (access.managesTeams || access.isAdmin);
+  const expenses = useApi(expenseReview ? 'expenses:pending' : null, (signal) => rd.expenses.pending(signal));
   const projects = useApi(access.managesTeams ? 'projects:managed' : null, (signal) => rd.projects.list(signal).catch(() => []));
   const [tab, setTab] = useState<InboxTab>('all');
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -141,12 +212,12 @@ export default function ApprovalsPage() {
 
   if (!can(access, 'approvals')) return <NoAccess what="Approvals are for team managers and org admins." />;
 
-  const sources = [corrections, sheets, leave, deletions];
+  const sources = [corrections, sheets, leave, deletions, expenses];
   const error = sources.find((x) => x.error)?.error;
   const loading = sources.some((x) => x.loading && !x.data);
-  const items = inboxItems(corrections.data ?? [], sheets.data ?? [], leave.data ?? [], tz, deletions.data ?? []);
-  // Deletion requests reach org admins only.
-  const tabs = INBOX_TABS.filter((t) => t.key !== 'privacy' || access.isAdmin);
+  const items = inboxItems(corrections.data ?? [], sheets.data ?? [], leave.data ?? [], tz, deletions.data ?? [], expenses.data ?? []);
+  // Deletion requests reach org admins only; expenses need the plan.
+  const tabs = INBOX_TABS.filter((t) => (t.key !== 'privacy' || access.isAdmin) && (t.key !== 'expenses' || expenseReview));
   const visible = inTab(items, tab);
   const counts = Object.fromEntries(tabs.map((t) => [t.key, inTab(items, t.key).length])) as Record<InboxTab, number>;
   const chosen = items.filter((i) => selected.has(itemKey(i)));
@@ -165,10 +236,12 @@ export default function ApprovalsPage() {
     const t = ids('timesheet');
     const o = ids('time_off');
     const d = ids('deletion_request');
+    const x = ids('expense');
     corrections.mutate((prev) => prev?.filter((x) => !c.has(x.id)));
     sheets.mutate((prev) => prev?.filter((x) => !x.id || !t.has(x.id)));
     leave.mutate((prev) => prev?.filter((x) => !o.has(x.id)));
     deletions.mutate((prev) => prev?.filter((x) => !d.has(x.id)));
+    expenses.mutate((prev) => prev?.filter((e) => !x.has(e.id)));
     const keys = new Set(done.map(itemKey));
     setSelected((prev) => new Set([...prev].filter((k) => !keys.has(k))));
     if (done.length) announceApprovalsChanged();
@@ -220,7 +293,7 @@ export default function ApprovalsPage() {
         description={
           items.length
             ? `${plural(items.length, 'request')} waiting. Originals are kept whatever you decide; you never review your own.`
-            : 'Corrections, manual time, timesheets and time off from the people you review. Originals are kept whatever you decide.'
+            : `Corrections, manual time, timesheets, time off${expenseReview ? ' and expense claims' : ''} from the people you review. Originals are kept whatever you decide.`
         }
       />
       {access.managesTeams && !me.entitlements.includes('correction_approvals') ? (
@@ -275,8 +348,8 @@ export default function ApprovalsPage() {
       ) : visible.length === 0 ? (
         <Card>
           <Empty title="Nothing to review">
-            When someone submits a timesheet, adds or corrects time, asks for time off{access.isAdmin ? ' or asks to delete a screenshot' : ''}, it shows up
-            here.
+            When someone submits a timesheet, adds or corrects time, asks for time off{expenseReview ? ', claims an expense' : ''}
+            {access.isAdmin ? ' or asks to delete a screenshot' : ''}, it shows up here.
           </Empty>
         </Card>
       ) : (
@@ -341,6 +414,8 @@ export default function ApprovalsPage() {
               <TimesheetReviewCard key={itemKey(focused)} t={sheets.data!.find((t) => t.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
             ) : focused?.type === 'time_off' ? (
               <TimeOffReviewCard key={itemKey(focused)} r={leave.data!.find((r) => r.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
+            ) : focused?.type === 'expense' ? (
+              <ExpenseReview key={itemKey(focused)} e={expenses.data!.find((e) => e.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
             ) : focused?.type === 'deletion_request' ? (
               <DeletionReview key={itemKey(focused)} d={deletions.data!.find((d) => d.id === focused.id)!} tz={tz} onDone={onDone(focused)} />
             ) : null}

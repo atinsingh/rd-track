@@ -31,6 +31,8 @@ export const ENTITLEMENTS = [
   /** team-level (aggregate) insights; personal insights are on every plan */
   'team_insights',
   'webhooks',
+  /** expense claims, reimbursed with payroll and billed to clients (Stage 4 F7) */
+  'expenses',
 ] as const;
 export type Entitlement = (typeof ENTITLEMENTS)[number];
 

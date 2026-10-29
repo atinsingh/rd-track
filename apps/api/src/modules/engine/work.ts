@@ -49,7 +49,10 @@ export async function inboxCounts(deps: Pick<Deps, 'now'>, q: Queryable, actor: 
   const deletion_requests = isAdmin(actor)
     ? await count(`SELECT count(*)::int AS n FROM deletion_requests d WHERE d.organization_id = $1 AND d.status = 'pending' AND d.requester_id <> $2 AND $3::boolean`)
     : 0;
-  return { corrections, timesheets, time_off, deletion_requests, total: corrections + timesheets + time_off + deletion_requests };
+  const expenses = has('expenses')
+    ? await count(`SELECT count(*)::int AS n FROM expenses e WHERE e.organization_id = $1 AND e.status = 'pending' AND e.user_id <> $2 AND ${MANAGES('e')}`)
+    : 0;
+  return { corrections, timesheets, time_off, deletion_requests, expenses, total: corrections + timesheets + time_off + deletion_requests + expenses };
 }
 
 // ───────────── timesheet rule ─────────────

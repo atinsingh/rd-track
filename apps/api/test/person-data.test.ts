@@ -86,6 +86,17 @@ describe('erasure', () => {
     // A hold over the first five minutes keeps those buckets and the first screenshot.
     await org.admin.post('/v1/admin/legal-holds', { user_id: empId, from: '2026-11-03T14:00:00Z', to: '2026-11-03T14:05:30Z', reason: 'Dispute' });
     const sessionsBefore = await count('SELECT count(*)::int AS n FROM work_sessions WHERE user_id = $1', [empId]);
+    // Two expense claims with receipts: one approved (a payroll record, kept), one still waiting (erased).
+    const receipts: string[] = [];
+    const claimIds: string[] = [];
+    for (const note of ['Train', 'Lunch']) {
+      const up = await org.users.emp!.client.post('/v1/me/expenses/receipt-uploads', { content_type: 'image/png', size_bytes: 10 });
+      receipts.push(`receipts/${org.id}/${empId}/${up.body.upload_id}`);
+      await env.store.put(receipts.at(-1)!, Buffer.alloc(10), 'image/png');
+      const c = await org.users.emp!.client.post('/v1/me/expenses', { amount_cents: 1000, currency: 'USD', spent_on: '2026-11-02', category: 'travel', note, receipt_upload_id: up.body.upload_id });
+      claimIds.push(c.body.id);
+    }
+    expect((await org.users.manager!.client.post(`/v1/expenses/${claimIds[0]}/approve`)).status).toBe(200);
 
     const r = await org.users.emp!.client.post('/v1/me/erasure-request', { reason: 'Leaving' });
     const ok = await org.admin.post(`/v1/admin/erasure-requests/${r.body.id}/approve`);
@@ -98,7 +109,8 @@ describe('erasure', () => {
     const done = (await org.admin.get('/v1/admin/erasure-requests')).body.items.find((x: { id: string }) => x.id === r.body.id);
     expect(done.status).toBe('completed');
     expect(done.user_name).toBe('Erased person');
-    expect(done.result.deleted).toMatchObject({ activity_buckets: 4, screenshots: 1 });
+    expect(done.result.deleted).toMatchObject({ activity_buckets: 4, screenshots: 1, expenses: 1 });
+    expect([env.store.objects.has(receipts[0]!), env.store.objects.has(receipts[1]!)]).toEqual([true, false]);
     expect(done.result.kept_for_legal_hold).toEqual({ activity_buckets: 6, screenshots: 1 });
     expect(env.store.objects.has(outside)).toBe(false);
     expect(await count('SELECT count(*)::int AS n FROM work_sessions WHERE user_id = $1', [empId])).toBe(sessionsBefore);

@@ -1,16 +1,28 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
-import type { BillRateDTO, BudgetKind, BudgetResets, PayRateDTO, ProjectBudgetDTO, ProjectDTO, UserDTO } from '@rd/contracts';
+import {
+  PAYROLL_ADJUSTMENT_KINDS,
+  PAYROLL_ADJUSTMENT_LABELS,
+  type BillRateDTO,
+  type BudgetKind,
+  type BudgetResets,
+  type PayRateDTO,
+  type PayrollAdjustmentDTO,
+  type PayrollAdjustmentKind,
+  type ProjectBudgetDTO,
+  type ProjectDTO,
+  type UserDTO,
+} from '@rd/contracts';
 import { BudgetMeter } from '@/components/BudgetMeter';
 import { Button, ButtonLink } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
-import { Checkbox, SelectField, TextField } from '@/components/ui/Field';
+import { Checkbox, SelectField, TextArea, TextField } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName } from '@/lib/format';
+import { byName, formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { CURRENCIES, centsToInput, formatRate, latestBy, parseHoursInput, parseMoneyInput, parseThresholds } from '@/lib/money';
+import { CURRENCIES, adjustmentWhen, centsToInput, formatRate, latestBy, parseHoursInput, parseMoneyInput, parseThresholds } from '@/lib/money';
 import { formatDayLabel, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { MoneyGate } from '../MoneyGate';
@@ -168,6 +180,160 @@ function PayRates({ users, today }: { users: UserDTO[]; today: string }) {
               </ul>
             );
           }}
+        </Resource>
+      )}
+    </Card>
+  );
+}
+
+// ───────────────────────── payroll adjustments ─────────────────────────
+
+/** Bonuses, deductions and reimbursements (F8): their own columns in the payroll file. */
+function PayAdjustments({ users, today }: { users: UserDTO[]; today: string }) {
+  // Loaded on request, like pay rates: every load is recorded in each person's access log.
+  const [shown, setShown] = useState(false);
+  const list = useApi(shown ? 'money:adjustments' : null, (signal) => rd.money.adjustments(signal));
+  const action = useAction();
+  const [userId, setUserId] = useState('');
+  const [kind, setKind] = useState<PayrollAdjustmentKind>('bonus');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [recurrence, setRecurrence] = useState<PayrollAdjustmentDTO['recurrence']>('once');
+  const [from, setFrom] = useState(today);
+  const [to, setTo] = useState('');
+  const [note, setNote] = useState('');
+  const people = users.filter((u) => u.status === 'active').sort(byName);
+  const cents = parseMoneyInput(amount);
+  const badEnd = recurrence === 'every_period' && to !== '' && to < from;
+  const ready = userId && cents !== null && cents >= 1 && note.trim() && from && !badEnd;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!ready || cents === null) return;
+    const r = await action.run(() =>
+      rd.money.createAdjustment({
+        user_id: userId,
+        kind,
+        amount_cents: cents,
+        currency,
+        note: note.trim(),
+        recurrence,
+        effective_from: from,
+        effective_to: recurrence === 'every_period' && to ? to : null,
+      }),
+    );
+    if (!r) return;
+    setAmount('');
+    setNote('');
+    setTo('');
+    if (shown) list.reload();
+    else setShown(true);
+  };
+  const end = async (a: PayrollAdjustmentDTO) => {
+    if (await action.run(() => rd.money.endAdjustment(a.id, today))) list.reload();
+  };
+  const remove = async (a: PayrollAdjustmentDTO) => {
+    if (await action.run(() => rd.money.deleteAdjustment(a.id))) list.reload();
+  };
+
+  return (
+    <Card title="Bonuses and deductions" subtitle="One-off or every pay period, on top of hours × rate">
+      <form onSubmit={submit} className={m.stack}>
+        <div className={formGridClass}>
+          <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">Choose a person…</option>
+            {people.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.display_name}
+              </option>
+            ))}
+          </SelectField>
+          <SelectField label="Kind" value={kind} onChange={(e) => setKind(e.target.value as PayrollAdjustmentKind)}>
+            {PAYROLL_ADJUSTMENT_KINDS.map((k) => (
+              <option key={k} value={k}>
+                {PAYROLL_ADJUSTMENT_LABELS[k]}
+              </option>
+            ))}
+          </SelectField>
+          <TextField
+            label="Amount"
+            inputMode="decimal"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            error={amount && (cents === null || cents < 1) ? 'Enter an amount such as 500 or 49.99' : null}
+          />
+          <CurrencyField value={currency} onChange={setCurrency} />
+          <SelectField label="How often" value={recurrence} onChange={(e) => setRecurrence(e.target.value as PayrollAdjustmentDTO['recurrence'])}>
+            <option value="once">Once</option>
+            <option value="every_period">Every pay period</option>
+          </SelectField>
+          <TextField
+            label={recurrence === 'once' ? 'In the pay period with' : 'From'}
+            type="date"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+          />
+          {recurrence === 'every_period' ? (
+            <TextField
+              label="Until (optional)"
+              type="date"
+              value={to}
+              min={from}
+              onChange={(e) => setTo(e.target.value)}
+              error={badEnd ? 'The end date is before the start date.' : null}
+            />
+          ) : null}
+        </div>
+        <TextArea label="Note" hint="The person sees this, e.g. “Q3 bonus” or “Parking”" rows={2} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
+        <div className={formActionsClass}>
+          <Button type="submit" variant="primary" disabled={!ready || action.busy}>
+            Add {PAYROLL_ADJUSTMENT_LABELS[kind].toLowerCase()}
+          </Button>
+        </div>
+      </form>
+      <ActionError error={action.error} />
+      {!shown ? (
+        <div>
+          <Button onClick={() => setShown(true)}>Show bonuses and deductions</Button>
+        </div>
+      ) : (
+        <Resource {...list} label="Loading bonuses and deductions">
+          {(rows) =>
+            rows.length === 0 ? (
+              <Empty title="None yet" />
+            ) : (
+              <ul className={m.history}>
+                {rows.map((a) => {
+                  const ended = a.recurrence === 'every_period' && a.effective_to !== null && a.effective_to < today;
+                  return (
+                    <li key={a.id}>
+                      <span>
+                        <strong>{a.user_name}</strong> · {PAYROLL_ADJUSTMENT_LABELS[a.kind]}{' '}
+                        <span className={m.amount}>
+                          {a.kind === 'deduction' ? '−' : ''}
+                          {formatMoney(a.amount_cents, a.currency)}
+                        </span>{' '}
+                        · {a.note}
+                        <span className="small muted" style={{ display: 'block' }}>
+                          {adjustmentWhen(a)}
+                          {ended ? ' · ended' : ''}
+                        </span>
+                      </span>
+                      {a.recurrence === 'once' || a.effective_from > today ? (
+                        <Button size="sm" variant="quiet" onClick={() => remove(a)} disabled={action.busy}>
+                          Remove
+                        </Button>
+                      ) : !a.effective_to || a.effective_to > today ? (
+                        <Button size="sm" variant="quiet" onClick={() => end(a)} disabled={action.busy}>
+                          End today
+                        </Button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          }
         </Resource>
       )}
     </Card>
@@ -425,6 +591,7 @@ function RatesContent() {
         description="Rates are effective-dated: a change starts on a date and earlier time keeps its earlier rate. Each session uses the rate in effect on the day it started."
       />
       <PayRates users={users.data ?? []} today={today} />
+      <PayAdjustments users={users.data ?? []} today={today} />
       <BillRates users={users.data ?? []} projects={projects.data ?? []} today={today} />
       <Budgets projects={projects.data ?? []} />
       <Banner tag="PAYROLL" actions={<ButtonLink href="/money" size="sm">Open period close</ButtonLink>}>

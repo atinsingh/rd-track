@@ -16,6 +16,7 @@ import { getTimesheetRule, inboxCounts, setTimesheetRule, todosFor } from './eng
 import { AppError, errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { reviewCorrection } from './corrections/service';
+import { reviewExpense } from './expenses/service';
 import { reviewDeletionRequest } from './privacy/service';
 import * as off from './scheduling/time-off';
 import * as sched from './scheduling/service';
@@ -86,5 +87,7 @@ async function reviewOne(
       // Screenshot deletion requests are decided by org admins (engine slice 3: in the same inbox).
       if (!isAdmin(actor)) throw errors.forbidden();
       return reviewDeletionRequest(tx, actor, id, approve, requestId);
+    case 'expense':
+      return reviewExpense(deps, tx, actor, id, approve, note, requestId);
   }
 }

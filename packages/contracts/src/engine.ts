@@ -31,6 +31,9 @@ export const DOMAIN_EVENT_TYPES = [
   'device.stale',
   // Slice 5a
   'support_grant.requested',
+  // Stage 4 F7
+  'expense.submitted',
+  'expense.decided',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 
@@ -112,6 +115,7 @@ export interface InboxCounts {
   time_off: number;
   /** Org admins only. */
   deletion_requests: number;
+  expenses: number;
   total: number;
 }
 

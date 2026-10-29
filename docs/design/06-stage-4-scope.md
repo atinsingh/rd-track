@@ -116,8 +116,33 @@ Validated with the dataviz checks on white. Adjacent CVD ΔE ≥ 9.1, normal-vis
    - team insights (Pro, 5+ people) add the average % and counts of people under, about
      (±10 %) and over expected — counts only, never who;
    - blue for under and the series, orange for over, grey for about; never red.
-7. F7 expenses → F8 payroll adjustments
-8. F9 polish items
+7. F7 expenses — **done 2026-10-29** (migration 019):
+   - My expenses (Pro): amount, currency, date, category, project, a note and an optional
+     receipt (photo or PDF up to 10 MB) that the browser uploads straight to private
+     storage with a presigned PUT; the API checks it arrived before saving the claim;
+   - claims go to the person's team managers (org admins when they have none) as an
+     *Expenses* tab in the approvals inbox, batch-approvable like the rest; nobody reviews
+     their own; sending back needs a reason, which the claimant is told;
+   - the receipt opens for the claimant, their reviewers and finance/admins only, through
+     a short-lived link; every view by someone else is in the claimant's access log;
+   - on a project with a client, "Bill this to the client" puts the approved expense on
+     the client's next draft invoice as its own line, once (`invoice_lines.expense_id`);
+   - the payroll file's `reimbursements` column pays approved, unpaid expenses; a file for
+     a period marks them paid with that period (making it again includes them again);
+   - My expenses shows waiting / to be paid / paid this year, per currency, and each
+     claim's status: waiting, approved, paid with a period and on which invoice, sent back
+     with the reason, or withdrawn.
+8. F8 payroll adjustments — **done 2026-10-29** (migration 020):
+   - bonus, deduction or reimbursement for a person, once (in the pay period containing
+     its date) or every pay period from a date until an optional end;
+   - their own `bonus` and `deductions` columns in the payroll CSV (reimbursements share
+     the column with expenses); a person paid in two currencies gets each on the row in
+     that currency;
+   - set under Money › Rates and budgets beside pay rates; loaded on request, and each
+     person shown gets an entry in their access log; amounts never go in the audit log;
+   - the person sees their own under My time › My pay; recurring ones are ended, one-time
+     ones (and recurring ones not yet started) removed.
+9. F9 polish items
 
 After step 4, the build order continues with the engine and role workspaces in
 [`07-product-review.md`](07-product-review.md); F5–F9 slot in after its slice 3.

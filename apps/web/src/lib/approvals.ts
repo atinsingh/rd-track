@@ -1,5 +1,5 @@
-import type { ApprovalType, CorrectionDTO, DeletionRequestDTO, TimeOffRequestDTO, TimesheetDTO } from '@rd/contracts';
-import { formatDuration } from './format';
+import { EXPENSE_CATEGORY_LABELS, type ApprovalType, type CorrectionDTO, type DeletionRequestDTO, type ExpenseDTO, type TimeOffRequestDTO, type TimesheetDTO } from '@rd/contracts';
+import { formatDuration, formatMoney } from './format';
 import { dateSpanLabel, formatHours } from './scheduling';
 import { addDays, dateInTz, formatDayMonth, formatShortDay, formatTime } from './time';
 
@@ -8,7 +8,7 @@ export interface InboxItem {
   type: ApprovalType;
   id: string;
   /** Tab it belongs to. */
-  group: 'timesheets' | 'time' | 'timeoff' | 'privacy';
+  group: 'timesheets' | 'time' | 'timeoff' | 'expenses' | 'privacy';
   who: string;
   what: string;
   kindLabel: string;
@@ -23,6 +23,7 @@ export const INBOX_TABS = [
   { key: 'timesheets', label: 'Timesheets' },
   { key: 'time', label: 'Time and corrections' },
   { key: 'timeoff', label: 'Time off' },
+  { key: 'expenses', label: 'Expenses' },
   { key: 'privacy', label: 'Deletion requests' },
 ] as const;
 export type InboxTab = (typeof INBOX_TABS)[number]['key'];
@@ -61,6 +62,14 @@ function timeOffItem(r: TimeOffRequestDTO): InboxItem {
   };
 }
 
+function expenseItem(e: ExpenseDTO): InboxItem {
+  return {
+    type: 'expense', id: e.id, group: 'expenses', who: e.user_name,
+    what: `${EXPENSE_CATEGORY_LABELS[e.category]} · ${e.note}${e.billable && e.client_name ? ` · bill ${e.client_name}` : ''}`,
+    kindLabel: 'Expense', amount: formatMoney(e.amount_cents, e.currency), submittedAt: e.created_at, flag: e.has_receipt ? null : 'No receipt',
+  };
+}
+
 function deletionItem(d: DeletionRequestDTO): InboxItem {
   return {
     type: 'deletion_request', id: d.id, group: 'privacy', who: d.requester_name,
@@ -75,9 +84,11 @@ export function inboxItems(
   timeOff: readonly TimeOffRequestDTO[],
   tz: string,
   deletions: readonly DeletionRequestDTO[] = [],
+  expenses: readonly ExpenseDTO[] = [],
 ): InboxItem[] {
   return [
     ...timesheets.filter((t) => t.id).map(timesheetItem),
+    ...expenses.map(expenseItem),
     ...corrections.map((c) => correctionItem(c, tz)),
     ...timeOff.map(timeOffItem),
     ...deletions.filter((d) => d.status === 'pending').map(deletionItem),
