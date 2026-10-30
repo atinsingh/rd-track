@@ -8,6 +8,10 @@ import type { AppLocale } from './locale';
 
 const permissionState = z.enum(['granted', 'denied', 'not_required', 'unknown']);
 
+/** The browser families the Track extension runs in (website domains, Pro). */
+export const BROWSER_FAMILIES = ['chromium', 'firefox'] as const;
+export type BrowserFamily = (typeof BROWSER_FAMILIES)[number];
+
 export const enrollRequest = z.strictObject({
   enrollment_code: z.string().min(6).max(32),
   device_name: z.string().min(1).max(200),
@@ -35,6 +39,8 @@ export const heartbeatRequest = z.strictObject({
   }),
   outbox_depth: z.number().int().min(0),
   applied_policy_revision: z.number().int().min(0).nullable(),
+  /** Browsers whose Track extension the app heard from lately (website domains, Pro). */
+  browser_extensions: z.array(z.enum(BROWSER_FAMILIES)).max(4).optional(),
 });
 export interface HeartbeatResponse {
   server_time: string;

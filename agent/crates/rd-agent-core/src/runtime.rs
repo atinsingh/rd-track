@@ -28,6 +28,7 @@ use crate::api::{
     ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo, ScheduleToday, WorkLimits,
 };
 use crate::apps::AppTracker;
+use crate::browser::BrowserFamily;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
 use crate::events::{
     ActivityBucket, DataGap, DataQuality, EventBody, GapReason, IdleDecision, IdleDecisionPayload,
@@ -495,6 +496,8 @@ pub struct LiveStatus {
     pub reminder: Option<ReminderPrompt>,
     /// Reminder settings and today's hours.
     pub reminders: ReminderStatus,
+    /// Browsers whose Track extension was heard from lately (website domains, Pro).
+    pub browser_extensions: Vec<BrowserFamily>,
 }
 
 /// Receives [`LiveStatus`] snapshots and [`Notice`]s from a running [`Runtime`] (the
@@ -704,6 +707,12 @@ impl Agent {
             screen_recording: capturer.map(|c| c.permission()).unwrap_or_default(),
             accessibility: self.foreground.permission(),
         }
+    }
+
+    /// Browsers whose Track extension was heard from lately.
+    pub fn browser_extensions(&mut self) -> Vec<BrowserFamily> {
+        let now = self.clock.wall();
+        self.foreground.browser_extensions(now)
     }
 
     /// The open session for the UI (`None` when idle or stopped).
@@ -1021,6 +1030,7 @@ impl Agent {
             self.capture_until(now);
         }
         self.input.set_capturing(false);
+        self.foreground.want_domains(None);
         self.last_capture = None;
         let buckets = self.activity.flush_all();
         let apps = self.apps.flush();
@@ -1264,6 +1274,7 @@ impl Agent {
     fn leave_active(&mut self, now: ClockReading) {
         self.gates.close_all();
         self.input.set_capturing(false);
+        self.foreground.want_domains(None);
         self.last_capture = None;
         let buckets = self.activity.interrupt(now.wall);
         let apps = self.apps.flush();
@@ -1317,6 +1328,7 @@ impl Agent {
 
         let s = &self.effective.settings;
         let want_apps = s.apps.capture_app_name;
+        let want_domains = want_apps && s.apps.capture_domains;
         let want_fg =
             want_apps || (s.screenshots.enabled && !s.screenshots.excluded_apps.is_empty());
         self.last_foreground = if want_fg {
@@ -1324,10 +1336,19 @@ impl Agent {
         } else {
             None
         };
+        self.foreground
+            .want_domains(want_domains.then_some(now.wall));
         if want_apps {
-            let segs = self
-                .apps
-                .record(now.wall, elapsed, self.last_foreground.clone());
+            let domain = match (&self.last_foreground, want_domains) {
+                (Some(app), true) => self.foreground.active_domain(app, now.wall),
+                _ => None,
+            };
+            let segs = self.apps.record_with_domain(
+                now.wall,
+                elapsed,
+                self.last_foreground.clone(),
+                domain,
+            );
             self.emit_apps(segs, now.wall);
         }
     }
@@ -1880,6 +1901,7 @@ impl ScreenshotSink for ChannelSink {
 #[derive(Debug, Clone, Default)]
 struct Health {
     permissions: Permissions,
+    browser_extensions: Vec<BrowserFamily>,
     applied_revision: i64,
     project_id: Option<String>,
 }
@@ -2068,6 +2090,7 @@ impl Runtime {
             limits: self.agent.limit_summary(),
             reminder: self.agent.reminder().cloned(),
             reminders: self.agent.reminder_status(),
+            browser_extensions: self.agent.browser_extensions(),
         }
     }
 
@@ -2085,8 +2108,10 @@ impl Runtime {
         let perms = self.agent.permissions(Some(self.capturer.as_ref()));
         let rev = self.agent.applied_policy_revision();
         let project = self.agent.current_project();
+        let browsers = self.agent.browser_extensions();
         let mut h = self.health.lock().unwrap_or_else(|e| e.into_inner());
         h.permissions = perms;
+        h.browser_extensions = browsers;
         h.applied_revision = rev;
         h.project_id = project;
     }
@@ -2584,6 +2609,7 @@ impl NetWorker {
             agent_version: crate::AGENT_VERSION.into(),
             client_time: crate::ts::to_millis(self.clock.wall()),
             permissions: h.permissions,
+            browser_extensions: h.browser_extensions.clone(),
             outbox_depth: lock(&self.outbox).depth().unwrap_or(0),
             applied_policy_revision: h.applied_revision,
         };

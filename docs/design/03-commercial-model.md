@@ -38,7 +38,7 @@ Terms confirmed on 2026-10-29: an annual term is half the month-to-month price.
 | Manager and project reports, CSV export | ✓ | ✓ | ✓ |
 | Policy scopes | Organization only | Organization only | Org, team, project, device |
 | Optional screenshots (policy-governed) | — | — | ✓ |
-| Website domains (approved browser integration) | — | — | ✓ |
+| Website domains (the Track browser extension: domain only, during sessions) | — | — | ✓ |
 | Approval workflow for corrections | — | ✓ | ✓ |
 | REST API and webhooks | — | — | ✓ |
 | SSO (OIDC/SAML) and SCIM provisioning | — | — | ✓ |

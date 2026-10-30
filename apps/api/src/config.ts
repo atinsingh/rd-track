@@ -24,6 +24,8 @@ export interface Config {
    * Unset: the download page says installers aren't published yet.
    */
   agentDownloads: { baseUrl: string | null; version: string | null };
+  /** Store listings of the Track browser extension (website domains, Pro), where published. */
+  browserExtensions: { chrome: string | null; edge: string | null; firefox: string | null };
   billing: {
     provider: 'manual' | 'stripe';
     stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: Record<'standard' | 'pro', Record<BillingInterval, string>> };
@@ -86,6 +88,11 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     agentDownloads: {
       baseUrl: process.env.AGENT_DOWNLOAD_BASE_URL?.replace(/\/$/, '') || null,
       version: process.env.AGENT_VERSION || null,
+    },
+    browserExtensions: {
+      chrome: process.env.BROWSER_EXTENSION_CHROME_URL || null,
+      edge: process.env.BROWSER_EXTENSION_EDGE_URL || null,
+      firefox: process.env.BROWSER_EXTENSION_FIREFOX_URL || null,
     },
     email: {
       provider: (process.env.EMAIL_PROVIDER as Config['email']['provider']) ?? (env === 'production' ? 'ses' : 'console'),

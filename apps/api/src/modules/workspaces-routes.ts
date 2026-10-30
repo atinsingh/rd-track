@@ -30,8 +30,13 @@ import { lang, langOfUser, SERVER_DEFAULT_LOCALE, type Lang } from '../i18n';
  * Installer links for the published agent version (G10). File names are the Tauri bundler's,
  * as GitHub release assets store them (spaces become dots); a CDN mirrors the same names.
  */
-export function agentDownloads(c: Config['agentDownloads'], l: Lang = lang(SERVER_DEFAULT_LOCALE)): AgentDownloadsResponse {
-  if (!c.baseUrl || !c.version) return { available: false, version: null, files: [] };
+export function agentDownloads(
+  c: Config['agentDownloads'],
+  l: Lang = lang(SERVER_DEFAULT_LOCALE),
+  ext: Config['browserExtensions'] = { chrome: null, edge: null, firefox: null },
+): AgentDownloadsResponse {
+  const extensions = (['chrome', 'edge', 'firefox'] as const).flatMap((browser) => (ext[browser] ? [{ browser, url: ext[browser]! }] : []));
+  if (!c.baseUrl || !c.version) return { available: false, version: null, files: [], extensions };
   const file = (name: string) => `${c.baseUrl}/${encodeURIComponent(`RoundDigital.Track_${c.version}_${name}`)}`;
   return {
     available: true,
@@ -41,6 +46,7 @@ export function agentDownloads(c: Config['agentDownloads'], l: Lang = lang(SERVE
       { os: 'windows', label: l.t('download.win.label'), kind: l.t('download.win.kind'), url: file('x64-setup.exe') },
       { os: 'windows', label: l.t('download.msi.label'), kind: l.t('download.msi.kind'), url: file('x64_en-US.msi') },
     ],
+    extensions,
   };
 }
 
@@ -75,7 +81,7 @@ export async function workspacesRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   // ───────── getting the agent (G10, G12) ─────────
-  app.get('/v1/agent/downloads', user, async (req): Promise<AgentDownloadsResponse> => agentDownloads(deps.config.agentDownloads, await langOfUser(pool, userOf(req).userId)));
+  app.get('/v1/agent/downloads', user, async (req): Promise<AgentDownloadsResponse> => agentDownloads(deps.config.agentDownloads, await langOfUser(pool, userOf(req).userId), deps.config.browserExtensions));
   app.get('/v1/admin/agent-updates', user, async (req) => updateSettings(deps.config.agentDownloads, pool, requireRole(req, ADMIN_ROLES).organizationId));
   app.put('/v1/admin/agent-updates', user, async (req) => {
     const a = requireRole(req, ADMIN_ROLES);

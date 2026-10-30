@@ -99,6 +99,9 @@ pub struct HeartbeatRequest {
     pub client_time: DateTime<Utc>,
     /// Permission status.
     pub permissions: Permissions,
+    /// Browsers whose Track extension was heard from lately (left out when none).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_extensions: Vec<crate::browser::BrowserFamily>,
     /// Events waiting in the outbox.
     pub outbox_depth: u64,
     /// Highest policy revision applied.
@@ -828,6 +831,7 @@ mod tests {
                 agent_version: "0.1.0".into(),
                 client_time: Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap(),
                 permissions: Permissions::default(),
+                browser_extensions: vec![crate::browser::BrowserFamily::Firefox],
                 outbox_depth: 4,
                 applied_policy_revision: 2,
             })
@@ -843,6 +847,7 @@ mod tests {
             json!({"input_monitoring": "unknown", "screen_recording": "unknown", "accessibility": "unknown"})
         );
         assert_eq!(body["client_time"], "2026-10-28T09:00:00Z");
+        assert_eq!(body["browser_extensions"], json!(["firefox"]));
 
         t.push(
             401,

@@ -5,6 +5,7 @@
 //! rd-agent run --project <id>            # native collectors (Windows, macOS)
 //! rd-agent run --project <id> --simulate # simulated platform (any OS, CI)
 //! rd-agent status
+//! rd-agent chrome-extension://<id>/     # started by a browser: the extension's native host
 //! ```
 
 use std::io::BufRead;
@@ -16,7 +17,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use rd_agent::config::{self, Paths};
 use rd_agent::setup::{credential_store, open_outbox};
-use rd_agent::{http, native, setup, simulated};
+use rd_agent::{browser_host, http, native, setup, simulated};
+use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::events::StopReason;
 use rd_agent_core::platform::{secret_names, ForegroundApp, InputCounter, ScreenCapturer};
@@ -68,6 +70,10 @@ enum Cmd {
         /// Seed for the simulated platform and screenshot slots.
         #[arg(long)]
         seed: Option<u64>,
+        /// With --simulate: report this app in the foreground all the time (e.g.
+        /// `com.google.Chrome`, to try the browser extension).
+        #[arg(long, value_name = "APP_ID", requires = "simulate")]
+        foreground_app: Option<String>,
         /// Stop the session and exit after this many seconds.
         #[arg(long, value_name = "SECS")]
         duration: Option<u64>,
@@ -90,6 +96,17 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
+    // Started by a browser as the extension's native messaging host.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(family) = browser_host::host_family(&args) {
+        return match browser_host::run(&config::data_dir(None), family) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                log::error!("browser host: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     let cli = Cli::parse();
     let paths = Paths::new(config::data_dir(cli.data_dir));
     let result = match cli.command {
@@ -104,6 +121,7 @@ fn main() -> ExitCode {
             task,
             simulate,
             seed,
+            foreground_app,
             duration,
             no_auto_start,
             stdin_control,
@@ -114,6 +132,7 @@ fn main() -> ExitCode {
                 task,
                 simulate,
                 seed,
+                foreground_app,
                 duration,
                 auto_start: !no_auto_start,
                 stdin_control,
@@ -151,6 +170,7 @@ struct RunArgs {
     task: Option<String>,
     simulate: bool,
     seed: Option<u64>,
+    foreground_app: Option<String>,
     duration: Option<u64>,
     auto_start: bool,
     stdin_control: bool,
@@ -169,7 +189,10 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
     let (input, foreground, capturer, platform_name): Collectors = if args.simulate {
         (
             Box::new(simulated::SimInput::new(seed)),
-            Box::new(simulated::SimForeground::new(seed)),
+            Box::new(match &args.foreground_app {
+                Some(id) => simulated::SimForeground::pinned(id),
+                None => simulated::SimForeground::new(seed),
+            }),
             Arc::new(simulated::SimCapturer::new(seed)),
             "simulated platform",
         )
@@ -186,7 +209,7 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
         RuntimeDeps {
             clock: Arc::new(SystemClock::new()),
             input,
-            foreground,
+            foreground: Box::new(BrowserAware::new(foreground, &paths.root)),
             capturer,
             transport: Arc::new(http::UreqTransport::new()),
             credentials: creds.clone(),

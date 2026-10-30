@@ -89,6 +89,7 @@ pub struct SimForeground {
     rng: StdRng,
     current: usize,
     left: u32,
+    pinned: Option<ForegroundAppInfo>,
 }
 
 impl SimForeground {
@@ -97,12 +98,31 @@ impl SimForeground {
         let mut rng = StdRng::seed_from_u64(seed ^ 0x5eed_f00d);
         let current = rng.gen_range(0..APPS.len());
         let left = rng.gen_range(20..=300);
-        Self { rng, current, left }
+        Self {
+            rng,
+            current,
+            left,
+            pinned: None,
+        }
+    }
+
+    /// Always reports `app_identifier` (e.g. `com.google.Chrome`, to try the browser
+    /// extension on Linux).
+    pub fn pinned(app_identifier: &str) -> Self {
+        let mut s = Self::new(0);
+        s.pinned = Some(ForegroundAppInfo {
+            app_identifier: app_identifier.into(),
+            app_name: app_identifier.into(),
+        });
+        s
     }
 }
 
 impl ForegroundApp for SimForeground {
     fn current(&mut self) -> Option<ForegroundAppInfo> {
+        if let Some(p) = &self.pinned {
+            return Some(p.clone());
+        }
         if self.left == 0 {
             self.current = self.rng.gen_range(0..APPS.len());
             self.left = self.rng.gen_range(20..=300);

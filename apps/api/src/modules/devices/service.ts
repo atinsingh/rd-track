@@ -116,9 +116,10 @@ export async function heartbeat(
   await q.query(
     `UPDATE devices SET last_seen_at = $2, agent_version = $3, permissions = $4,
        applied_policy_revision = COALESCE($5, applied_policy_revision),
-       clock_offset_ms = $6::int, clock_skew_detected = (abs($6::int) > 120000)
+       clock_offset_ms = $6::int, clock_skew_detected = (abs($6::int) > 120000),
+       browser_extensions = $7
      WHERE id = $1`,
-    [device.deviceId, now.toISOString(), input.agent_version, input.permissions, input.applied_policy_revision, Math.round(offset)],
+    [device.deviceId, now.toISOString(), input.agent_version, input.permissions, input.applied_policy_revision, Math.round(offset), [...new Set(input.browser_extensions ?? [])].sort()],
   );
   // A permission the agent needs was just turned off (or never granted): tell the person, once a day.
   for (const [key, label, what] of MEASURED_PERMISSIONS) {
@@ -159,7 +160,8 @@ export async function listDevices(q: Queryable, orgId: string, userId: string | 
     q,
     `SELECT d.id, d.user_id, u.display_name AS user_name, d.name, d.os, d.os_version, d.agent_version, d.credential_status,
             d.enrolled_at, d.revoked_at, d.last_seen_at, d.last_sync_at, d.applied_policy_revision,
-            o.policy_revision AS current_policy_revision, d.permissions, d.clock_skew_detected, d.sequence_gaps
+            o.policy_revision AS current_policy_revision, d.permissions, d.clock_skew_detected, d.sequence_gaps,
+            d.browser_extensions
      FROM devices d JOIN users u ON u.id = d.user_id JOIN organizations o ON o.id = d.organization_id
      WHERE d.organization_id = $1 AND ($2::uuid IS NULL OR d.user_id = $2)
      ORDER BY d.credential_status, u.display_name, d.name`,

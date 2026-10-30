@@ -80,6 +80,8 @@ export interface AgentDownloadsResponse {
   available: boolean;
   version: string | null;
   files: AgentDownload[];
+  /** Where to get the Track browser extension (website domains, Pro), where it is published. */
+  extensions: { browser: 'chrome' | 'edge' | 'firefox'; url: string }[];
 }
 
 // ───────────── desktop app updates (G10) ─────────────

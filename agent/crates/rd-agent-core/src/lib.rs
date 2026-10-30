@@ -12,6 +12,7 @@
 //! | [`state`] | Session state machine, emits lifecycle events |
 //! | [`activity`] | Per-second samples → UTC-minute buckets with idle attribution |
 //! | [`apps`] | Foreground-app samples → `app_usage` segments |
+//! | [`browser`] | Website domains from the approved browser extension (Pro) |
 //! | [`screenshot`] | Randomised screenshot slots and the capture/upload pipeline |
 //! | [`policy`] | Signed policy verification, typed settings, work hours |
 //! | [`limits`] | Work-limit warnings at 80% / 100% (local only) |
@@ -28,6 +29,7 @@
 pub mod activity;
 pub mod api;
 pub mod apps;
+pub mod browser;
 pub mod clock;
 pub mod describe;
 pub mod events;

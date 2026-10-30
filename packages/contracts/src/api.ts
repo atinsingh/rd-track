@@ -4,6 +4,7 @@ import { partialPolicySettingsSchema, type FieldSource, type PolicySettings, typ
 import type { CollectionChange } from './policy';
 import { BILLING_INTERVALS, type BillingInterval, type Entitlement, type LicenseState, type PlanId, type SubscriptionStatus } from './plans';
 import type { AppLocale } from './locale';
+import type { BrowserFamily } from './agent-api';
 
 /**
  * Web/API request schemas and response shapes (system design §5.4).
@@ -461,6 +462,8 @@ export interface DeviceDTO {
   permissions: Record<string, PermissionState>;
   clock_skew_detected: boolean;
   sequence_gaps: number;
+  /** Browsers on this computer with the Track extension (website domains, Pro). */
+  browser_extensions: BrowserFamily[];
 }
 
 // ───────────────────────── policies ─────────────────────────

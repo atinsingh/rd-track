@@ -10,6 +10,7 @@ use rd_agent::native::logic::PromptLedger;
 use rd_agent::native::{self, NativePlatform, Permission};
 use rd_agent::{credentials, http, setup, simulated};
 use rd_agent_core::api::{ApiClient, ApiError, DeviceProject};
+use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::describe::format_duration;
 use rd_agent_core::events::StopReason;
@@ -214,6 +215,21 @@ impl Controller {
         })
     }
 
+    /// Lets the browsers find the extension's native messaging host (this executable).
+    pub fn install_browser_host(&self) {
+        let exe = std::env::var_os("APPIMAGE")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::current_exe().ok());
+        let Some(exe) = exe else { return };
+        match rd_agent::browser_host::install_manifests(&exe, &self.paths.root) {
+            Ok(w) if !w.is_empty() => {
+                log::info!("browser host registered for {} browser(s)", w.len())
+            }
+            Ok(_) => {}
+            Err(e) => log::info!("browser host not registered: {e}"),
+        }
+    }
+
     fn ledger(&self) -> PromptLedger {
         PromptLedger::new(self.paths.root.clone())
     }
@@ -304,7 +320,8 @@ impl Controller {
             RuntimeDeps {
                 clock: Arc::new(SystemClock::new()),
                 input,
-                foreground,
+                // Website domains (Pro) come from the browser extension, through the host.
+                foreground: Box::new(BrowserAware::new(foreground, &self.paths.root)),
                 capturer,
                 transport: Arc::new(http::UreqTransport::new()),
                 credentials: self.creds.clone(),

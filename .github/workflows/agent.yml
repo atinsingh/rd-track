@@ -46,6 +46,19 @@ jobs:
         run: |
           npx --yes -p typescript@5.9.3 tsc -p .
           if [ -n "$(git status --porcelain -- public)" ]; then git status --short -- public; git diff -- public; exit 1; fi
+      # The browser extension (website domains, Pro): tests, then a zip per store.
+      - name: Browser extension tests and packages
+        working-directory: agent/browser-extension
+        run: |
+          node --test test/*.test.mjs
+          node build.mjs
+          (cd dist/chromium && zip -qr ../rd-track-extension-chromium.zip .)
+          (cd dist/firefox && zip -qr ../rd-track-extension-firefox.zip .)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: browser-extension
+          path: agent/browser-extension/dist/*.zip
+          if-no-files-found: error
 
   check:
     name: Clippy and tests (${{ matrix.os }})

@@ -199,7 +199,7 @@ Every response carries `x-request-id`.
 | `session.resumed.v1` | `{}` |
 | `session.stopped.v1` | `{reason: "user"\|"logout"\|"shutdown"\|"revoked"\|"policy"\|"overlap"}` |
 | `activity_bucket.v1` | `{bucket_start (minute-aligned), active_seconds 0..60, idle_seconds 0..60, keyboard_count, mouse_count, data_quality: "ok"\|"partial"\|"permission_missing"}` with `active + idle ≤ 60` |
-| `app_usage.v1` | `{app_identifier, app_name, domain?, started_at, duration_seconds 1..3600}` — `domain` is dropped server-side unless the resolved policy has `apps.capture_domains` |
+| `app_usage.v1` | `{app_identifier, app_name, domain?, started_at, duration_seconds 1..3600}` — `domain` is a bare hostname from the Track browser extension (Pro), set only while the session's policy has `apps.capture_domains` and dropped server-side otherwise (see agent/README.md, *Website domains*) |
 | `data_gap.v1` | `{gap_start, gap_end, reason: "suspended"\|"offline_agent_stopped"\|"permission_missing"\|"clock_change"}` |
 
 Ingestion processing (in one transaction):

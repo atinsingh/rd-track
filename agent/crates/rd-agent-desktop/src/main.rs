@@ -359,7 +359,21 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
+    // Started by a browser as the Track extension's native messaging host: relay the
+    // active tab's domain and exit with the browser, without starting the app.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(family) = rd_agent::browser_host::host_family(&args) {
+        if let Err(e) = rd_agent::browser_host::run(&rd_agent::config::data_dir(None), family) {
+            log::error!("browser host: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     let ctl = Controller::new();
+    {
+        let c = ctl.clone();
+        std::thread::spawn(move || c.install_browser_host());
+    }
     let app = tauri::Builder::default()
         // First, so a second launch (e.g. opening an enrolment link on Windows or Linux)
         // hands its arguments to the running tray app instead of starting another one.

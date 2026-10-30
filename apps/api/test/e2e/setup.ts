@@ -1,6 +1,7 @@
 /**
  * Prepares an organization for the agent end-to-end run and prints JSON:
- * { code, project_id, user_id, organization_id }. Used by scripts/e2e-agent.sh.
+ * { code, project_id, user_id, organization_id }. Used by scripts/e2e-agent.sh and
+ * scripts/e2e-browser.sh (E2E_DOMAINS=1: the project records website domains).
  */
 import { loadConfig } from '../../src/config';
 import type { Deps } from '../../src/context';
@@ -38,7 +39,17 @@ await pool.query(`UPDATE organizations SET policy_revision = 1 WHERE id = $1`, [
 await pool.query(
   `INSERT INTO policy_versions (policy_id, organization_id, version, org_revision, settings, change_note, expands_collection, published_by)
    VALUES ($1, $2, 1, 1, $3, 'e2e: screenshots on', true, $4)`,
-  [policy!.id, orgId, { screenshots: { enabled: true, interval_minutes: 10, max_width_px: 640 }, idle: { threshold_seconds: 60 } }, org.admin_user_id],
+  [
+    policy!.id,
+    orgId,
+    {
+      screenshots: { enabled: true, interval_minutes: 10, max_width_px: 640 },
+      idle: { threshold_seconds: 60 },
+      // scripts/e2e-browser.sh: the project records website domains (Pro).
+      ...(process.env.E2E_DOMAINS === '1' ? { apps: { capture_domains: true } } : {}),
+    },
+    org.admin_user_id,
+  ],
 );
 const code = enrollmentCode();
 await pool.query(

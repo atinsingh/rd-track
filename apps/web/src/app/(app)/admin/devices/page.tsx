@@ -11,6 +11,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Segmented, SelectField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { browserList, EXTENSION_IDS, STORE_NAMES } from '@/lib/browsers';
 import { byName } from '@/lib/format';
 import { t, tPlural, type MessageKey } from '@/lib/i18n';
 import { currentLocale } from '@/lib/locale';
@@ -195,6 +196,49 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
+/** Website domains (Pro): how the extension gets to people's browsers, and how many have it. */
+function BrowserExtension({ devices }: { devices: DeviceDTO[] | undefined }) {
+  const downloads = useApi('agent:downloads', (signal) => rd.my.agentDownloads(signal));
+  const active = (devices ?? []).filter((d) => d.credential_status === 'active');
+  const withExt = active.filter((d) => d.browser_extensions.length > 0).length;
+  const ids: [MessageKey, string][] = [
+    ['adm.dev.ext.chromium', EXTENSION_IDS.chromium],
+    ['adm.dev.ext.firefox', EXTENSION_IDS.firefox],
+  ];
+  return (
+    <Card title={t('adm.dev.ext.title')} subtitle={t('adm.dev.ext.sub')}>
+      <div className="stack" style={{ gap: 10 }}>
+        <p style={{ margin: 0 }}>{t('adm.dev.ext.body')}</p>
+        <dl style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 1fr) auto', gap: '8px 16px', alignItems: 'center', margin: 0 }}>
+          {ids.map(([label, id]) => (
+            <div key={id} style={{ display: 'contents' }}>
+              <dt className="small muted">{t(label)}</dt>
+              <dd className="mono small" style={{ margin: 0, overflowWrap: 'anywhere' }}>
+                {id}
+              </dd>
+              <CopyButton text={id} />
+            </div>
+          ))}
+        </dl>
+        {downloads.data?.extensions.length ? (
+          <p className="small" style={{ margin: 0, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            {downloads.data.extensions.map((s) => (
+              <a key={s.browser} href={s.url} rel="noopener" target="_blank">
+                {t('adm.dev.ext.store')} · {STORE_NAMES[s.browser]}
+              </a>
+            ))}
+          </p>
+        ) : null}
+        {devices && active.length ? (
+          <p className="small secondary" style={{ margin: 0 }}>
+            {t('adm.dev.ext.count', { n: withExt, total: active.length })}
+          </p>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 const UPDATE_MODES: AgentUpdateMode[] = ['prompt', 'auto', 'hold'];
 const modeLabel = (m: AgentUpdateMode) => t(`adm.dev.mode.${m}`);
 const modeDetail = (m: AgentUpdateMode) => t(`adm.dev.mode.${m}.detail`);
@@ -331,6 +375,7 @@ export default function DevicesPage() {
                       const notes = [
                         d.clock_skew_detected ? t('adm.dev.clockSkew') : null,
                         d.sequence_gaps > 0 ? tPlural(d.sequence_gaps, 'adm.dev.gaps.one', 'adm.dev.gaps.other') : null,
+                        !revoked && d.browser_extensions.length ? t('adm.dev.browsers', { list: browserList(d.browser_extensions) }) : null,
                       ].filter(Boolean);
                       return (
                         <tr key={d.id} style={revoked ? { color: 'var(--text-3)' } : undefined}>
@@ -387,6 +432,7 @@ export default function DevicesPage() {
       </Card>
 
       <AppUpdates />
+      {access.entitlements.includes('domains') ? <BrowserExtension devices={devices.data} /> : null}
       {access.entitlements.includes('mdm') ? <MdmDeployment tz={tz} /> : null}
       <EnrollDialog
         open={enrolling}

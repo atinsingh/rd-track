@@ -200,11 +200,12 @@ slot within the first second when the project policy enables screenshots).
 ## Privacy guarantees enforced in code
 
 * `InputCounter` can only return counts and seconds-since-last-input; `ForegroundApp`
-  only an identifier and a name. There is no API through which a key code, typed text,
-  clipboard, window title or URL could reach the core.
-* Payload structs are closed (`deny_unknown_fields`, no free-form maps). `domain` is never
-  collected (always omitted); `apps.capture_app_name = false` disables app usage entirely;
-  `apps.capture_window_titles` is ignored.
+  only an identifier and a name, plus a hostname from the browser extension (below). There
+  is no API through which a key code, typed text, clipboard, window title, page or URL
+  could reach the core.
+* Payload structs are closed (`deny_unknown_fields`, no free-form maps). `domain` is set
+  only as described in *Website domains*; `apps.capture_app_name = false` disables app
+  usage entirely; `apps.capture_window_titles` is ignored.
 * Screenshots: only when the signed policy for the session's project enables them, only
   in `Active`, inside work hours, with no excluded app in front, and only after the server
   issued an upload intent — so never offline. Bytes go straight to the presigned URL (no
@@ -220,6 +221,68 @@ slot within the first second when the project policy enables screenshots).
 * Tray app: the session-start notice is generated from the verified policy with the
   web's wording; the web view cannot reach the network, filesystem or shell (command
   allowlist + CSP); permission prompts are shown at most once per install.
+
+## Website domains (Pro): the browser extension
+
+Websites are a browser's business, not the operating system's, so the agent never reads a
+URL itself. The Track extension (`browser-extension/`: Chrome, Edge, Brave and Chromium
+from one build, Firefox from another) tells the app the hostname of the active tab, and
+only when the app asks:
+
+```text
+extension ──native messaging──▶ host (the app's own binary, started by the browser)
+                                   │ writes <data-dir>/browser/<family>.json  {domain, at, instance}
+agent ── writes <data-dir>/browser/wanted (renewed every minute) ──▶ read by the host
+```
+
+* **Asked for, never pushed.** The agent writes `wanted` only while a session is `Active`
+  and its signed policy has `apps.capture_domains` (Pro); the mark expires after two
+  minutes unless renewed, and is deleted (with any stored domain) on pause, stop, or a
+  policy without domains. Without it the host stores no domain and answers the
+  extension `{"collect": false}`, so the extension sends none, only a check-in every 30
+  seconds; a session therefore starts getting domains within about 30 seconds.
+* **Only a hostname.** `domainOf` (`browser-extension/src/domain.js`) keeps the
+  lowercased hostname of `http(s)` pages, without `www.`; browser pages, files,
+  extension pages and IP-v6 literals give nothing. The host and the agent normalise it
+  again (`[a-z0-9.-]`, ≤ 253), and the server refuses anything else.
+* **Only the window in front.** A report is used only when the foreground app is a
+  supported browser of that family (bundle ids / executables in `browser.rs`) and is at
+  most 90 s old. Private windows are never looked at (`"incognito": "not_allowed"`, and
+  an unfocused or private window counts as no site). Each browser profile is its own
+  `instance`; one profile losing focus never clears another's report.
+* **Segments split by domain**, so `app_usage` reads "Chrome · github.com 12 min".
+* **Heartbeats** report which families were heard from in the last 5 minutes
+  (`browser_extensions`), shown on Admin › Devices and My computers; the app shows a
+  banner during a session that wants domains when no browser has the extension.
+
+**Host registration.** The browser launches the host from a manifest naming the app's
+executable (`digital.round.track`). The desktop app writes it at every start for the
+current user, for each installed browser: `~/Library/Application Support/<browser>/NativeMessagingHosts/`
+on macOS, `~/.config/<browser>/NativeMessagingHosts/` and `~/.mozilla/native-messaging-hosts/`
+on Linux, and `HKCU\Software\{Google\Chrome,Microsoft\Edge,Chromium,Mozilla}\NativeMessagingHosts`
+pointing at manifests in the data folder on Windows. Started with `chrome-extension://<id>/`
+(or Firefox's manifest path and add-on ID), the binary runs as the host and nothing else.
+
+**IDs.** Chromium: `gagmoddppfppofnboknnmkiakhjmacln`, fixed by the public `key` in
+`manifest.chromium.json` (store builds get their own IDs: add them at build time with
+`RD_CHROMIUM_EXTENSION_IDS=id1,id2` so the host accepts them). Firefox:
+`browser@track.round.digital`.
+
+**Deploying it.** Publish the zips CI builds (`browser-extension` artifact) to the Chrome
+Web Store, Edge Add-ons and addons.mozilla.org, and set `BROWSER_EXTENSION_CHROME_URL`,
+`BROWSER_EXTENSION_EDGE_URL`, `BROWSER_EXTENSION_FIREFOX_URL` on the API so My computers
+links to them. Organizations force-install it with their browser policies
+(`ExtensionInstallForcelist` for Chrome and Edge, `ExtensionSettings` for Firefox), using the
+IDs shown on Admin › Devices.
+
+```sh
+cd browser-extension && node build.mjs     # dist/chromium, dist/firefox (load unpacked to try)
+node --test test/*.test.mjs                 # domain extraction and the extension's logic
+../../scripts/e2e-browser.sh                # real Chromium + extension + host + agent + API
+```
+
+On Linux (simulated collectors) `rd-agent run --simulate --foreground-app org.chromium.Chromium`
+keeps a browser in front, so the whole chain can be tried; the e2e script does exactly that.
 
 ## Credential storage
 

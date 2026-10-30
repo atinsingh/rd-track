@@ -349,6 +349,17 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    product names, CSV column names the importer reads, generated MDM files, and text the
    API writes in error details.
 
+   **14 done 2026-10-30 (Pro: website domains)**: the "approved browser integration" the
+   plans promised. A Track extension for Chrome, Edge, Brave and Chromium (one build) and
+   Firefox tells the desktop app the active tab's hostname through native messaging; the
+   app's own binary is the host, registered for each installed browser at start. Nothing
+   flows unless the app asks: only during an `Active` session whose signed policy records
+   domains, with private windows and background windows never looked at, and only the
+   domain (no path, no query). App segments split by domain; heartbeats say which browsers
+   have the extension (Admin › Devices, My computers), the app warns when a session wants
+   domains and no browser has it, and the session notice says what is shared. The demo's
+   Client B project records domains. Tested end to end in CI with a real Chromium.
+
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on
 work items and notifications.

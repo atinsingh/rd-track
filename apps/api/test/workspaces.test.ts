@@ -152,7 +152,7 @@ describe('auditor tools', () => {
 describe('getting the agent', () => {
   it('lists installers only once they are published', async () => {
     const { agentDownloads } = await import('../src/modules/workspaces-routes');
-    expect(agentDownloads({ baseUrl: null, version: null })).toEqual({ available: false, version: null, files: [] });
+    expect(agentDownloads({ baseUrl: null, version: null })).toEqual({ available: false, version: null, files: [], extensions: [] });
     const d = agentDownloads({ baseUrl: 'https://github.com/rd/track/releases/download/agent-v0.2.0', version: '0.2.0' });
     expect(d.files.map((f) => f.url)).toEqual([
       'https://github.com/rd/track/releases/download/agent-v0.2.0/RoundDigital.Track_0.2.0_universal.dmg',

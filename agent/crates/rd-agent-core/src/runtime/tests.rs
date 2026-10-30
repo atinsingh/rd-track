@@ -552,6 +552,86 @@ fn app_usage_disabled_by_policy() {
 }
 
 #[test]
+fn website_domains_only_from_a_browser_while_the_policy_asks() {
+    use crate::browser::{Bridge, BrowserAware, BrowserFamily};
+    let dir = tempfile::tempdir().unwrap();
+    let bridge = Bridge::new(dir.path());
+    let clock = FakeClock::new(t0());
+    let fg = FakeForeground::new("com.google.Chrome");
+    let outbox = shared_outbox();
+    let mut agent = Agent::new(
+        AgentConfig::new(identity()),
+        AgentDeps {
+            clock: Arc::new(clock.clone()),
+            input: Box::new(FakeInput::new()),
+            foreground: Box::new(BrowserAware::new(fg.clone(), dir.path())),
+            outbox: outbox.clone(),
+            screenshots: Box::new(RecordingSink::default()),
+            rng: StdRng::seed_from_u64(42),
+        },
+    )
+    .unwrap();
+    let step = |agent: &mut Agent, secs: u32, tab: Option<&str>| {
+        for _ in 0..secs {
+            clock.advance(Duration::from_secs(1));
+            // The extension, through the host, every second.
+            bridge
+                .record(BrowserFamily::Chromium, "p1", tab, clock.wall())
+                .unwrap();
+            agent.tick();
+        }
+    };
+    let domains = |outbox: &SharedOutbox| -> Vec<(String, Option<String>, u32)> {
+        lock(outbox)
+            .peek_oldest(1_000_000)
+            .unwrap()
+            .into_iter()
+            .filter_map(|e| match e.body {
+                EventBody::AppUsage(a) => Some((a.app_identifier, a.domain, a.duration_seconds)),
+                _ => None,
+            })
+            .collect()
+    };
+
+    // Off by default: nothing is wanted, nothing is kept, even with a session.
+    agent.start(None, None).unwrap();
+    step(&mut agent, 30, Some("github.com"));
+    assert!(!bridge.wanted(clock.wall()));
+    assert_eq!(bridge.report(BrowserFamily::Chromium).unwrap().domain, None);
+    agent.stop(StopReason::User).unwrap();
+    assert_eq!(domains(&outbox), [("com.google.Chrome".into(), None, 30)]);
+
+    agent.on_policy(
+        None,
+        &doc(None, 1, json!({"apps": {"capture_domains": true}})),
+    );
+    // No session: not wanted either.
+    step(&mut agent, 5, Some("github.com"));
+    assert!(!bridge.wanted(clock.wall()));
+    agent.start(None, None).unwrap();
+    step(&mut agent, 20, Some("github.com"));
+    step(&mut agent, 10, Some("docs.rs"));
+    fg.set(Some("com.apple.Terminal"));
+    step(&mut agent, 5, Some("docs.rs"));
+    agent.pause().unwrap();
+    // Paused: the mark is gone and stored domains with it.
+    assert!(!bridge.wanted(clock.wall()));
+    assert_eq!(bridge.report(BrowserFamily::Chromium).unwrap().domain, None);
+    agent.stop(StopReason::User).unwrap();
+    // The first second after "wanted" was still recorded by the host before the mark.
+    let got = domains(&outbox);
+    assert_eq!(
+        got[1..],
+        [
+            ("com.google.Chrome".into(), None, 1),
+            ("com.google.Chrome".into(), Some("github.com".into()), 19),
+            ("com.google.Chrome".into(), Some("docs.rs".into()), 10),
+            ("com.apple.Terminal".into(), None, 5),
+        ]
+    );
+}
+
+#[test]
 fn permission_missing_buckets() {
     let mut h = harness();
     h.input.set(InputSample::default());

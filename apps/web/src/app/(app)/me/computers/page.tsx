@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { browserList, STORE_NAMES } from '@/lib/browsers';
 import { useMe } from '@/lib/me';
 import { formatCountdown, formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
@@ -170,6 +171,9 @@ function MyComputers() {
                           ) : (
                             <Badge tone="solid">{t('comp.connected')}</Badge>
                           )}
+                          {d.credential_status === 'active' && d.browser_extensions.length ? (
+                            <div className="small muted">{t('comp.browsers', { list: browserList(d.browser_extensions) })}</div>
+                          ) : null}
                         </td>
                       </tr>
                     );
@@ -184,8 +188,42 @@ function MyComputers() {
   );
 }
 
+/** Website domains (Pro): what the browser extension does, and where to get it. */
+function BrowserExtension() {
+  const downloads = useApi('agent:downloads', (signal) => rd.my.agentDownloads(signal));
+  const devices = useApi('me:devices', (signal) => rd.my.devices(signal));
+  const seen = [...new Set((devices.data ?? []).filter((d) => d.credential_status === 'active').flatMap((d) => d.browser_extensions))].sort();
+  const stores = downloads.data?.extensions ?? [];
+  return (
+    <Card title={t('comp.ext.title')} subtitle={t('comp.ext.sub')}>
+      <div className="stack" style={{ gap: 10 }}>
+        <p style={{ margin: 0 }}>{t('comp.ext.body')}</p>
+        {stores.length ? (
+          <p style={{ margin: 0, display: 'flex', flexWrap: 'wrap', gap: 16 }}>
+            {stores.map((s) => (
+              <a key={s.browser} href={s.url} rel="noopener" target="_blank">
+                {t('comp.ext.add', { browser: STORE_NAMES[s.browser] })}
+              </a>
+            ))}
+          </p>
+        ) : (
+          <p className="small secondary" style={{ margin: 0 }}>
+            {t('comp.ext.it')}
+          </p>
+        )}
+        {devices.data ? (
+          <p className="small" style={{ margin: 0 }}>
+            {seen.length ? t('comp.ext.seen', { list: browserList(seen) }) : t('comp.ext.none')}
+          </p>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
 /** Self-service setup (G10, G12): download the app, connect it with your own code, see your computers. */
 export default function MyComputersPage() {
+  const { access } = useMe();
   return (
     <>
       <PageHeader
@@ -196,6 +234,7 @@ export default function MyComputersPage() {
       <Download />
       <Connect />
       <MyComputers />
+      {access.entitlements.includes('domains') ? <BrowserExtension /> : null}
     </>
   );
 }

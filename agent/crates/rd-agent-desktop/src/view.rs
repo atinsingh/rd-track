@@ -227,8 +227,11 @@ pub fn session_notice(
         });
         footer.push(m.notice_see_each.into());
     }
-    if s.apps.capture_domains || s.apps.capture_window_titles {
-        footer.push(m.notice_no_domains.into());
+    if s.apps.capture_app_name && s.apps.capture_domains {
+        footer.push(m.notice_domains.into());
+    }
+    if s.apps.capture_window_titles {
+        footer.push(m.notice_no_titles.into());
     }
     let warning = (preview.source != "exact").then(|| {
         if preview.project_id.is_some() {
@@ -713,6 +716,19 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
         if l.permissions.input_monitoring == PermissionStatus::Denied {
             out.push(permission_banner("input_monitoring", m.perm_input, ctx));
         }
+        // Domains are wanted but no browser can give them.
+        if l.session.is_some()
+            && l.settings.apps.capture_app_name
+            && l.settings.apps.capture_domains
+            && l.browser_extensions.is_empty()
+            && !ctx.simulated
+        {
+            out.push(Banner::new(
+                "browser-extension",
+                "info",
+                m.browser_ext_missing,
+            ));
+        }
         if l.session.as_ref().and_then(|s| s.paused_reason)
             == Some(rd_agent_core::events::PauseReason::WorkHours)
         {
@@ -886,6 +902,7 @@ mod tests {
             idle_prompt: None,
             limits: None,
             reminder: None,
+            browser_extensions: Vec::new(),
             reminders: ReminderStatus::default(),
         }
     }
@@ -1021,6 +1038,39 @@ mod tests {
         let mut viewers = base.clone();
         viewers.viewers.manager_can_view_screenshots = true;
         assert!(expands(&base, &viewers));
+    }
+
+    #[test]
+    fn website_domains_are_explained_and_a_missing_extension_is_flagged() {
+        let mut s = PolicySettings::default();
+        s.apps.capture_domains = true;
+        let p = PolicyPreview {
+            project_id: None,
+            source: "exact".into(),
+            revision: 3,
+            settings: s.clone(),
+        };
+        let n = session_notice(&p, None, None, Lang::En);
+        assert!(n
+            .footer
+            .iter()
+            .any(|f| f.contains("the domain alone (e.g. github.com)")));
+        assert!(!n.footer.iter().any(|f| f.contains("window titles")));
+
+        let mut l = live();
+        l.settings = s;
+        l.session = Some(session("active"));
+        let has = |l: &LiveStatus| {
+            banners(Some(l), &BannerContext::default())
+                .iter()
+                .any(|b| b.id == "browser-extension")
+        };
+        assert!(has(&l));
+        l.browser_extensions = vec![rd_agent_core::browser::BrowserFamily::Firefox];
+        assert!(!has(&l));
+        l.browser_extensions.clear();
+        l.session = None;
+        assert!(!has(&l), "only while a session is open");
     }
 
     #[test]
