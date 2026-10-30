@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeOrg, PASSWORD, testEnv, type Org, type TestEnv } from './helpers';
+import { deviceReq, enrollDevice, makeOrg, PASSWORD, testEnv, type Org, type TestEnv } from './helpers';
 
 /** G27: language and formats for the organization and for each person. */
 
@@ -71,5 +71,25 @@ describe('what the server writes, in each reader’s language', () => {
     expect(frMail!.subject).toBe('Réinitialisez votre mot de passe RoundDigital Track');
     expect(frMail!.text).toContain('Le lien fonctionne une seule fois et expire dans');
     expect(frMail!.html).toContain('lang="fr-CA"');
+  });
+});
+
+describe('the desktop app', () => {
+  it('learns the person’s language from its heartbeat, or none so the computer decides', async () => {
+    const other = await makeOrg(env, 'langdesk');
+    const d = await enrollDevice(env, other, 'emp');
+    const beat = () =>
+      deviceReq(env, d, 'POST', '/v1/device/heartbeat', {
+        agent_version: '0.2.0',
+        client_time: env.clock.iso(),
+        permissions: { input_monitoring: 'granted', screen_recording: 'granted', accessibility: 'granted' },
+        outbox_depth: 0,
+        applied_policy_revision: 0,
+      });
+    expect((await beat()).body.locale).toBeNull();
+    await other.admin.put('/v1/admin/branding/locale', { locale: 'fr-CA' });
+    expect((await beat()).body.locale).toBe('fr-CA');
+    await other.users.emp!.client.req('PATCH', '/v1/me', { locale: 'en-GB' });
+    expect((await beat()).body.locale).toBe('en-GB');
   });
 });

@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::i18n::{fill, Lang, Messages, EN};
 use crate::policy::PolicySettings;
 
 /// One line of the "what this session collects" list.
@@ -31,81 +32,89 @@ fn item(key: &str, collected: bool, text: &str, detail: String) -> CollectionIte
     }
 }
 
-fn off_or(on: bool, detail: &str) -> String {
-    if on { detail } else { "Off for you" }.to_owned()
+fn off_or(m: &Messages, on: bool, detail: &str) -> String {
+    if on { detail } else { m.collect_off }.to_owned()
 }
 
-/// Describes what is collected under `p` (same order and wording as the web).
+/// Describes what is collected under `p` (same order and wording as the web), in English.
 pub fn describe_collection(p: &PolicySettings) -> Vec<CollectionItem> {
+    describe_collection_in(p, Lang::En)
+}
+
+/// Describes what is collected under `p` in `lang` (the English is the web's, word for word).
+pub fn describe_collection_in(p: &PolicySettings, lang: Lang) -> Vec<CollectionItem> {
+    let m = lang.messages();
     let s = &p.screenshots;
     let screenshot_detail = if s.enabled {
-        format!(
-            "About one every {} minutes, {}, reduced to {} px wide, kept {}{} days",
-            s.interval_minutes,
-            if s.primary_monitor_only {
-                "primary monitor"
-            } else {
-                "all monitors"
-            },
-            s.max_width_px,
-            if s.excluded_apps.is_empty() {
-                ""
-            } else {
-                "except when excluded apps are in front, "
-            },
-            p.retention.screenshot_days
+        fill(
+            m.collect_shots_detail,
+            &[
+                ("minutes", &s.interval_minutes.to_string()),
+                (
+                    "monitors",
+                    if s.primary_monitor_only {
+                        m.collect_shots_primary
+                    } else {
+                        m.collect_shots_all
+                    },
+                ),
+                ("width", &s.max_width_px.to_string()),
+                (
+                    "excluded",
+                    if s.excluded_apps.is_empty() {
+                        ""
+                    } else {
+                        m.collect_shots_excluded
+                    },
+                ),
+                ("days", &p.retention.screenshot_days.to_string()),
+            ],
         )
     } else {
-        "Off for you".to_owned()
+        m.collect_off.to_owned()
     };
     vec![
         item(
             "session",
             true,
-            "When your session starts, pauses and stops",
-            "Plus the project and task you chose".to_owned(),
+            m.collect_session_text,
+            m.collect_session_detail.to_owned(),
         ),
         item(
             "activity",
             true,
-            "How many keyboard and mouse events happen each minute",
-            "Counts only — never which keys or where you clicked".to_owned(),
+            m.collect_activity_text,
+            m.collect_activity_detail.to_owned(),
         ),
         item(
             "apps.capture_app_name",
             p.apps.capture_app_name,
-            "The name of the app in front",
-            off_or(
-                p.apps.capture_app_name,
-                "For example \"Visual Studio Code\"",
-            ),
+            m.collect_app_text,
+            off_or(m, p.apps.capture_app_name, m.collect_app_detail),
         ),
         item(
             "apps.capture_domains",
             p.apps.capture_domains,
-            "Website domains",
-            off_or(
-                p.apps.capture_domains,
-                "Domain only, e.g. \"github.com\" — never full addresses",
-            ),
+            m.collect_domains_text,
+            off_or(m, p.apps.capture_domains, m.collect_domains_detail),
         ),
         item(
             "apps.capture_window_titles",
             p.apps.capture_window_titles,
-            "Window titles and full URLs",
-            off_or(p.apps.capture_window_titles, "Collected"),
+            m.collect_titles_text,
+            off_or(m, p.apps.capture_window_titles, m.collect_titles_detail),
         ),
         item(
             "screenshots.enabled",
             s.enabled,
-            "Screenshots",
+            m.collect_shots_text,
             screenshot_detail,
         ),
     ]
 }
 
-/// What is never collected (same text as the web).
-pub const NEVER_COLLECTED: &str = "Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your location.";
+/// What is never collected (same text as the web), in English.
+pub const NEVER_COLLECTED: &str = EN.never_collected;
 
 /// `"6h 42m"` (same as the web's `formatDuration`).
 pub fn format_duration(seconds: u64) -> String {

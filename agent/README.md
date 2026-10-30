@@ -271,6 +271,13 @@ is the intended outcome.
 A Tauri 2 tray / menu-bar app embedding the same `Runtime` (native collectors; simulated
 on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.dc):
 
+* **Language** (G27): English or French. The heartbeat says the person's language (their
+  choice in the web app, else their organization's); the app remembers it in the data
+  directory (`locale`) and otherwise follows the computer's language. Rust texts live in
+  `rd_agent_core::i18n` (English and French side by side, checked by the compiler), the
+  popover's own in `ui/src/i18n.ts`; `AppView.lang` tells the UI which one to use. The
+  examples below are the English.
+
 * **Popover** (dark, `#0B0C0F`): red tracking dot + `TRACKING` / `PAUSED` / `NOT TRACKING`
   and the session's active time `H:MM:SS`; camera badge "Screenshots on for this project ·
   about every N min" when the session's policy enables them; Project / Task pickers;

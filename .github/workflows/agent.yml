@@ -39,12 +39,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      # public/app.js is committed so `cargo build` needs no Node; make sure it matches src/.
+      # public/*.js is committed so `cargo build` needs no Node; make sure it matches src/
+      # (a changed or a new, uncommitted file both fail).
       - name: UI type-check and compiled output up to date
         working-directory: agent/crates/rd-agent-desktop/ui
         run: |
           npx --yes -p typescript@5.9.3 tsc -p .
-          git diff --exit-code -- public/app.js
+          if [ -n "$(git status --porcelain -- public)" ]; then git status --short -- public; git diff -- public; exit 1; fi
 
   check:
     name: Clippy and tests (${{ matrix.os }})

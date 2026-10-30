@@ -10,6 +10,7 @@ import { assertLicensedForTracking, currentSubscription } from '../billing/servi
 import { publish } from '../engine/events';
 import { assertInOrg } from '../org/service';
 import { orgRevision } from '../policy/service';
+import { localesOf } from '../../i18n';
 
 const CODE_TTL_MIN = 30;
 
@@ -147,6 +148,8 @@ export async function heartbeat(
     credential_status: 'active',
     license: license === 'grace' && sub.grace_ends_at ? { status: license, grace_ends_at: sub.grace_ends_at } : { status: license },
     dashboard_url: dashboardUrl(deps),
+    // The person's language (G27): theirs, else the organization's; null lets the computer decide.
+    locale: (await localesOf(q, [device.userId], { withoutDefault: true })).get(device.userId) ?? null,
   };
 }
 

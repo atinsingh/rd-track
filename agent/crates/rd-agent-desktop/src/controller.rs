@@ -13,6 +13,7 @@ use rd_agent_core::api::{ApiClient, ApiError, DeviceProject};
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::describe::format_duration;
 use rd_agent_core::events::StopReason;
+use rd_agent_core::i18n::Lang;
 use rd_agent_core::platform::CredentialStore;
 use rd_agent_core::policy::PolicySettings;
 use rd_agent_core::runtime::{
@@ -56,6 +57,8 @@ pub struct AppView {
     pub error: Option<String>,
     /// `idle`, `tracking`, `paused`.
     pub tray: TrayState,
+    /// The language every text in this view is written in.
+    pub lang: Lang,
     /// "TRACKING" / "PAUSED" / "NOT TRACKING".
     pub label: &'static str,
     /// Elapsed `H:MM:SS` of the open session.
@@ -122,6 +125,25 @@ struct Inner {
     update: Option<String>,
     enroll_prefill: Option<EnrollPrefill>,
     deployment: Option<config::Deployment>,
+    /// The computer's own language (before the server says, or when the person has no choice).
+    system_lang: Lang,
+    /// The person's language from the server, remembered between starts.
+    server_locale: Option<String>,
+    /// The language the tray menu was last written in.
+    tray_lang: Option<Lang>,
+}
+
+impl Inner {
+    fn lang(&self) -> Lang {
+        self.server_locale
+            .as_deref()
+            .map_or(self.system_lang, Lang::from_tag)
+    }
+}
+
+/// Where the person's language from the server is remembered.
+fn locale_file(paths: &Paths) -> std::path::PathBuf {
+    paths.root.join("locale")
 }
 
 /// What the enrolment screen shows of the deployment file (never the key).
@@ -171,6 +193,11 @@ impl Controller {
         let identity = config::load_identity(&paths.identity()).ok().flatten();
         let dashboard_url = identity.as_ref().and_then(|i| i.dashboard_url.clone());
         let server_url = identity.map(|i| i.server_url);
+        let system_lang = sys_locale::get_locale().map_or(Lang::En, |t| Lang::from_tag(&t));
+        let server_locale = std::fs::read_to_string(locale_file(&paths))
+            .ok()
+            .map(|s| s.trim().to_owned())
+            .filter(|s| !s.is_empty());
         Arc::new(Self {
             paths,
             creds,
@@ -178,6 +205,8 @@ impl Controller {
             inner: Mutex::new(Inner {
                 server_url,
                 dashboard_url,
+                system_lang,
+                server_locale,
                 ..Inner::default()
             }),
             handle: Mutex::new(None),
@@ -376,7 +405,7 @@ impl Controller {
             .deployment
             .clone()
             .ok_or("this computer wasn't set up by your IT team")?;
-        setup::request_email_code(&deployment, email)
+        setup::request_email_code(&deployment, email, self.lang())
     }
 
     /// Fetches the project list (blocking; call off the UI thread).
@@ -434,16 +463,17 @@ impl Controller {
         let preview = last.ok_or("the agent did not answer; try again")?;
         let i = lock(&self.inner);
         let name = view::project_name(&i.projects, project_id.as_deref());
-        Ok(view::session_notice(&preview, task_id, name))
+        Ok(view::session_notice(&preview, task_id, name, i.lang()))
     }
 
     /// Starts a session after the employee confirmed the notice for `project_id`.
     pub fn start(&self, project_id: Option<String>, task_id: Option<String>) -> Result<(), String> {
         {
             let mut i = lock(&self.inner);
+            let lang = i.lang();
             let live = i.live.as_ref().ok_or("the agent is still starting")?;
-            if let Some(m) = &live.agent.tracking_unavailable_message {
-                return Err(m.clone());
+            if let Some(b) = live.agent.tracking_unavailable {
+                return Err(b.message_in(lang).to_owned());
             }
             if live.session.is_some() {
                 return Err("a session is already running".into());
@@ -454,7 +484,7 @@ impl Controller {
                 .filter(|p| p.project_id == project_id)
                 .ok_or("review what this session collects first")?;
             if project_id.is_none() && preview.settings.session.require_project {
-                return Err("Your organization requires a project for every session.".into());
+                return Err(lang.messages().err_project_required.into());
             }
             i.acknowledged = Some(preview.settings.clone());
             i.collection_changed = false;
@@ -475,7 +505,7 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Err("The session did not start. Check the banner above or try again.".into())
+        Err(self.lang().messages().err_not_started.into())
     }
 
     /// The notice for the running session's current settings (after a policy change);
@@ -495,6 +525,7 @@ impl Controller {
             &preview,
             task,
             view::project_name(&i.projects, preview.project_id.as_deref()),
+            i.lang(),
         );
         i.acknowledged = Some(preview.settings);
         i.collection_changed = false;
@@ -520,10 +551,10 @@ impl Controller {
                 .as_ref()
                 .and_then(|l| l.idle_prompt.as_ref())
                 .filter(|p| p.id == id)
-                .ok_or("This was already answered.")?;
+                .ok_or(i.lang().messages().err_answered)?;
             if decision == rd_agent_core::events::IdleDecision::Reassign {
-                let v = view::idle_view(prompt, &i.projects, &Local);
-                view::check_idle_target(&v, project_id.as_deref(), task_id.as_deref())?;
+                let v = view::idle_view(prompt, &i.projects, &Local, i.lang());
+                view::check_idle_target(&v, project_id.as_deref(), task_id.as_deref(), i.lang())?;
                 (project_id, task_id)
             } else {
                 (None, None)
@@ -547,7 +578,7 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Err("Your choice was not saved. Try again.".into())
+        Err(self.lang().messages().err_choice_not_saved.into())
     }
 
     /// The person's answer to the reminder `id` (`start`, `not_today`, `stop`, `keep`).
@@ -563,7 +594,7 @@ impl Controller {
                 .as_ref()
                 .and_then(|l| l.reminder.as_ref())
                 .filter(|r| r.id == id)
-                .ok_or("This reminder was already answered.")?;
+                .ok_or(i.lang().messages().err_reminder_answered)?;
             if !choice.answers(shown.kind) {
                 return Err("unknown choice".into());
             }
@@ -581,13 +612,13 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Err("Your choice was not saved. Try again.".into())
+        Err(self.lang().messages().err_choice_not_saved.into())
     }
 
     /// Saves the employee's reminder settings (local only). Waits (≤ 2 s) until the
     /// runtime reports them. Blocking.
     pub fn set_reminders(&self, input: &RemindersInput) -> Result<(), String> {
-        let settings = view::parse_reminders_input(input)?;
+        let settings = view::parse_reminders_input(input, self.lang())?;
         self.send(Command::SetReminderSettings(settings.clone()))?;
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
@@ -600,7 +631,7 @@ impl Controller {
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Err("Your settings were not saved. Try again.".into())
+        Err(self.lang().messages().err_settings_not_saved.into())
     }
 
     /// Dismisses a banner.
@@ -670,9 +701,17 @@ impl Controller {
         true
     }
 
+    /// The language the app writes in now: the person's choice from the server, else
+    /// the computer's own.
+    pub fn lang(&self) -> Lang {
+        lock(&self.inner).lang()
+    }
+
     /// Builds the popover view.
     pub fn view(&self) -> AppView {
         let i = lock(&self.inner);
+        let lang = i.lang();
+        let m = lang.messages();
         let live = i.live.as_ref();
         let prompted: Vec<&str> = ["screen_recording", "input_monitoring"]
             .into_iter()
@@ -688,44 +727,47 @@ impl Controller {
                 simulated: self.simulated,
                 macos: cfg!(target_os = "macos"),
                 update: i.update.as_deref(),
+                lang,
             },
         );
         let tray = TrayState::of(live);
         let session = live.and_then(|l| l.session.as_ref());
-        let limit_lines = view::limit_lines(live.and_then(|l| l.limits.as_ref()));
+        let limit_lines = view::limit_lines(live.and_then(|l| l.limits.as_ref()), lang);
         AppView {
             phase: i.phase.unwrap_or(Phase::Starting),
             error: i.error.clone(),
             tray,
+            lang,
             label: match tray {
-                TrayState::Tracking => "TRACKING",
-                TrayState::Paused => "PAUSED",
-                TrayState::Idle => "NOT TRACKING",
+                TrayState::Tracking => m.label_tracking,
+                TrayState::Paused => m.label_paused,
+                TrayState::Idle => m.label_idle,
             },
             elapsed: session.map(|s| view::clock(s.tracked_seconds)),
             session_project_id: session.and_then(|s| s.project_id.clone()),
             session_task_id: session.and_then(|s| s.task_id.clone()),
-            camera: live.and_then(|l| view::camera_badge(&l.settings, l.session.is_some())),
+            camera: live.and_then(|l| view::camera_badge(&l.settings, l.session.is_some(), lang)),
             today: format_duration(live.map_or(0, |l| l.today.tracked_seconds)),
             activity: live
                 .and_then(|l| l.today.activity_percent())
-                .map(|p| format!("{p}%")),
+                .map(|p| lang.percent(p)),
             limit_today: limit_lines.0,
             limit_week: limit_lines.1,
             sync: live
-                .map(|l| view::sync_line(l, Utc::now()))
-                .unwrap_or_else(|| "Starting…".into()),
+                .map(|l| view::sync_line(l, Utc::now(), lang))
+                .unwrap_or_else(|| m.starting.into()),
             banners,
             idle: live
                 .and_then(|l| l.idle_prompt.as_ref())
-                .map(|p| view::idle_view(p, &i.projects, &Local)),
+                .map(|p| view::idle_view(p, &i.projects, &Local, lang)),
             reminder: live
                 .filter(|_| tray != TrayState::Paused)
                 .and_then(|l| l.reminder.as_ref())
-                .map(|r| view::reminder_view(r, Utc::now(), &Local)),
+                .map(|r| view::reminder_view(r, Utc::now(), &Local, lang)),
             reminders: view::reminders_view(
                 &live.map(|l| l.reminders.clone()).unwrap_or_default(),
                 &Local,
+                lang,
             ),
             can_start: live.is_some_and(|l| {
                 l.session.is_none() && l.agent.tracking_unavailable.is_none() && !l.revoked
@@ -752,15 +794,20 @@ impl Controller {
         };
         let (tooltip, title) = {
             let i = lock(&self.inner);
-            view::tray_text(i.live.as_ref(), project.as_deref())
+            view::tray_text(i.live.as_ref(), project.as_deref(), v.lang)
         };
-        let changed = {
+        let (changed, relabel) = {
             let mut i = lock(&self.inner);
             let next = (v.tray, tooltip.clone(), title.clone());
             let changed = i.tray.as_ref() != Some(&next);
             i.tray = Some(next);
-            changed
+            let relabel = i.tray_lang.is_some_and(|l| l != v.lang);
+            i.tray_lang = Some(v.lang);
+            (changed, relabel)
         };
+        if relabel {
+            crate::tray::relabel(app, v.lang);
+        }
         if changed {
             crate::tray::update(app, v.tray, &tooltip, title.as_deref());
         }
@@ -792,6 +839,14 @@ impl RuntimeObserver for Observer {
             } else {
                 i.acknowledged = None;
                 i.collection_changed = false;
+            }
+            // The person's language, once a heartbeat has said it (remembered for next start).
+            if status.agent.locale_known && status.agent.locale != i.server_locale {
+                i.server_locale.clone_from(&status.agent.locale);
+                let _ = std::fs::write(
+                    locale_file(&self.ctl.paths),
+                    i.server_locale.as_deref().unwrap_or_default(),
+                );
             }
             i.live = Some(status.clone());
             if status.revoked {

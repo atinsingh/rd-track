@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use rd_agent_core::api::{ApiClient, ApiError, EmailCodeRequest, EnrollRequest, Os};
+use rd_agent_core::i18n::{fill, Lang};
 use rd_agent_core::identity::DeviceIdentity;
 use rd_agent_core::outbox::{CredentialStoreKey, Outbox, OutboxConfig, SharedOutbox};
 use rd_agent_core::platform::{secret_names, CredentialStore};
@@ -48,24 +49,25 @@ pub fn is_enrolled(paths: &Paths, creds: &dyn CredentialStore) -> Result<bool, S
 
 /// On a computer IT deployed (G26): asks the organization's server to email the person a
 /// one-time code. Employee-facing errors; the same success whether or not the email exists.
-pub fn request_email_code(deployment: &config::Deployment, email: &str) -> Result<(), String> {
+pub fn request_email_code(
+    deployment: &config::Deployment,
+    email: &str,
+    lang: Lang,
+) -> Result<(), String> {
+    let m = lang.messages();
     let api = ApiClient::new(&deployment.server, Arc::new(http::UreqTransport::new()));
     api.request_email_code(&EmailCodeRequest {
         deployment_key: deployment.deployment_key.clone(),
         email: email.trim().to_owned(),
     })
     .map_err(|e| match e.code() {
-        Some("invalid_deployment_key") => {
-            "This computer's setup from your IT team is no longer valid. Ask them, or use a code from your administrator.".to_owned()
-        }
-        Some("validation_failed") => "Enter your work email address.".to_owned(),
+        Some("invalid_deployment_key") => m.setup_key_invalid.to_owned(),
+        Some("validation_failed") => m.setup_enter_email.to_owned(),
         _ if matches!(e, ApiError::Transport(_)) => {
-            format!("Can't reach {}. Check your connection and try again.", deployment.server)
+            fill(m.setup_cant_reach, &[("server", &deployment.server)])
         }
-        _ if matches!(e, ApiError::Http { status: 429, .. }) => {
-            "Too many tries. Wait a minute, then ask again.".to_owned()
-        }
-        _ => format!("Couldn't ask for a code: {e}"),
+        _ if matches!(e, ApiError::Http { status: 429, .. }) => m.setup_too_many.to_owned(),
+        _ => fill(m.setup_code_failed, &[("error", &e.to_string())]),
     })
 }
 

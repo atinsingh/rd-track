@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rd_agent_core::events::StopReason;
+use rd_agent_core::i18n::Lang;
 use rd_agent_core::runtime::Command;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -44,14 +45,27 @@ fn icon(state: TrayState) -> Option<Image<'static>> {
     Image::from_bytes(bytes).ok()
 }
 
-/// Creates the tray icon and its menu.
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open RoundDigital Track", true, None::<&str>)?;
-    let pause = MenuItem::with_id(app, "pause", "Pause / resume", true, None::<&str>)?;
-    let stop = MenuItem::with_id(app, "stop", "Stop session", true, None::<&str>)?;
+/// The tray menu in `lang`.
+fn menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
+    let m = lang.messages();
+    let open = MenuItem::with_id(app, "open", m.menu_open, true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", m.menu_pause, true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop", m.menu_stop, true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit (stops the session)", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &pause, &stop, &sep, &quit])?;
+    let quit = MenuItem::with_id(app, "quit", m.menu_quit, true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &pause, &stop, &sep, &quit])
+}
+
+/// Rewrites the tray menu after the language changed.
+pub fn relabel(app: &AppHandle, lang: Lang) {
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY_ID), menu(app, lang)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// Creates the tray icon and its menu.
+pub fn create(app: &AppHandle, lang: Lang) -> tauri::Result<()> {
+    let menu = menu(app, lang)?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("RoundDigital Track")
         .menu(&menu)

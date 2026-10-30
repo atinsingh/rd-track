@@ -61,7 +61,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) — **done** | L | P1/P2 |
-| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French for everything an employee sees on the web and receives (slices 10–11); manager, admin and money screens and the desktop app follow | M | P2 |
+| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French for everything an employee sees and receives, the desktop app included (slices 10–12); manager, admin and money screens follow | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
 
@@ -320,6 +320,20 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
      so each copy is formatted for its reader. Notifications already sent keep the
      language they were written in. Signup emails, sent before anyone has an account or a
      choice, stay English.
+
+   **12 done 2026-10-30 (G27)**: the desktop app in French.
+   - *Which language*: the heartbeat now carries the person's language (theirs, else the
+     organization's; `null` when neither is set). The app remembers it between starts;
+     until a heartbeat has said it, and when nobody chose, it follows the computer's own
+     language (`sys-locale`).
+   - *Rust*: `rd_agent_core::i18n` holds every text the app writes in English and French
+     side by side, so a missing translation doesn't compile. The popover's view model,
+     banners, idle and reminder cards, the session-start notice (the collection list
+     word for word the web's), the tray menu and tooltip, licence messages and the errors
+     shown in the app use it; the view model tells the UI which language it is in.
+   - *UI*: its own text (buttons, labels, enrolment and settings) comes from a typed
+     catalogue (`ui/src/i18n.ts`) keyed off that language. Log lines and the command-line
+     agent stay English.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { timestamp, uuid } from './events';
 import type { LicenseState } from './plans';
 import type { PolicySettings } from './policy';
+import type { AppLocale } from './locale';
 
 /** Agent ↔ API request/response contracts (system design §5.2). */
 
@@ -41,6 +42,8 @@ export interface HeartbeatResponse {
   credential_status: 'active' | 'revoked';
   license: { status: LicenseState; grace_ends_at?: string };
   dashboard_url: string;
+  /** The person's language and formats (G27); null lets the computer's own language decide. */
+  locale: AppLocale | null;
 }
 
 /** `GET /v1/device/projects`: what the device's user may book time to (tray pickers). */

@@ -353,6 +353,12 @@ pub struct AgentStatus {
     /// Licence state from the last heartbeat.
     #[serde(default)]
     pub license: Option<LicenseInfo>,
+    /// The person's language from the last heartbeat (`fr-CA`…; `None`: the computer's).
+    #[serde(default)]
+    pub locale: Option<String>,
+    /// Whether a heartbeat has said the language yet (until then `locale` means nothing).
+    #[serde(default)]
+    pub locale_known: bool,
     /// When this snapshot was written.
     #[serde(with = "crate::ts")]
     pub updated_at: DateTime<Utc>,
@@ -547,6 +553,8 @@ pub struct Agent {
     revoked: bool,
     license_block: Option<LicenseBlock>,
     license: Option<LicenseInfo>,
+    locale: Option<String>,
+    locale_known: bool,
     ticks: u64,
     queued: usize,
     notices: Vec<Notice>,
@@ -617,6 +625,8 @@ impl Agent {
             revoked: false,
             license_block: None,
             license: None,
+            locale: None,
+            locale_known: false,
             ticks: 0,
             queued: 0,
             notices: Vec::new(),
@@ -907,6 +917,8 @@ impl Agent {
             tracking_unavailable: self.license_block,
             tracking_unavailable_message: self.license_block.map(|b| b.message().to_owned()),
             license: self.license.clone(),
+            locale: self.locale.clone(),
+            locale_known: self.locale_known,
             updated_at: self.clock.wall(),
         }
     }
@@ -1136,6 +1148,15 @@ impl Agent {
     pub fn on_license_info(&mut self, info: Option<LicenseInfo>) {
         if self.license != info {
             self.license = info;
+            self.write_status();
+        }
+    }
+
+    /// Records the person's language from a heartbeat (for display only).
+    pub fn on_locale(&mut self, locale: Option<String>) {
+        if self.locale != locale || !self.locale_known {
+            self.locale = locale;
+            self.locale_known = true;
             self.write_status();
         }
     }
@@ -1807,6 +1828,8 @@ pub enum NetEvent {
     LicenseRestored,
     /// Licence info from a successful heartbeat.
     License(Option<LicenseInfo>),
+    /// The person's language from a successful heartbeat.
+    Locale(Option<String>),
     /// Work limits were fetched (`None`: the plan has none).
     WorkLimits {
         /// The session they leave out.
@@ -2293,6 +2316,7 @@ impl Runtime {
                 self.maybe_auto_start();
             }
             NetEvent::License(info) => self.agent.on_license_info(info),
+            NetEvent::Locale(locale) => self.agent.on_locale(locale),
             NetEvent::WorkLimits { excluded, limits } => {
                 self.agent.on_work_limits(limits, excluded)
             }
@@ -2571,6 +2595,7 @@ impl NetWorker {
                     return true;
                 }
                 self.send(NetEvent::License(resp.license.clone()));
+                self.send(NetEvent::Locale(resp.locale.clone()));
                 self.unblock();
                 if resp.policy_revision > h.applied_revision {
                     if self.fetch_policy(None) {

@@ -1,12 +1,11 @@
 //! Pure view-model logic for the tray popover: everything the UI shows is computed
 //! here from the runtime's [`LiveStatus`], so it is unit tested without a window.
 
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use rd_agent_core::api::{DeviceProject, LicenseStatus};
-use rd_agent_core::describe::{
-    describe_collection, format_duration, CollectionItem, NEVER_COLLECTED,
-};
+use rd_agent_core::describe::{describe_collection_in, format_duration, CollectionItem};
 use rd_agent_core::events::IdleDecision;
+use rd_agent_core::i18n::{fill, translate, Lang};
 use rd_agent_core::limits::{LimitScope, LimitSummary};
 use rd_agent_core::platform::PermissionStatus;
 use rd_agent_core::policy::PolicySettings;
@@ -135,35 +134,37 @@ pub fn ago(seconds: i64) -> String {
 }
 
 /// The sync line under the popover ("Synced 12 s ago").
-pub fn sync_line(live: &LiveStatus, now: DateTime<Utc>) -> String {
+pub fn sync_line(live: &LiveStatus, now: DateTime<Utc>, lang: Lang) -> String {
+    let m = lang.messages();
     let queued = live.outbox_depth;
+    let n = queued.to_string();
     if !live.agent.online {
         return if queued > 0 {
-            format!("Offline · {queued} queued")
+            fill(m.sync_offline_queued, &[("n", &n)])
         } else {
-            "Offline".into()
+            m.sync_offline.into()
         };
     }
     if live.agent.tracking_unavailable.is_some() {
-        return "Not syncing · tracking unavailable".into();
+        return m.sync_unavailable.into();
     }
     let since = live.sync.last_success_at.map(|t| (now - t).num_seconds());
     match (since, &live.sync.last_error) {
-        (_, Some(_)) if queued > 0 => format!("Sync problem · {queued} queued, retrying"),
+        (_, Some(_)) if queued > 0 => fill(m.sync_problem, &[("n", &n)]),
         // Nothing to send for a while: say so instead of an ever-growing "ago".
-        (Some(s), _) if queued == 0 && s > 300 => "Up to date".into(),
-        (Some(s), _) => format!("Synced {} ago", ago(s)),
-        (None, _) if queued == 0 => "Up to date".into(),
-        (None, _) => "Syncing…".into(),
+        (Some(s), _) if queued == 0 && s > 300 => m.sync_up_to_date.into(),
+        (Some(s), _) => fill(m.sync_synced, &[("ago", &ago(s))]),
+        (None, _) if queued == 0 => m.sync_up_to_date.into(),
+        (None, _) => m.syncing.into(),
     }
 }
 
 /// The camera badge text when screenshots are on for the session (or `None`).
-pub fn camera_badge(settings: &PolicySettings, session_open: bool) -> Option<String> {
+pub fn camera_badge(settings: &PolicySettings, session_open: bool, lang: Lang) -> Option<String> {
     (session_open && settings.screenshots.enabled).then(|| {
-        format!(
-            "Screenshots on for this project · about every {} min",
-            settings.screenshots.interval_minutes
+        fill(
+            lang.messages().camera_badge,
+            &[("n", &settings.screenshots.interval_minutes.to_string())],
         )
     })
 }
@@ -205,38 +206,36 @@ pub fn session_notice(
     preview: &PolicyPreview,
     task_id: Option<String>,
     project_name: Option<&str>,
+    lang: Lang,
 ) -> SessionNotice {
+    let m = lang.messages();
     let s = &preview.settings;
-    let (items, not_collected): (Vec<_>, Vec<_>) = describe_collection(s)
+    let (items, not_collected): (Vec<_>, Vec<_>) = describe_collection_in(s, lang)
         .into_iter()
         .partition(|i| i.collected);
     let title = match (project_name, &preview.project_id) {
-        (Some(n), _) => format!("Start a session on {n}?"),
-        (None, Some(id)) => format!("Start a session on {id}?"),
-        (None, None) => "Start a session without a project?".into(),
+        (Some(n), _) => fill(m.notice_title_project, &[("name", n)]),
+        (None, Some(id)) => fill(m.notice_title_project, &[("name", id)]),
+        (None, None) => m.notice_title_none.into(),
     };
-    let mut footer = vec!["Nothing is recorded while paused or after you stop.".to_owned()];
+    let mut footer = vec![m.notice_paused.to_owned()];
     if s.screenshots.enabled {
         footer.push(if s.viewers.manager_can_view_screenshots {
-            "Your team manager can view these screenshots; every view is shown to you.".into()
+            m.notice_manager_views.into()
         } else {
-            "Managers cannot view your screenshots under this policy.".into()
+            m.notice_managers_cannot.into()
         });
-        footer.push("You can see each screenshot and request its deletion in My dashboard.".into());
+        footer.push(m.notice_see_each.into());
     }
     if s.apps.capture_domains || s.apps.capture_window_titles {
-        footer.push(
-            "This version of the agent does not collect website domains, window titles or URLs."
-                .into(),
-        );
+        footer.push(m.notice_no_domains.into());
     }
     let warning = (preview.source != "exact").then(|| {
-        let whose = if preview.project_id.is_some() {
-            "This project's policy"
+        if preview.project_id.is_some() {
+            m.notice_warning_project.to_owned()
         } else {
-            "Your organization's policy"
-        };
-        format!("{whose} could not be loaded yet (offline?). Screenshots stay off until it is; you will be told if that changes.")
+            m.notice_warning_org.to_owned()
+        }
     });
     SessionNotice {
         project_id: preview.project_id.clone(),
@@ -245,7 +244,7 @@ pub fn session_notice(
         items,
         not_collected,
         footer,
-        never: NEVER_COLLECTED,
+        never: m.never_collected,
         warning,
     }
 }
@@ -282,11 +281,18 @@ pub struct IdleView {
 }
 
 /// Builds the idle-return panel; times are shown in `tz` (the device's local zone).
-pub fn idle_view<Tz: TimeZone>(prompt: &IdlePrompt, projects: &[DeviceProject], tz: &Tz) -> IdleView
+pub fn idle_view<Tz: TimeZone>(
+    prompt: &IdlePrompt,
+    projects: &[DeviceProject],
+    tz: &Tz,
+    lang: Lang,
+) -> IdleView
 where
     Tz::Offset: std::fmt::Display,
 {
+    let m = lang.messages();
     let duration = away_duration(prompt.seconds);
+    let d = [("duration", duration.as_str())];
     let (from, to) = (
         prompt.started_at.with_timezone(tz),
         prompt.ended_at.with_timezone(tz),
@@ -295,23 +301,25 @@ where
         format!("{} – {}", from.format("%H:%M"), to.format("%H:%M"))
     } else {
         format!(
-            "{} – {}",
-            from.format("%-d %b %H:%M"),
-            to.format("%-d %b %H:%M")
+            "{} {} – {} {}",
+            lang.day_month(from.day(), from.month()),
+            from.format("%H:%M"),
+            lang.day_month(to.day(), to.month()),
+            to.format("%H:%M")
         )
     };
     let project = match prompt.project_id.as_deref() {
         Some(id) => project_name(projects, Some(id)).unwrap_or(id).to_owned(),
-        None => "No project".to_owned(),
+        None => m.no_project.to_owned(),
     };
     IdleView {
         id: prompt.id.to_string(),
-        title: format!("You were away for {duration}"),
+        title: fill(m.idle_title, &d),
         times,
         project,
-        keep_label: format!("Keep {duration}"),
-        discard_label: format!("Remove {duration}"),
-        reassign_label: format!("Move {duration}"),
+        keep_label: fill(m.idle_keep, &d),
+        discard_label: fill(m.idle_remove, &d),
+        reassign_label: fill(m.idle_move, &d),
         targets: projects
             .iter()
             .filter(|p| Some(p.id.as_str()) != prompt.project_id.as_deref())
@@ -336,16 +344,18 @@ pub fn check_idle_target(
     view: &IdleView,
     project_id: Option<&str>,
     task_id: Option<&str>,
+    lang: Lang,
 ) -> Result<(), String> {
-    let pid = project_id.ok_or("Choose the project to move this time to.")?;
+    let m = lang.messages();
+    let pid = project_id.ok_or(m.idle_choose_project)?;
     let p = view
         .targets
         .iter()
         .find(|p| p.id == pid)
-        .ok_or("Choose one of the listed projects.")?;
+        .ok_or(m.idle_choose_listed)?;
     if let Some(t) = task_id {
         if !p.tasks.iter().any(|x| x.id == t) {
-            return Err("Choose one of the project's tasks.".into());
+            return Err(m.idle_choose_task.into());
         }
     }
     Ok(())
@@ -360,23 +370,20 @@ pub fn limit_hours(minutes: u32) -> String {
     }
 }
 
-/// Why a limit banner appears (one line, the same for every limit banner).
-pub const LIMIT_DETAIL: &str =
-    "Tracking continues — this is a heads-up from your organization's work limits.";
-
 /// Title of a work-limit banner: "80% of today's 8 h limit", "You've reached this
 /// week's 40 h limit".
-pub fn limit_title(scope: LimitScope, percent: u8, limit_minutes: u32) -> String {
-    let period = match scope {
-        LimitScope::Daily => "today's",
-        LimitScope::Weekly => "this week's",
-    };
+pub fn limit_title(scope: LimitScope, percent: u8, limit_minutes: u32, lang: Lang) -> String {
+    let m = lang.messages();
     let limit = limit_hours(limit_minutes);
-    if percent >= 100 {
-        format!("You've reached {period} {limit} limit")
-    } else {
-        format!("{percent}% of {period} {limit} limit")
-    }
+    let pct = lang.percent(percent);
+    let vars = [("limit", limit.as_str()), ("percent", pct.as_str())];
+    let template = match (scope, percent >= 100) {
+        (LimitScope::Daily, true) => m.limit_reached_today,
+        (LimitScope::Weekly, true) => m.limit_reached_week,
+        (LimitScope::Daily, false) => m.limit_pct_today,
+        (LimitScope::Weekly, false) => m.limit_pct_week,
+    };
+    fill(template, &vars)
 }
 
 /// "8h" / "7h 30m": a limit in the popover's duration style.
@@ -388,20 +395,23 @@ fn short_hours(minutes: u32) -> String {
 }
 
 /// The popover's limit lines: "5h 12m of 8h today", "31h 05m of 40h this week".
-pub fn limit_lines(summary: Option<&LimitSummary>) -> (Option<String>, Option<String>) {
+pub fn limit_lines(summary: Option<&LimitSummary>, lang: Lang) -> (Option<String>, Option<String>) {
     let Some(s) = summary else {
         return (None, None);
     };
-    let line = |p: &rd_agent_core::limits::LimitProgress, when: &str| {
-        format!(
-            "{} of {} {when}",
-            format_duration(p.worked_seconds),
-            short_hours(p.limit_minutes)
+    let m = lang.messages();
+    let line = |p: &rd_agent_core::limits::LimitProgress, template: &str| {
+        fill(
+            template,
+            &[
+                ("worked", &format_duration(p.worked_seconds)),
+                ("limit", &short_hours(p.limit_minutes)),
+            ],
         )
     };
     (
-        s.daily.as_ref().map(|p| line(p, "today")),
-        s.weekly.as_ref().map(|p| line(p, "this week")),
+        s.daily.as_ref().map(|p| line(p, m.limit_line_today)),
+        s.weekly.as_ref().map(|p| line(p, m.limit_line_week)),
     )
 }
 
@@ -437,58 +447,72 @@ pub fn reminder_view<Tz: TimeZone>(
     prompt: &ReminderPrompt,
     now: DateTime<Utc>,
     tz: &Tz,
+    lang: Lang,
 ) -> ReminderView
 where
     Tz::Offset: std::fmt::Display,
 {
+    let m = lang.messages();
     let today = now.with_timezone(tz).date_naive();
     let time = |t: DateTime<Utc>| {
         let local = t.with_timezone(tz);
         if local.date_naive() == today {
             local.format("%H:%M").to_string()
         } else {
-            local.format("%-d %b %H:%M").to_string()
+            format!(
+                "{} {}",
+                lang.day_month(local.day(), local.month()),
+                local.format("%H:%M")
+            )
         }
     };
-    let hours = match prompt.source {
-        HoursSource::Organization => "Your shift",
-        HoursSource::Mine => "Your hours",
+    let shift = prompt.source == HoursSource::Organization;
+    let at = |t: DateTime<Utc>, shift_text: &str, hours_text: &str| {
+        fill(
+            if shift { shift_text } else { hours_text },
+            &[("time", &time(t))],
+        )
     };
     let (stop, keep) = (
         ReminderButton {
-            label: "Stop tracking",
+            label: m.rem_stop,
             choice: "stop",
         },
         ReminderButton {
-            label: "Keep tracking",
+            label: m.rem_keep,
             choice: "keep",
         },
     );
     let (title, detail, primary, secondary) = match prompt.kind {
         ReminderKind::Start => (
-            "Ready to start tracking?".to_owned(),
-            format!(
-                "{hours} started at {}.",
-                time(prompt.hours_start.unwrap_or(prompt.hours_end))
+            m.rem_ready.to_owned(),
+            at(
+                prompt.hours_start.unwrap_or(prompt.hours_end),
+                m.rem_shift_started,
+                m.rem_hours_started,
             ),
             ReminderButton {
-                label: "Start tracking",
+                label: m.rem_start,
                 choice: "start",
             },
             ReminderButton {
-                label: "Not today",
+                label: m.rem_not_today,
                 choice: "not_today",
             },
         ),
         ReminderKind::Stop => (
-            format!("{hours} ended at {}", time(prompt.hours_end)),
-            "This session is still tracking.".to_owned(),
+            at(
+                prompt.hours_end,
+                m.rem_shift_ended_title,
+                m.rem_hours_ended_title,
+            ),
+            m.rem_session_still.to_owned(),
             stop,
             keep,
         ),
         ReminderKind::StillTracking => (
-            "Still tracking?".to_owned(),
-            format!("{hours} ended at {}.", time(prompt.hours_end)),
+            m.rem_still.to_owned(),
+            at(prompt.hours_end, m.rem_shift_ended, m.rem_hours_ended),
             stop,
             keep,
         ),
@@ -538,18 +562,24 @@ pub struct RemindersView {
 }
 
 /// Builds the settings section; times in `tz`.
-pub fn reminders_view<Tz: TimeZone>(status: &ReminderStatus, tz: &Tz) -> RemindersView
+pub fn reminders_view<Tz: TimeZone>(status: &ReminderStatus, tz: &Tz, lang: Lang) -> RemindersView
 where
     Tz::Offset: std::fmt::Display,
 {
+    let m = lang.messages();
     let s = &status.settings;
     let today = match &status.window {
-        Some(w) => format!(
-            "Today {}–{}",
-            w.start.with_timezone(tz).format("%H:%M"),
-            w.end.with_timezone(tz).format("%H:%M")
+        Some(w) => fill(
+            m.rem_today,
+            &[
+                (
+                    "from",
+                    &w.start.with_timezone(tz).format("%H:%M").to_string(),
+                ),
+                ("to", &w.end.with_timezone(tz).format("%H:%M").to_string()),
+            ],
         ),
-        None => "No reminders today".to_owned(),
+        None => m.rem_none_today.to_owned(),
     };
     RemindersView {
         enabled: s.enabled,
@@ -559,9 +589,7 @@ where
         my_start: s.my_hours.start.format("%H:%M").to_string(),
         my_end: s.my_hours.end.format("%H:%M").to_string(),
         my_days: s.my_hours.days.clone(),
-        schedule_note: status
-            .schedule_sets_hours
-            .then_some("Your organization's schedule sets these hours"),
+        schedule_note: status.schedule_sets_hours.then_some(m.rem_schedule_note),
         today,
     }
 }
@@ -586,9 +614,13 @@ pub struct RemindersInput {
 }
 
 /// Checks the section's input; the error is shown under it.
-pub fn parse_reminders_input(input: &RemindersInput) -> Result<ReminderSettings, String> {
-    let start = parse_hhmm(&input.my_start).ok_or("Enter a start time like 09:00.")?;
-    let end = parse_hhmm(&input.my_end).ok_or("Enter an end time like 17:30.")?;
+pub fn parse_reminders_input(
+    input: &RemindersInput,
+    lang: Lang,
+) -> Result<ReminderSettings, String> {
+    let m = lang.messages();
+    let start = parse_hhmm(&input.my_start).ok_or(m.rem_start_time)?;
+    let end = parse_hhmm(&input.my_end).ok_or(m.rem_end_time)?;
     ReminderSettings {
         enabled: input.enabled,
         start: input.start,
@@ -601,7 +633,8 @@ pub fn parse_reminders_input(input: &RemindersInput) -> Result<ReminderSettings,
         },
     }
     .validated()
-    .map_err(str::to_owned)
+    // The checks are written in English; say them in the person's language.
+    .map_err(|e| translate(lang, e).to_owned())
 }
 
 /// Inputs to [`banners`] beyond the runtime status.
@@ -621,6 +654,8 @@ pub struct BannerContext<'a> {
     pub macos: bool,
     /// An update is ready to install.
     pub update: Option<&'a str>,
+    /// The language to write in.
+    pub lang: Lang,
 }
 
 fn permission_banner(name: &str, text: &str, ctx: &BannerContext<'_>) -> Banner {
@@ -628,36 +663,43 @@ fn permission_banner(name: &str, text: &str, ctx: &BannerContext<'_>) -> Banner 
     if !ctx.macos {
         return b;
     }
+    let m = ctx.lang.messages();
     if ctx.prompted.contains(&name) {
-        b.action(
-            "Fix in System Settings",
-            "open_permission_settings",
-            Some(name),
-        )
+        b.action(m.perm_fix, "open_permission_settings", Some(name))
     } else {
-        b.action("Allow…", "request_permission", Some(name))
+        b.action(m.perm_allow, "request_permission", Some(name))
     }
 }
 
 /// Banners for the popover, most important first.
 pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner> {
+    let m = ctx.lang.messages();
     let mut out = Vec::new();
     let paused = TrayState::of(live) == TrayState::Paused;
     if let Some(l) = live {
-        if let Some(msg) = &l.agent.tracking_unavailable_message {
+        let unavailable = l
+            .agent
+            .tracking_unavailable
+            .map(|b| b.message_in(ctx.lang).to_owned())
+            .or_else(|| l.agent.tracking_unavailable_message.clone());
+        if let Some(msg) = unavailable {
             out.push(
-                Banner::new("license", "warn", format!("{msg}. Ask your administrator.")).sticky(),
+                Banner::new("license", "warn", fill(m.license_ask, &[("message", &msg)])).sticky(),
             );
         } else if let Some(li) = &l.agent.license {
             if li.status == LicenseStatus::Grace {
                 let until = li
                     .grace_ends_at
-                    .map(|t| format!(" until {}", t.format("%-d %b %Y")))
+                    .map(|t| {
+                        let date =
+                            format!("{} {}", ctx.lang.day_month(t.day(), t.month()), t.year());
+                        fill(m.license_grace_until, &[("date", &date)])
+                    })
                     .unwrap_or_default();
                 out.push(Banner::new(
                     "license-grace",
                     "info",
-                    format!("Your organization's subscription is in its grace period{until}. Tracking continues."),
+                    fill(m.license_grace, &[("until", &until)]),
                 ));
             }
         }
@@ -666,46 +708,29 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
                 .as_ref()
                 .is_some_and(|p| p.settings.screenshots.enabled);
         if screenshots_relevant && l.permissions.screen_recording == PermissionStatus::Denied {
-            out.push(permission_banner(
-                "screen_recording",
-                "Screenshots for this project need the Screen Recording permission. None are taken until it is granted.",
-                ctx,
-            ));
+            out.push(permission_banner("screen_recording", m.perm_screen, ctx));
         }
         if l.permissions.input_monitoring == PermissionStatus::Denied {
-            out.push(permission_banner(
-                "input_monitoring",
-                "Keyboard and mouse counts need the Input Monitoring permission. Until then minutes are recorded without counts.",
-                ctx,
-            ));
+            out.push(permission_banner("input_monitoring", m.perm_input, ctx));
         }
         if l.session.as_ref().and_then(|s| s.paused_reason)
             == Some(rd_agent_core::events::PauseReason::WorkHours)
         {
-            out.push(Banner::new(
-                "work-hours",
-                "info",
-                "Outside your work hours — nothing is recorded until they start again.",
-            ));
+            out.push(Banner::new("work-hours", "info", m.work_hours));
         }
     }
     if ctx.collection_changed {
         out.push(
-            Banner::new(
-                "collection-changed",
-                "warn",
-                "Your organization changed what this session collects. Review it now.",
-            )
-            .action("Review", "review_collection", None),
+            Banner::new("collection-changed", "warn", m.collection_changed).action(
+                m.review,
+                "review_collection",
+                None,
+            ),
         );
     }
     for (id, n) in ctx.notices {
         let b = match n {
-            Notice::SessionOverlap { .. } => Banner::new(
-                format!("n{id}"),
-                "warn",
-                "Your session was stopped: another work session is already running for you.",
-            ),
+            Notice::SessionOverlap { .. } => Banner::new(format!("n{id}"), "warn", m.overlap),
             Notice::OutsideWorkHours => continue, // shown from the live status above
             Notice::LicenseUnavailable { .. } | Notice::Revoked => continue,
             // Shown as its own panel from `LiveStatus::idle_prompt`.
@@ -722,41 +747,31 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
             } => Banner::new(
                 format!("n{id}"),
                 "info",
-                limit_title(*scope, *percent, *limit_minutes),
+                limit_title(*scope, *percent, *limit_minutes, ctx.lang),
             )
-            .detail(LIMIT_DETAIL)
-            .acknowledge("Got it"),
-            Notice::LicenseRestored => {
-                Banner::new(format!("n{id}"), "info", "Tracking is available again.")
+            .detail(m.limit_detail)
+            .acknowledge(m.got_it),
+            Notice::LicenseRestored => Banner::new(format!("n{id}"), "info", m.license_restored),
+            Notice::Recovered { resumed: true, .. } => {
+                Banner::new(format!("n{id}"), "info", m.recovered_resumed)
             }
-            Notice::Recovered { resumed: true, .. } => Banner::new(
-                format!("n{id}"),
-                "info",
-                "Your session from before the restart was resumed.",
-            ),
-            Notice::Recovered { resumed: false, .. } => Banner::new(
-                format!("n{id}"),
-                "info",
-                "A session left open before a restart was closed at the time the agent last ran.",
-            ),
+            Notice::Recovered { resumed: false, .. } => {
+                Banner::new(format!("n{id}"), "info", m.recovered_closed)
+            }
         };
         out.push(b);
     }
     if let Some(v) = ctx.update {
         out.push(
-            Banner::new("update", "info", format!("Version {v} is ready.")).action(
-                "Restart to update",
+            Banner::new("update", "info", fill(m.update_ready, &[("version", v)])).action(
+                m.update_restart,
                 "install_update",
                 None,
             ),
         );
     }
     if ctx.simulated {
-        out.push(Banner::new(
-            "simulated",
-            "info",
-            "Development build: simulated input and screen (no native collectors on this OS).",
-        ));
+        out.push(Banner::new("simulated", "info", m.simulated));
     }
     out.retain(|b| !(b.dismissible && ctx.dismissed.contains(&b.id)));
     out
@@ -766,22 +781,24 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
 pub fn tray_text(
     live: Option<&LiveStatus>,
     project_name: Option<&str>,
+    lang: Lang,
 ) -> (String, Option<String>) {
+    let m = lang.messages();
     let Some(l) = live else {
         return ("RoundDigital Track".into(), None);
     };
     let Some(s) = &l.session else {
         let t = if l.agent.tracking_unavailable.is_some() {
-            "RoundDigital Track — tracking unavailable"
+            m.tray_unavailable
         } else {
-            "RoundDigital Track — not tracking"
+            m.tray_not_tracking
         };
         return (t.into(), None);
     };
     let what = if s.state == "paused" {
-        "Paused"
+        m.tray_paused
     } else {
-        "Tracking"
+        m.tray_tracking
     };
     let project = project_name
         .map(str::to_owned)
@@ -790,7 +807,7 @@ pub fn tray_text(
         .unwrap_or_default();
     let elapsed = format_duration(s.tracked_seconds);
     let camera = if l.settings.screenshots.enabled {
-        " · screenshots on"
+        m.tray_screenshots
     } else {
         ""
     };
@@ -832,6 +849,7 @@ mod tests {
     use super::*;
     use chrono::TimeZone;
     use rd_agent_core::api::{LicenseBlock, LicenseInfo};
+    use rd_agent_core::i18n::Lang;
     use rd_agent_core::platform::Permissions;
     use rd_agent_core::runtime::{AgentStatus, LiveSession, SyncStatus, TodayTotals};
 
@@ -853,6 +871,8 @@ mod tests {
                 tracking_unavailable: None,
                 tracking_unavailable_message: None,
                 license: None,
+                locale: None,
+                locale_known: false,
                 updated_at: t(0),
             },
             session: None,
@@ -895,21 +915,56 @@ mod tests {
     #[test]
     fn sync_line_states() {
         let mut l = live();
-        assert_eq!(sync_line(&l, t(0)), "Up to date");
+        assert_eq!(sync_line(&l, t(0), Lang::En), "Up to date");
         l.outbox_depth = 4;
-        assert_eq!(sync_line(&l, t(0)), "Syncing…");
+        assert_eq!(sync_line(&l, t(0), Lang::En), "Syncing…");
         l.sync.last_success_at = Some(t(0));
-        assert_eq!(sync_line(&l, t(12)), "Synced 12 s ago");
+        assert_eq!(sync_line(&l, t(12), Lang::En), "Synced 12 s ago");
         l.outbox_depth = 0;
-        assert_eq!(sync_line(&l, t(301)), "Up to date");
-        assert_eq!(sync_line(&l, t(300)), "Synced 5 min ago");
+        assert_eq!(sync_line(&l, t(301), Lang::En), "Up to date");
+        assert_eq!(sync_line(&l, t(300), Lang::En), "Synced 5 min ago");
         l.outbox_depth = 4;
         l.sync.last_error = Some("http 500".into());
-        assert_eq!(sync_line(&l, t(12)), "Sync problem · 4 queued, retrying");
+        assert_eq!(
+            sync_line(&l, t(12), Lang::En),
+            "Sync problem · 4 queued, retrying"
+        );
         l.agent.online = false;
-        assert_eq!(sync_line(&l, t(12)), "Offline · 4 queued");
+        assert_eq!(sync_line(&l, t(12), Lang::En), "Offline · 4 queued");
         l.outbox_depth = 0;
-        assert_eq!(sync_line(&l, t(12)), "Offline");
+        assert_eq!(sync_line(&l, t(12), Lang::En), "Offline");
+    }
+
+    #[test]
+    fn writes_in_the_persons_language() {
+        let mut l = live();
+        l.outbox_depth = 4;
+        l.agent.online = false;
+        assert_eq!(sync_line(&l, t(12), Lang::Fr), "Hors ligne · 4 en attente");
+        assert_eq!(
+            limit_title(LimitScope::Daily, 80, 480, Lang::Fr),
+            "80\u{a0}% de la limite de 8 h d’aujourd’hui"
+        );
+        assert_eq!(
+            limit_title(LimitScope::Weekly, 100, 2400, Lang::En),
+            "You've reached this week's 40 h limit"
+        );
+        let (tooltip, _) = tray_text(Some(&l), None, Lang::Fr);
+        assert_eq!(tooltip, "RoundDigital Track — aucun suivi");
+        let err = parse_reminders_input(
+            &RemindersInput {
+                enabled: true,
+                start: true,
+                stop: true,
+                still_tracking: true,
+                my_start: "17:00".into(),
+                my_end: "09:00".into(),
+                my_days: vec![1],
+            },
+            Lang::Fr,
+        )
+        .unwrap_err();
+        assert_eq!(err, "La fin de vos heures doit être après le début.");
     }
 
     #[test]
@@ -918,28 +973,30 @@ mod tests {
         assert_eq!(TrayState::of(None), TrayState::Idle);
         assert_eq!(TrayState::of(Some(&l)), TrayState::Idle);
         assert_eq!(
-            tray_text(Some(&l), None).0,
+            tray_text(Some(&l), None, Lang::En).0,
             "RoundDigital Track — not tracking"
         );
         l.session = Some(session("active"));
         l.settings.screenshots.enabled = true;
         assert_eq!(TrayState::of(Some(&l)), TrayState::Tracking);
-        let (tip, title) = tray_text(Some(&l), Some("Client A"));
+        let (tip, title) = tray_text(Some(&l), Some("Client A"), Lang::En);
         assert_eq!(tip, "Tracking — Client A · 2h 14m · screenshots on");
         assert_eq!(title.as_deref(), Some("2h 14m"));
         l.session = Some(session("paused"));
         assert_eq!(TrayState::of(Some(&l)), TrayState::Paused);
-        assert!(tray_text(Some(&l), None).0.starts_with("Paused — p1"));
+        assert!(tray_text(Some(&l), None, Lang::En)
+            .0
+            .starts_with("Paused — p1"));
     }
 
     #[test]
     fn camera_badge_only_with_open_session_and_screenshots() {
         let mut s = PolicySettings::default();
-        assert_eq!(camera_badge(&s, true), None);
+        assert_eq!(camera_badge(&s, true, Lang::En), None);
         s.screenshots.enabled = true;
-        assert_eq!(camera_badge(&s, false), None);
+        assert_eq!(camera_badge(&s, false, Lang::En), None);
         assert_eq!(
-            camera_badge(&s, true).as_deref(),
+            camera_badge(&s, true, Lang::En).as_deref(),
             Some("Screenshots on for this project · about every 15 min")
         );
     }
@@ -977,7 +1034,7 @@ mod tests {
             revision: 3,
             settings: s,
         };
-        let n = session_notice(&p, Some("t1".into()), Some("Client A"));
+        let n = session_notice(&p, Some("t1".into()), Some("Client A"), Lang::En);
         assert_eq!(n.title, "Start a session on Client A?");
         let texts: Vec<_> = n.items.iter().map(|i| i.text.as_str()).collect();
         assert_eq!(
@@ -1003,7 +1060,7 @@ mod tests {
             revision: 1,
             settings: PolicySettings::default(),
         };
-        let n = session_notice(&fallback, None, None);
+        let n = session_notice(&fallback, None, None, Lang::En);
         assert_eq!(n.title, "Start a session without a project?");
         assert!(n.warning.is_some());
         assert_eq!(n.footer.len(), 1);
@@ -1095,7 +1152,7 @@ mod tests {
 
     #[test]
     fn idle_panel_wording_times_and_targets() {
-        let v = idle_view(&prompt(1710, Some("p1")), &projects(), &Utc);
+        let v = idle_view(&prompt(1710, Some("p1")), &projects(), &Utc, Lang::En);
         assert_eq!(v.id, "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b");
         assert_eq!(v.title, "You were away for 29 min");
         assert_eq!(v.times, "09:12 – 09:41");
@@ -1106,10 +1163,10 @@ mod tests {
         let ids: Vec<_> = v.targets.iter().map(|p| p.id.as_str()).collect();
         assert_eq!(ids, ["p2"], "the session's own project is not a target");
 
-        let v = idle_view(&prompt(1710, None), &projects(), &Utc);
+        let v = idle_view(&prompt(1710, None), &projects(), &Utc, Lang::En);
         assert_eq!(v.project, "No project");
         assert_eq!(v.targets.len(), 2);
-        let v = idle_view(&prompt(1710, Some("p9")), &[], &Utc);
+        let v = idle_view(&prompt(1710, Some("p9")), &[], &Utc, Lang::En);
         assert_eq!(v.project, "p9", "unknown project: show its id");
 
         // Shown in the device's zone, with dates when the span crosses midnight.
@@ -1117,9 +1174,9 @@ mod tests {
         p.started_at = Utc.with_ymd_and_hms(2026, 10, 28, 22, 10, 0).unwrap();
         p.ended_at = Utc.with_ymd_and_hms(2026, 10, 29, 8, 10, 0).unwrap();
         let riga = chrono::FixedOffset::east_opt(2 * 3600).unwrap();
-        assert_eq!(idle_view(&p, &[], &riga).times, "00:10 – 10:10");
+        assert_eq!(idle_view(&p, &[], &riga, Lang::En).times, "00:10 – 10:10");
         assert_eq!(
-            idle_view(&p, &[], &Utc).times,
+            idle_view(&p, &[], &Utc, Lang::En).times,
             "28 Oct 22:10 – 29 Oct 08:10"
         );
     }
@@ -1133,16 +1190,16 @@ mod tests {
             Some(IdleDecision::Reassign)
         );
         assert_eq!(parse_idle_decision("delete"), None);
-        let v = idle_view(&prompt(600, Some("p1")), &projects(), &Utc);
-        assert!(check_idle_target(&v, Some("p2"), None).is_ok());
-        assert!(check_idle_target(&v, Some("p2"), Some("t1")).is_ok());
-        assert!(check_idle_target(&v, None, None).is_err());
+        let v = idle_view(&prompt(600, Some("p1")), &projects(), &Utc, Lang::En);
+        assert!(check_idle_target(&v, Some("p2"), None, Lang::En).is_ok());
+        assert!(check_idle_target(&v, Some("p2"), Some("t1"), Lang::En).is_ok());
+        assert!(check_idle_target(&v, None, None, Lang::En).is_err());
         assert!(
-            check_idle_target(&v, Some("p1"), None).is_err(),
+            check_idle_target(&v, Some("p1"), None, Lang::En).is_err(),
             "own project"
         );
-        assert!(check_idle_target(&v, Some("zz"), None).is_err());
-        assert!(check_idle_target(&v, Some("p2"), Some("t9")).is_err());
+        assert!(check_idle_target(&v, Some("zz"), None, Lang::En).is_err());
+        assert!(check_idle_target(&v, Some("p2"), Some("t9"), Lang::En).is_err());
     }
 
     #[test]
@@ -1226,14 +1283,14 @@ mod tests {
         assert_eq!(limit_hours(480), "8 h");
         assert_eq!(limit_hours(450), "7 h 30 min");
         assert_eq!(limit_hours(45), "45 min");
-        assert_eq!(limit_lines(None), (None, None));
+        assert_eq!(limit_lines(None, Lang::En), (None, None));
         let summary: LimitSummary = serde_json::from_value(serde_json::json!({
             "daily": {"scope": "daily", "limit_minutes": 480, "worked_seconds": 18_720, "period": "2026-10-28"},
             "weekly": {"scope": "weekly", "limit_minutes": 2430, "worked_seconds": 111_900, "period": "2026-10-26"}
         }))
         .unwrap();
         assert_eq!(
-            limit_lines(Some(&summary)),
+            limit_lines(Some(&summary), Lang::En),
             (
                 Some("5h 12m of 8h today".to_owned()),
                 Some("31h 05m of 40h 30m this week".to_owned())
@@ -1261,6 +1318,7 @@ mod tests {
             ),
             now,
             &Utc,
+            Lang::En,
         );
         assert_eq!(v.id, "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b");
         assert_eq!(v.title, "Ready to start tracking?");
@@ -1284,6 +1342,7 @@ mod tests {
             ),
             now,
             &riga,
+            Lang::En,
         );
         assert_eq!(v.detail, "Your shift started at 08:30.");
 
@@ -1297,6 +1356,7 @@ mod tests {
             ),
             late,
             &Utc,
+            Lang::En,
         );
         assert_eq!(v.title, "Your hours ended at 17:30");
         assert_eq!(v.detail, "This session is still tracking.");
@@ -1318,6 +1378,7 @@ mod tests {
             ),
             late,
             &Utc,
+            Lang::En,
         );
         assert_eq!(v.title, "Still tracking?");
         assert_eq!(v.detail, "Your shift ended at 17:30.");
@@ -1327,6 +1388,7 @@ mod tests {
             &reminder("still_tracking", "mine", None, "2026-10-28T17:30:00Z"),
             next,
             &Utc,
+            Lang::En,
         );
         assert_eq!(v.detail, "Your hours ended at 28 Oct 17:30.");
     }
@@ -1358,7 +1420,7 @@ mod tests {
     #[test]
     fn reminders_section_shows_my_hours_or_the_schedule_note() {
         let mut st = ReminderStatus::default();
-        let v = reminders_view(&st, &Utc);
+        let v = reminders_view(&st, &Utc, Lang::En);
         assert!(v.enabled && v.start && v.stop && v.still_tracking);
         assert_eq!((v.my_start.as_str(), v.my_end.as_str()), ("09:00", "17:30"));
         assert_eq!(v.my_days, [1, 2, 3, 4, 5]);
@@ -1370,7 +1432,7 @@ mod tests {
             "source": "organization"
         }))
         .unwrap();
-        let v = reminders_view(&st, &Utc);
+        let v = reminders_view(&st, &Utc, Lang::En);
         assert_eq!(
             v.schedule_note,
             Some("Your organization's schedule sets these hours")
@@ -1389,14 +1451,14 @@ mod tests {
             my_end: "16:45".into(),
             my_days: vec![5, 1, 2],
         };
-        let s = parse_reminders_input(&ok).unwrap();
+        let s = parse_reminders_input(&ok, Lang::En).unwrap();
         assert!(!s.start);
         assert_eq!(s.my_hours.days, [1, 2, 5]);
         assert_eq!(s.my_hours.start.format("%H:%M").to_string(), "08:15");
         let bad = |f: fn(&mut RemindersInput)| {
             let mut i = ok.clone();
             f(&mut i);
-            parse_reminders_input(&i).unwrap_err()
+            parse_reminders_input(&i, Lang::En).unwrap_err()
         };
         assert_eq!(
             bad(|i| i.my_start = "8".into()),

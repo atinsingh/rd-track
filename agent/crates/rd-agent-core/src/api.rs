@@ -122,6 +122,8 @@ pub struct HeartbeatResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub license: Option<LicenseInfo>,
+    /// The person's language and formats (`fr-CA`…); `None` lets the computer decide.
+    pub locale: Option<String>,
 }
 
 /// Licence status reported in heartbeats.
@@ -188,11 +190,15 @@ impl LicenseBlock {
 
     /// Text shown to the employee.
     pub fn message(self) -> &'static str {
+        self.message_in(crate::i18n::Lang::En)
+    }
+
+    /// The same, in `lang`.
+    pub fn message_in(self, lang: crate::i18n::Lang) -> &'static str {
+        let m = lang.messages();
         match self {
-            Self::SubscriptionInactive => {
-                "Tracking is unavailable: your organization's subscription is inactive"
-            }
-            Self::SeatUnavailable => "Tracking is unavailable: no licence seat assigned",
+            Self::SubscriptionInactive => m.license_inactive,
+            Self::SeatUnavailable => m.license_no_seat,
         }
     }
 }

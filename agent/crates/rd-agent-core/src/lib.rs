@@ -31,6 +31,7 @@ pub mod apps;
 pub mod clock;
 pub mod describe;
 pub mod events;
+pub mod i18n;
 pub mod identity;
 pub mod limits;
 pub mod outbox;

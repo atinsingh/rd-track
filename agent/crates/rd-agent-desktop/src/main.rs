@@ -50,7 +50,7 @@ async fn enroll(
 ) -> Result<AppView, String> {
     let server_url = server_url.trim().to_owned();
     if !link::acceptable_server(&server_url) {
-        return Err("Enter the server address starting with https://".into());
+        return Err(ctl.lang().messages().err_server_https.into());
     }
     let c = ctl.inner().clone();
     let a = app.clone();
@@ -404,7 +404,7 @@ fn main() {
         .setup(move |app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            tray::create(app.handle())?;
+            tray::create(app.handle(), app.state::<Arc<Controller>>().lang())?;
             let needs_ui = ctl.boot(app.handle());
             // Linux trays cannot report clicks: open the window on start there too.
             if needs_ui || cfg!(target_os = "linux") {

@@ -59,15 +59,23 @@ export function lang(locale: AppLocale): Lang {
 export type Localized = string | ((l: Lang) => string);
 export const render = (v: Localized, l: Lang): string => (typeof v === 'string' ? v : v(l));
 
-/** Each person's locale: their own, else their organization's, else English. */
-export async function localesOf(q: Queryable, userIds: readonly string[]): Promise<Map<string, AppLocale>> {
+/**
+ * Each person's locale: their own, else their organization's, else English. With
+ * `withoutDefault`, people who have neither are left out (their computer decides).
+ */
+export async function localesOf(q: Queryable, userIds: readonly string[], opts: { withoutDefault?: boolean } = {}): Promise<Map<string, AppLocale>> {
   if (userIds.length === 0) return new Map();
   const rows = await many<{ id: string; locale: AppLocale | null; org_locale: AppLocale | null }>(
     q,
     'SELECT u.id, u.locale, o.locale AS org_locale FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = ANY($1::uuid[])',
     [userIds],
   );
-  return new Map(rows.map((r) => [r.id, r.locale ?? r.org_locale ?? SERVER_DEFAULT_LOCALE]));
+  const out = new Map<string, AppLocale>();
+  for (const r of rows) {
+    const l = r.locale ?? r.org_locale ?? (opts.withoutDefault ? null : SERVER_DEFAULT_LOCALE);
+    if (l) out.set(r.id, l);
+  }
+  return out;
 }
 
 export async function langOfUser(q: Queryable, userId: string): Promise<Lang> {
