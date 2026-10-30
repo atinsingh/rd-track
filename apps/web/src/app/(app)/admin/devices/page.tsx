@@ -11,25 +11,31 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Segmented, SelectField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName, plural } from '@/lib/format';
+import { byName } from '@/lib/format';
+import { t, tPlural, type MessageKey } from '@/lib/i18n';
+import { currentLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
-import { formatCountdown, formatDateTime, formatRelative } from '@/lib/time';
+import { formatCountdown, formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from '../admin.module.css';
 
 const OS_LABEL: Record<DeviceDTO['os'], string> = { windows: 'Windows', macos: 'macOS', linux: 'Linux' };
-const PERMS: { key: string; label: string }[] = [
-  { key: 'input_monitoring', label: 'Input' },
-  { key: 'screen_recording', label: 'Screen' },
-  { key: 'accessibility', label: 'Accessibility' },
+const PERMS: { key: string; label: MessageKey }[] = [
+  { key: 'input_monitoring', label: 'adm.dev.permInput' },
+  { key: 'screen_recording', label: 'adm.dev.permScreen' },
+  { key: 'accessibility', label: 'adm.dev.permAccess' },
 ];
+
+/** "27 Oct 2026": the day, without the time. */
+const dayOnly = (iso: string, tz: string) =>
+  new Intl.DateTimeFormat(currentLocale(), { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz }).format(new Date(iso));
 
 function isBehind(d: DeviceDTO): boolean {
   return d.credential_status === 'active' && (d.applied_policy_revision === null || d.applied_policy_revision < d.current_policy_revision);
 }
 function missingPermissions(d: DeviceDTO): string[] {
-  return PERMS.filter((p) => d.permissions[p.key] === 'denied').map((p) => p.label);
+  return PERMS.filter((p) => d.permissions[p.key] === 'denied').map((p) => t(p.label));
 }
 
 function permText(state: PermissionState | undefined): string {
@@ -37,18 +43,19 @@ function permText(state: PermissionState | undefined): string {
     case 'granted':
       return '✓';
     case 'denied':
-      return 'missing';
+      return t('adm.dev.missing');
     case 'not_required':
       return '—';
     default:
       return '?';
   }
 }
-const PERM_SR: Record<string, string> = { granted: 'granted', denied: 'missing', not_required: 'not needed', unknown: 'unknown' };
+const permSr = (st: string) =>
+  ['granted', 'denied', 'not_required'].includes(st) ? t(`adm.dev.sr.${st}` as MessageKey) : t('adm.dev.sr.unknown');
 
 function Permissions({ d }: { d: DeviceDTO }) {
   const shown = PERMS.filter((p) => d.permissions[p.key] !== undefined && !(p.key === 'accessibility' && d.permissions[p.key] === 'not_required'));
-  if (shown.length === 0) return <span className={s.perm}>Not reported yet</span>;
+  if (shown.length === 0) return <span className={s.perm}>{t('adm.dev.notReported')}</span>;
   const missing = missingPermissions(d).length > 0;
   return (
     <span className={missing ? s.permWarn : s.perm}>
@@ -58,11 +65,9 @@ function Permissions({ d }: { d: DeviceDTO }) {
           <span key={p.key}>
             {i > 0 ? ' · ' : ''}
             <span aria-hidden="true">
-              {p.label} {permText(st)}
+              {t(p.label)} {permText(st)}
             </span>
-            <span className="visually-hidden">
-              {p.label} permission {PERM_SR[st ?? 'unknown']}
-            </span>
+            <span className="visually-hidden">{t('adm.dev.permSr', { name: t(p.label), state: permSr(st ?? 'unknown') })}</span>
           </span>
         );
       })}
@@ -73,19 +78,19 @@ function Permissions({ d }: { d: DeviceDTO }) {
 function Countdown({ expiresAt }: { expiresAt: string }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
   const left = Date.parse(expiresAt) - now;
   return left > 0 ? (
     <>
-      Expires in{' '}
+      {t('adm.dev.expiresIn')}{' '}
       <strong className="mono" style={{ color: '#fff' }}>
         {formatCountdown(left)}
       </strong>
     </>
   ) : (
-    <strong style={{ color: '#fff' }}>This code has expired — create a new one</strong>
+    <strong style={{ color: '#fff' }}>{t('adm.dev.expired')}</strong>
   );
 }
 
@@ -111,25 +116,25 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
       onClose={close}
       tone="ink"
       size="sm"
-      eyebrow="Enrollment code"
-      title={code ? `For ${person?.display_name ?? 'this person'}` : 'New enrollment code'}
-      description={code ? undefined : 'A single-use code links one device to one person. It is shown only once.'}
+      eyebrow={t('adm.dev.codeEyebrow')}
+      title={code ? t('adm.dev.codeFor', { name: person?.display_name ?? t('adm.dev.thisPerson') }) : t('adm.dev.newCode')}
+      description={code ? undefined : t('adm.dev.codeIntro')}
       footer={
         code ? (
           <>
-            <CopyButton text={code.code} label="Copy code" variant="inverse" />
-            <CopyButton text={enrollmentLink(window.location.origin, code.code)} label="Copy link" variant="inverse" />
+            <CopyButton text={code.code} label={t('adm.dev.copyCode')} variant="inverse" />
+            <CopyButton text={enrollmentLink(window.location.origin, code.code)} label={t('adm.dev.copyLink')} variant="inverse" />
             <Button variant="quiet" onClick={close}>
-              Done
+              {t('adm.dev.done')}
             </Button>
           </>
         ) : (
           <>
             <Button variant="quiet" onClick={close}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="primary" disabled={!userId || action.busy} onClick={create}>
-              {action.busy ? 'Creating…' : 'Create code'}
+              {action.busy ? t('adm.dev.creating') : t('adm.dev.createCode')}
             </Button>
           </>
         )
@@ -137,46 +142,46 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
     >
       {code ? (
         <>
-          <div className={s.code} aria-label="Enrollment code">
+          <div className={s.code} aria-label={t('adm.dev.codeEyebrow')}>
             {code.code}
           </div>
           <p role="timer" aria-live="off">
-            Single use. <Countdown expiresAt={code.expires_at} />. Shown only once — share it directly with {person?.display_name ?? 'them'}.
+            {t('adm.dev.singleUse')} <Countdown expiresAt={code.expires_at} />. {t('adm.dev.shareWith', { name: person?.display_name ?? t('adm.dev.them') })}
           </p>
           <p className="small" style={{ color: 'var(--ink-muted)' }}>
-            The link opens the Track app with the server address and code filled in. People who track can also get their own code under My computers.
+            {t('adm.dev.linkNote')}
           </p>
           <p className="small" style={{ color: 'var(--ink-muted)' }}>
-            On first run the agent explains what it collects and asks for the macOS or Windows permissions it needs. It never installs or tracks silently.
+            {t('adm.dev.firstRun')}
           </p>
         </>
       ) : (
         <>
           <div style={{ color: 'var(--text)' }}>
             <SelectField
-              label={<span style={{ color: '#fff' }}>Person</span>}
+              label={<span style={{ color: '#fff' }}>{t('adm.dev.person')}</span>}
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               disabled={!users.data}
-              hint={<span style={{ color: 'var(--ink-muted)' }}>Enrolling a device for someone who doesn&apos;t track yet uses a seat.</span>}
+              hint={<span style={{ color: 'var(--ink-muted)' }}>{t('adm.dev.seatHint')}</span>}
             >
-              <option value="">{users.data ? 'Choose a person…' : 'Loading people…'}</option>
+              <option value="">{users.data ? t('adm.dev.choosePerson') : t('adm.dev.loadingPeople')}</option>
               {[...(users.data ?? [])]
                 .filter((u) => u.status === 'active')
                 .sort(byName)
                 .map((u) => (
                   <option key={u.id} value={u.id}>
                     {u.display_name} · {u.email}
-                    {u.tracking_enabled ? '' : ' (not tracking yet)'}
+                    {u.tracking_enabled ? '' : t('adm.dev.notTrackingYet')}
                   </option>
                 ))}
             </SelectField>
           </div>
           {action.error?.code === 'seat_limit_reached' || action.error?.code === 'plan_upgrade_required' ? (
             <p role="alert">
-              {action.error.code === 'seat_limit_reached' ? 'No seat is available for this person.' : 'Your plan needs an upgrade to add this person.'}{' '}
+              {action.error.code === 'seat_limit_reached' ? t('adm.dev.noSeat') : t('adm.dev.needUpgrade')}{' '}
               <Link href="/admin/billing" style={{ color: 'var(--link-on-ink)' }}>
-                Open billing →
+                {t('adm.dev.openBilling')}
               </Link>
             </p>
           ) : (
@@ -190,11 +195,9 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
   );
 }
 
-const UPDATE_MODES: { value: AgentUpdateMode; label: string; detail: string }[] = [
-  { value: 'prompt', label: 'People choose when', detail: 'The app says a new version is ready; people restart it when it suits them.' },
-  { value: 'auto', label: 'Automatically', detail: 'The app installs it by itself, only while no session is running.' },
-  { value: 'hold', label: 'Hold', detail: 'No updates are offered. Use it to test a release first, or when IT deploys the MSI.' },
-];
+const UPDATE_MODES: AgentUpdateMode[] = ['prompt', 'auto', 'hold'];
+const modeLabel = (m: AgentUpdateMode) => t(`adm.dev.mode.${m}`);
+const modeDetail = (m: AgentUpdateMode) => t(`adm.dev.mode.${m}.detail`);
 
 /** How the desktop app updates in this organization (G10). Only signed releases ever install. */
 function AppUpdates() {
@@ -208,26 +211,28 @@ function AppUpdates() {
     res.mutate(() => r ?? before);
   };
   return (
-    <Card title="App updates" subtitle={res.data?.latest_version ? `Latest version ${res.data.latest_version}` : 'No release published for this service yet'}>
-      <Resource {...res} label="Loading update settings">
+    <Card title={t('adm.dev.updates')} subtitle={res.data?.latest_version ? t('adm.dev.latest', { version: res.data.latest_version }) : t('adm.dev.noRelease')}>
+      <Resource {...res} label={t('adm.dev.loadingUpdates')}>
         {(u) => (
           <div className="stack" style={{ gap: 12 }}>
             <Segmented<AgentUpdateMode>
-              legend="How the desktop app updates"
+              legend={t('adm.dev.howUpdates')}
               name="agent-update-mode"
               value={u.mode}
               onChange={(m) => void set(m)}
               disabled={action.busy}
-              options={UPDATE_MODES.map(({ value, label }) => ({ value, label }))}
+              options={UPDATE_MODES.map((value) => ({ value, label: modeLabel(value) }))}
             />
-            <p className="small secondary">{UPDATE_MODES.find((m) => m.value === u.mode)!.detail} Only releases signed by RoundDigital install.</p>
+            <p className="small secondary">
+              {modeDetail(u.mode)} {t('adm.dev.signedOnly')}
+            </p>
             {u.versions.length ? (
               <p className="small">
                 {u.versions.map((v, i) => (
                   <span key={v.version}>
                     {i ? ' · ' : ''}
-                    <span className="mono">{v.version}</span> on {plural(v.devices, 'computer')}
-                    {v.current ? '' : ' (behind)'}
+                    <span className="mono">{v.version}</span> {tPlural(v.devices, 'adm.dev.onComputers.one', 'adm.dev.onComputers.other')}
+                    {v.current ? '' : t('adm.dev.behindSuffix')}
                   </span>
                 ))}
               </p>
@@ -247,7 +252,7 @@ export default function DevicesPage() {
   const [revoking, setRevoking] = useState<DeviceDTO | null>(null);
   const [showRevoked, setShowRevoked] = useState(false);
   const revoke = useAction();
-  if (!access.isAdmin) return <NoAccess what="Devices are managed by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('adm.dev.noAccess')} />;
 
   const all = devices.data ?? [];
   const active = all.filter((d) => d.credential_status === 'active');
@@ -269,61 +274,64 @@ export default function DevicesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Agent fleet"
-        title="Devices"
+        eyebrow={t('adm.dev.eyebrow')}
+        title={t('adm.dev.title')}
         description={
           devices.data
-            ? `${active.length} enrolled · ${behind} behind on policy · ${plural(missing, 'device')} missing a permission`
-            : 'Every enrolled desktop agent.'
+            ? tPlural(missing, 'adm.dev.summary.one', 'adm.dev.summary.other', { enrolled: active.length, behind })
+            : t('adm.dev.everyAgent')
         }
         actions={
           <Button variant="primary" onClick={() => setEnrolling(true)}>
-            New enrollment code →
+            {t('adm.dev.newCodeAction')}
           </Button>
         }
       />
       {missing > 0 ? (
-        <Banner tone="warn" title={`${plural(missing, 'device')} missing a permission`}>
-          Minutes without permission are marked “no permission”, never as idle. The agent shows the person one banner with a link to fix it.
+        <Banner tone="warn" title={tPlural(missing, 'adm.dev.missingTitle.one', 'adm.dev.missingTitle.other')}>
+          {t('adm.dev.missingBody')}
         </Banner>
       ) : null}
       <Card
-        title="Enrolled devices"
+        title={t('adm.dev.enrolled')}
         actions={
           revokedCount > 0 ? (
             <Button variant="link" aria-pressed={showRevoked} onClick={() => setShowRevoked((v) => !v)}>
-              {showRevoked ? 'Hide revoked' : `Show ${revokedCount} revoked`}
+              {showRevoked ? t('adm.dev.hideRevoked') : t('adm.dev.showRevoked', { n: revokedCount })}
             </Button>
           ) : undefined
         }
       >
-        <Resource {...devices} label="Loading devices">
+        <Resource {...devices} label={t('adm.dev.loading')}>
           {(list) => {
             const rows = list
               .filter((d) => showRevoked || d.credential_status === 'active')
               .sort((a, b) => a.user_name.localeCompare(b.user_name) || a.name.localeCompare(b.name));
             return rows.length === 0 ? (
-              <Empty title="No devices enrolled yet">Create an enrollment code and enter it in the desktop agent on first run.</Empty>
+              <Empty title={t('adm.dev.none')}>{t('adm.dev.noneBody')}</Empty>
             ) : (
-              <TableBox label="Enrolled devices">
+              <TableBox label={t('adm.dev.enrolled')}>
                 <table className={tableClass} style={{ minWidth: 900 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Person · device</th>
-                      <th scope="col">OS · agent</th>
-                      <th scope="col">Last sync</th>
-                      <th scope="col">Policy</th>
-                      <th scope="col">Permissions</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('adm.dev.colPerson')}</th>
+                      <th scope="col">{t('adm.dev.colOs')}</th>
+                      <th scope="col">{t('adm.dev.colSync')}</th>
+                      <th scope="col">{t('adm.dev.colPolicy')}</th>
+                      <th scope="col">{t('adm.dev.colPerms')}</th>
+                      <th scope="col">{t('adm.dev.colStatus')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.dev.colActions')}</span>
                       </th>
                     </tr>
                   </thead>
                   <tbody>
                     {rows.map((d) => {
                       const revoked = d.credential_status === 'revoked';
-                      const notes = [d.clock_skew_detected ? 'clock skew' : null, d.sequence_gaps > 0 ? plural(d.sequence_gaps, 'sequence gap') : null].filter(Boolean);
+                      const notes = [
+                        d.clock_skew_detected ? t('adm.dev.clockSkew') : null,
+                        d.sequence_gaps > 0 ? tPlural(d.sequence_gaps, 'adm.dev.gaps.one', 'adm.dev.gaps.other') : null,
+                      ].filter(Boolean);
                       return (
                         <tr key={d.id} style={revoked ? { color: 'var(--text-3)' } : undefined}>
                           <td>
@@ -341,7 +349,7 @@ export default function DevicesPage() {
                             {formatRelative(d.last_sync_at, tz)}
                             <br />
                             <span className="muted">
-                              seen {formatRelative(d.last_seen_at, tz)} · enrolled {formatDateTime(d.enrolled_at, tz).replace(/, \d\d:\d\d$/, '')}
+                              {t('adm.dev.seenEnrolled', { seen: formatRelative(d.last_seen_at, tz), enrolled: dayOnly(d.enrolled_at, tz) })}
                             </span>
                           </td>
                           <td>
@@ -349,21 +357,21 @@ export default function DevicesPage() {
                               <span className="muted">—</span>
                             ) : isBehind(d) ? (
                               <Badge tone="warn">
-                                {d.applied_policy_revision === null ? 'None applied' : `Rev ${d.applied_policy_revision}`} · behind
+                                {d.applied_policy_revision === null ? t('adm.dev.noneApplied') : t('adm.dev.rev', { n: d.applied_policy_revision })} · {t('adm.dev.behind')}
                               </Badge>
                             ) : (
-                              <Badge>Rev {d.applied_policy_revision}</Badge>
+                              <Badge>{t('adm.dev.rev', { n: d.applied_policy_revision ?? '' })}</Badge>
                             )}
                           </td>
                           <td>
                             <Permissions d={d} />
                             {notes.length ? <div className="small muted">{notes.join(' · ')}</div> : null}
                           </td>
-                          <td>{revoked ? <Badge>Revoked</Badge> : <Badge tone="solid">Active</Badge>}</td>
+                          <td>{revoked ? <Badge>{t('adm.dev.revoked')}</Badge> : <Badge tone="solid">{t('adm.dev.active')}</Badge>}</td>
                           <td style={{ textAlign: 'right' }}>
                             {!revoked ? (
-                              <Button size="sm" variant="danger" onClick={() => setRevoking(d)} aria-label={`Revoke ${d.name} (${d.user_name})`}>
-                                Revoke
+                              <Button size="sm" variant="danger" onClick={() => setRevoking(d)} aria-label={t('adm.dev.revokeLabel', { device: d.name, person: d.user_name })}>
+                                {t('adm.dev.revoke')}
                               </Button>
                             ) : null}
                           </td>
@@ -394,13 +402,13 @@ export default function DevicesPage() {
           revoke.reset();
         }}
         size="sm"
-        title={`Revoke ${revoking?.name ?? 'device'}?`}
-        description={`${revoking?.user_name ?? 'The person'}'s agent on this device stops collecting at its next contact and shows why. Records already received stay. This can't be undone — the device needs a new enrollment code.`}
+        title={t('adm.dev.revokeTitle', { device: revoking?.name ?? t('adm.dev.device') })}
+        description={t('adm.dev.revokeBody', { person: revoking?.user_name ?? t('adm.dev.thePerson') })}
         footer={
           <>
-            <Button onClick={() => setRevoking(null)}>Cancel</Button>
+            <Button onClick={() => setRevoking(null)}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={confirmRevoke} disabled={revoke.busy}>
-              {revoke.busy ? 'Revoking…' : 'Revoke device'}
+              {revoke.busy ? t('adm.dev.revoking') : t('adm.dev.revokeDevice')}
             </Button>
           </>
         }

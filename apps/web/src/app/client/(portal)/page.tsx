@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/Button';
 import { Empty, Resource } from '@/components/ui/DataState';
 import { Badge, Card, Meter, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { formatDuration, formatMoney, formatPercent } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import { BUDGET_STATUS_LABEL } from '@/lib/money';
 import { clientPortal } from '@/lib/portal';
 import { addDays, browserTimeZone, daysInMonth, daysRange, formatDayLabel, formatDayMonth, formatMonthYear, startOfWeek, todayInTz } from '@/lib/time';
@@ -25,11 +26,11 @@ function Budget({ b }: { b: NonNullable<ClientPortalProject['budget']> }) {
   const used = hours ? b.used_seconds : (b.used_cents ?? 0);
   const limit = hours ? (b.limit_hours ?? 0) * 3600 : (b.limit_cents ?? 0);
   const fmt = (n: number) => (hours ? formatDuration(n) : formatMoney(n, b.currency ?? 'USD'));
-  const label = `${fmt(used)} of ${fmt(limit)} used (${formatPercent(b.used_percent)})`;
+  const label = t('pub.portal.budgetUsed', { used: fmt(used), limit: fmt(limit), percent: formatPercent(b.used_percent) });
   return (
     <div className="stack" style={{ gap: 6 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline' }}>
-        <span className="small secondary">{b.period.from ? 'Budget this month' : 'Budget for the project'}</span>
+        <span className="small secondary">{b.period.from ? t('pub.portal.budgetMonth') : t('pub.portal.budgetProject')}</span>
         <Badge tone={b.status === 'ok' ? 'outline' : 'warn'}>{BUDGET_STATUS_LABEL[b.status]}</Badge>
       </div>
       <Meter value={used} max={Math.max(limit, used, 1)} label={label} />
@@ -45,22 +46,22 @@ function Project({ p }: { p: ClientPortalProject }) {
     <Card title={p.name}>
       <span className={s.hours}>{formatDuration(p.seconds)}</span>
       {weeks.size ? (
-        <ul className={s.people} aria-label={`${p.name} by week`}>
+        <ul className={s.people} aria-label={t('pub.portal.byWeek', { project: p.name })}>
           {[...weeks].map(([w, sec]) => (
             <li key={w}>
               <span>
-                Week of {formatDayMonth(w)} – {formatDayMonth(addDays(w, 6))}
+                {t('pub.portal.weekOf', { from: formatDayMonth(w), to: formatDayMonth(addDays(w, 6)) })}
               </span>
               <span className="mono">{formatDuration(sec)}</span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="small muted">No time this month.</p>
+        <p className="small muted">{t('pub.portal.noTime')}</p>
       )}
       {p.people && p.people.length ? (
         <>
-          <span className="label-mono">Who worked on it</span>
+          <span className="label-mono">{t('pub.portal.who')}</span>
           <ul className={s.people}>
             {p.people.map((x) => (
               <li key={x.name}>
@@ -79,30 +80,30 @@ function Project({ p }: { p: ClientPortalProject }) {
 function Invoices() {
   const invoices = useApi('client:invoices', (signal) => clientPortal.invoices(signal));
   return (
-    <Card title="Invoices">
-      <Resource {...invoices} label="Loading invoices">
+    <Card title={t('pub.portal.invoices')}>
+      <Resource {...invoices} label={t('pub.portal.loadingInvoices')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No invoices yet">Invoices show here once they&apos;re issued.</Empty>
+            <Empty title={t('pub.portal.noInvoices')}>{t('pub.portal.noInvoicesBody')}</Empty>
           ) : (
-            <TableBox label="Invoices">
+            <TableBox label={t('pub.portal.invoices')}>
               <table className={tableClass} style={{ minWidth: 640 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Invoice</th>
-                    <th scope="col">Period</th>
-                    <th scope="col">Due</th>
+                    <th scope="col">{t('pub.portal.invoice')}</th>
+                    <th scope="col">{t('pub.portal.period')}</th>
+                    <th scope="col">{t('pub.portal.due')}</th>
                     <th scope="col" className={numClass}>
-                      Total
+                      {t('pub.portal.total')}
                     </th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('pub.portal.status')}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {list.map((i) => (
                     <tr key={i.id}>
                       <td>
-                        <Link href={`/client/invoices/${i.id}`}>{i.number ?? 'Invoice'}</Link>
+                        <Link href={`/client/invoices/${i.id}`}>{i.number ?? t('pub.portal.invoice')}</Link>
                       </td>
                       <td>
                         {formatDayMonth(i.period_from)} – {formatDayMonth(i.period_to)}
@@ -111,11 +112,11 @@ function Invoices() {
                       <td className={numClass}>{formatMoney(i.total_cents, i.currency)}</td>
                       <td>
                         {i.status === 'void' ? (
-                          <Badge>Void</Badge>
+                          <Badge>{t('pub.portal.void')}</Badge>
                         ) : i.paid_on ? (
-                          <Badge tone="solid">Paid {formatDayMonth(i.paid_on)}</Badge>
+                          <Badge tone="solid">{t('pub.portal.paid', { date: formatDayMonth(i.paid_on) })}</Badge>
                         ) : (
-                          <Badge>Unpaid</Badge>
+                          <Badge>{t('pub.portal.unpaid')}</Badge>
                         )}
                       </td>
                     </tr>
@@ -141,31 +142,31 @@ export default function ClientPortalHome() {
   return (
     <>
       <PageHeader
-        eyebrow={`Client portal · ${me.organization.name}`}
+        eyebrow={t('pub.portal.eyebrow', { org: me.organization.name })}
         title={me.client.name}
-        description={`Hours, budgets and invoices for your projects with ${me.organization.name}.${me.client.show_people ? '' : ' Hours are shown per project.'}`}
+        description={`${t('pub.portal.description', { org: me.organization.name })}${me.client.show_people ? '' : t('pub.portal.perProject')}`}
         actions={
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <Button size="sm" onClick={() => setMonth(shiftMonth(month, -1))} aria-label="Previous month">
+            <Button size="sm" onClick={() => setMonth(shiftMonth(month, -1))} aria-label={t('pub.portal.prevMonth')}>
               ←
             </Button>
             <strong style={{ minWidth: 140, textAlign: 'center' }}>{formatMonthYear(first)}</strong>
-            <Button size="sm" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= thisMonth} aria-label="Next month">
+            <Button size="sm" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= thisMonth} aria-label={t('pub.portal.nextMonth')}>
               →
             </Button>
           </div>
         }
       />
-      <Resource {...report} label="Working out the hours">
+      <Resource {...report} label={t('pub.portal.working')}>
         {(r) =>
           r.projects.length === 0 ? (
             <Card>
-              <Empty title="No projects yet">Projects show here once {me.organization.name} links them to {me.client.name}.</Empty>
+              <Empty title={t('pub.portal.noProjects')}>{t('pub.portal.noProjectsBody', { org: me.organization.name, client: me.client.name })}</Empty>
             </Card>
           ) : (
             <>
               <Card>
-                <span className="label-mono">Total this month</span>
+                <span className="label-mono">{t('pub.portal.totalMonth')}</span>
                 <span className={s.hours}>{formatDuration(r.total_seconds)}</span>
               </Card>
               <div className={s.projects}>

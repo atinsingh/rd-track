@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { clientPortal } from '@/lib/portal';
+import { useT } from '@/lib/i18n';
 import { useAction, useApi } from '@/lib/useApi';
 import { AuthFrame } from '../../login/AuthFrame';
 import s from '../../login/login.module.css';
@@ -19,6 +20,7 @@ function ChoosePassword() {
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
   const action = useAction();
+  const t = useT();
   const mismatch = again.length > 0 && again !== password;
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -28,34 +30,53 @@ function ChoosePassword() {
   if (!token || info.error)
     return (
       <div className={s.form}>
-        <h1 style={{ fontSize: 28 }}>This link doesn&apos;t work</h1>
+        <h1 style={{ fontSize: 28 }}>{t('pub.client.badLink')}</h1>
         {info.error ? <ErrorState error={info.error} /> : null}
-        <p className={s.fine}>Links work once and expire after 7 days. Ask your contact at the agency to send a new one.</p>
+        <p className={s.fine}>{t('pub.client.badLinkBody')}</p>
       </div>
     );
-  if (!info.data) return <Loading label="Checking your link" />;
+  if (!info.data) return <Loading label={t('pub.client.checkingLink')} />;
   const d = info.data;
   return (
     <form className={s.form} onSubmit={submit} noValidate>
-      <span className="eyebrow">{d.organization_name} · Client portal</span>
-      <h1 style={{ fontSize: 28 }}>{d.first_time ? `Welcome, ${d.display_name}` : 'Choose a new password'}</h1>
-      <p className="secondary">
-        {d.organization_name} shares the hours, budgets and invoices for {d.client_name}&apos;s projects with you. You sign in as {d.email}.
-      </p>
-      <TextField label="Password" type="password" autoComplete="new-password" hint="At least 12 characters" required value={password} onChange={(e) => setPassword(e.target.value)} />
-      <TextField label="Password again" type="password" autoComplete="new-password" required value={again} onChange={(e) => setAgain(e.target.value)} error={mismatch ? 'The passwords are different.' : null} />
+      <span className="eyebrow">{t('pub.client.portalEyebrow', { org: d.organization_name })}</span>
+      <h1 style={{ fontSize: 28 }}>{d.first_time ? t('pub.invite.welcome', { name: d.display_name }) : t('pub.reset.chooseTitle')}</h1>
+      <p className="secondary">{t('pub.client.shares', { org: d.organization_name, client: d.client_name, email: d.email })}</p>
+      <TextField
+        label={t('login.password')}
+        type="password"
+        autoComplete="new-password"
+        hint={t('pub.client.atLeast12')}
+        required
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
+      <TextField
+        label={t('pub.invite.passwordAgain')}
+        type="password"
+        autoComplete="new-password"
+        required
+        value={again}
+        onChange={(e) => setAgain(e.target.value)}
+        error={mismatch ? t('pub.client.different') : null}
+      />
       <ActionError error={action.error} />
       <Button type="submit" variant="primary" disabled={action.busy || password.length < 12 || again !== password}>
-        {action.busy ? 'Saving…' : 'Save and sign in →'}
+        {action.busy ? t('common.saving') : t('pub.client.saveSignIn')}
       </Button>
     </form>
   );
 }
 
+function LinkFallback() {
+  const t = useT();
+  return <Loading label={t('pub.client.checkingLink')} />;
+}
+
 export default function ClientLinkPage() {
   return (
     <AuthFrame about={<ClientAbout />}>
-      <Suspense fallback={<Loading label="Checking your link" />}>
+      <Suspense fallback={<LinkFallback />}>
         <ChoosePassword />
       </Suspense>
     </AuthFrame>

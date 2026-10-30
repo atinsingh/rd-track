@@ -12,6 +12,7 @@ import { useMe } from '@/lib/me';
 import { addDays, formatDayMonth, todayInTz } from '@/lib/time';
 import { reviewActions, timesheetsApi } from '@/lib/timesheets';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { NoAccess } from '../../../NoAccess';
 
 export default function MemberTimesheetPage() {
@@ -27,9 +28,9 @@ export default function MemberTimesheetPage() {
   const sheet = useApi(allowed && userId ? `member:timesheet|${userId}|${week}` : null, (signal) =>
     timesheetsApi.memberWeek(userId, week, signal),
   );
-  const name = sheet.data?.user_name ?? search.get('name') ?? 'Team member';
+  const name = sheet.data?.user_name ?? search.get('name') ?? t('mgr.member.fallback');
 
-  if (!allowed) return <NoAccess what="Member timesheets are for team managers and org admins on plans with timesheets." />;
+  if (!allowed) return <NoAccess what={t('mgr.sheet.noAccess')} />;
 
   return (
     <>
@@ -38,18 +39,18 @@ export default function MemberTimesheetPage() {
           <>
             {access.managesTeams ? (
               <Link href="/team" style={{ color: 'inherit' }}>
-                Team
+                {t('nav.team')}
               </Link>
             ) : (
               <Link href="/approvals" style={{ color: 'inherit' }}>
-                Approvals
+                {t('nav.approvals')}
               </Link>
             )}
-            &nbsp;· Timesheet
+            &nbsp;· {t('mgr.col.timesheet')}
           </>
         }
         title={name}
-        description={`The week as ${name} sees it on their own timesheet.`}
+        description={t('mgr.sheet.description', { name })}
         actions={
           <>
             {sheet.data ? <StatusBadge status={sheet.data.status} /> : null}
@@ -65,26 +66,22 @@ export default function MemberTimesheetPage() {
           </>
         }
       />
-      <Banner tag="NOTE">Opening someone&apos;s timesheet is recorded and listed on their “What&apos;s collected” page.</Banner>
+      <Banner tag="NOTE">{t('mgr.sheet.note')}</Banner>
       {sheet.error ? (
         sheet.error.status === 403 ? (
-          <Banner tag="NOTE">You can&apos;t view this person&apos;s timesheet. Only their team managers and org admins can.</Banner>
+          <Banner tag="NOTE">{t('mgr.sheet.cantView')}</Banner>
         ) : (
           <ErrorState error={sheet.error} onRetry={sheet.reload} />
         )
       ) : !sheet.data ? (
-        <Loading label="Loading the timesheet" />
+        <Loading label={t('mgr.sheet.loading')} />
       ) : (
         <>
           <TimesheetView sheet={sheet.data} tz={tz} self={false} />
           {reviewActions(sheet.data).length > 0 ? (
             <Card
-              title={sheet.data.status === 'approved' ? 'Reopen this week' : 'Review this week'}
-              subtitle={
-                sheet.data.status === 'approved'
-                  ? 'Reopening unlocks the week so corrections can be made; the approved record stays in the history.'
-                  : 'Approving locks the week for payroll.'
-              }
+              title={sheet.data.status === 'approved' ? t('mgr.sheet.reopenTitle') : t('mgr.sheet.reviewTitle')}
+              subtitle={sheet.data.status === 'approved' ? t('mgr.sheet.reopenBody') : t('mgr.sheet.reviewBody')}
             >
               <ReviewPanel sheet={sheet.data} onDone={(t) => sheet.mutate(() => t)} />
             </Card>

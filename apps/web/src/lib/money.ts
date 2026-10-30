@@ -1,4 +1,5 @@
 import type { BudgetStatus, InvoiceStatus, PayrollAdjustmentDTO } from '@rd/contracts';
+import type { InvoiceState } from './workspaces';
 import { formatMoney, formatNumber, formatPercent } from './format';
 import { t } from './i18n';
 import { currentLocale } from './locale';
@@ -72,21 +73,41 @@ export function formatPercentBp(bp: number): string {
 }
 
 export function formatRate(cents: number, currency: string): string {
-  return `${formatMoney(cents, currency)}/h`;
+  return t('money.perHour', { amount: formatMoney(cents, currency) });
 }
 
 export function formatHours(hours: number): string {
   return `${formatNumber(hours, 2)} h`;
 }
 
-export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = { draft: 'Draft', issued: 'Issued', void: 'Void' };
+/** Read in the current language each time (G27). */
+export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  get draft() {
+    return t('money.invoiceStatus.draft');
+  },
+  get issued() {
+    return t('money.invoiceStatus.issued');
+  },
+  get void() {
+    return t('money.invoiceStatus.void');
+  },
+};
 
 /** Budget wording. Status is about a project's budget, never about a person. */
 export const BUDGET_STATUS_LABEL: Record<BudgetStatus, string> = {
-  ok: 'Within budget',
-  near: 'Near budget',
-  reached: 'Budget reached',
+  get ok() {
+    return t('money.budgetStatus.ok');
+  },
+  get near() {
+    return t('money.budgetStatus.near');
+  },
+  get reached() {
+    return t('money.budgetStatus.reached');
+  },
 };
+
+/** An invoice's state (draft, unpaid, overdue, paid, void), in the current language. */
+export const invoiceStateLabel = (state: InvoiceState): string => t(`money.invoiceState.${state}`);
 
 /** Latest rate per key (rows are newest-first per key). */
 export function latestBy<T extends { effective_from: string }>(rows: readonly T[], key: (r: T) => string, today: string): Map<string, T> {

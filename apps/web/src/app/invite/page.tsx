@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { rd } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { browserTimeZone } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { AuthFrame } from '../login/AuthFrame';
@@ -16,6 +17,7 @@ function Accept() {
   const token = useSearchParams().get('token') ?? '';
   const info = useApi(token ? `invite:${token}` : null, () => rd.auth.invite(token));
   const action = useAction();
+  const t = useT();
   const [password, setPassword] = useState('');
   const [again, setAgain] = useState('');
   const short = password.length > 0 && password.length < 12;
@@ -33,49 +35,49 @@ function Accept() {
   if (!token || info.error) {
     return (
       <div className={s.form}>
-        <span className="eyebrow">Track · Invite</span>
-        <h1 style={{ fontSize: 28 }}>This invite link doesn’t work</h1>
-        <p className="secondary">It may have expired (after 7 days) or been used already. Ask your org admin to send a new one.</p>
+        <span className="eyebrow">{t('pub.invite.eyebrow')}</span>
+        <h1 style={{ fontSize: 28 }}>{t('pub.invite.badTitle')}</h1>
+        <p className="secondary">{t('pub.invite.badBody')}</p>
         {info.error && info.error.code !== 'link_invalid' ? <ErrorState error={info.error} onRetry={info.reload} /> : null}
         <p className={s.fine}>
-          Already set a password? <a href="/login">Sign in</a>
+          {t('pub.invite.alreadySet')} <a href="/login">{t('pub.signup.signIn')}</a>
         </p>
       </div>
     );
   }
-  if (!info.data) return <Loading label="Checking your invite" />;
+  if (!info.data) return <Loading label={t('pub.invite.checking')} />;
   return (
     <form className={s.form} onSubmit={submit} noValidate>
-      <span className="eyebrow">Track · Join {info.data.organization_name}</span>
-      <h1 style={{ fontSize: 28 }}>Welcome, {info.data.display_name}</h1>
+      <span className="eyebrow">{t('pub.invite.join', { org: info.data.organization_name })}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.invite.welcome', { name: info.data.display_name })}</h1>
       <p className="secondary">
-        Choose a password for <strong>{info.data.email}</strong>. Nothing is measured until you start a work session, and you can see
-        everything that is collected about you.
+        {t('pub.invite.chooseBefore')} <strong>{info.data.email}</strong>
+        {t('pub.invite.chooseAfter')}
       </p>
       <TextField
-        label="Password"
+        label={t('login.password')}
         type="password"
         name="new-password"
         autoComplete="new-password"
         required
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        error={short ? 'Use at least 12 characters.' : null}
+        error={short ? t('password.tooShort') : null}
       />
       <TextField
-        label="Password again"
+        label={t('pub.invite.passwordAgain')}
         type="password"
         name="confirm-password"
         autoComplete="new-password"
         required
         value={again}
         onChange={(e) => setAgain(e.target.value)}
-        error={mismatch ? 'The passwords don’t match.' : null}
+        error={mismatch ? t('password.mismatch') : null}
       />
-      <p className={s.fine}>Your time zone is set to {browserTimeZone()}; you can change it later in Settings.</p>
+      <p className={s.fine}>{t('pub.invite.tz', { tz: browserTimeZone() })}</p>
       <ActionError error={action.error} />
       <Button type="submit" variant="primary" disabled={action.busy || password.length < 12 || password !== again}>
-        {action.busy ? 'Joining…' : 'Join and sign in →'}
+        {action.busy ? t('pub.invite.joining') : t('pub.invite.submit')}
       </Button>
     </form>
   );

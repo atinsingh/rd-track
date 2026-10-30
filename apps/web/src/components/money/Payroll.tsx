@@ -10,16 +10,11 @@ import { Badge, Card, TableBox, formActionsClass, formGridClass, numClass, table
 import { rd, toApiError, type ApiError } from '@/lib/api';
 import { addDays, formatDateTime, formatDayLabel, startOfMonth } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 // ───────────────────────── payroll ─────────────────────────
 
-const EXPORT_STATUS: Record<PayrollExportDTO['status'], string> = {
-  queued: 'Queued',
-  running: 'Preparing',
-  ready: 'Ready',
-  failed: 'Failed',
-  expired: 'Expired',
-};
+const exportStatus = (st: PayrollExportDTO['status']) => t(`money.payroll.status.${st}`);
 
 function PayrollDownload({ e }: { e: PayrollExportDTO }) {
   const [error, setError] = useState<ApiError | null>(null);
@@ -35,7 +30,7 @@ function PayrollDownload({ e }: { e: PayrollExportDTO }) {
   return (
     <>
       <Button size="sm" variant="quiet" onClick={fetchLink}>
-        Download CSV
+        {t('money.payroll.download')}
       </Button>
       <ActionError error={error} />
     </>
@@ -52,8 +47,8 @@ export function Payroll({ tz, today }: { tz: string; today: string }) {
   const { reload } = exportsRes;
   useEffect(() => {
     if (!inFlight) return;
-    const t = window.setInterval(reload, 3000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(reload, 3000);
+    return () => window.clearInterval(timer);
   }, [inFlight, reload]);
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -62,49 +57,47 @@ export function Payroll({ tz, today }: { tz: string; today: string }) {
     if (r) exportsRes.mutate((prev) => [r, ...(prev ?? [])]);
   };
   return (
-    <Card title="Payroll export" subtitle="Hours × pay rate per person for a pay period, as CSV">
+    <Card title={t('money.payroll.title')} subtitle={t('money.payroll.subtitle')}>
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
-          <TextField label="Pay period from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+          <TextField label={t('money.payroll.from')} type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           <TextField
-            label="To"
+            label={t('money.payroll.to')}
             type="date"
             value={to}
             min={from}
             onChange={(e) => setTo(e.target.value)}
-            hint={`Whole days in ${tz}; up to 93 days`}
-            error={from > to ? 'The end date is before the start date.' : null}
+            hint={t('money.payroll.hint', { tz })}
+            error={from > to ? t('money.payroll.endBefore') : null}
           />
         </div>
         <p className="small muted">
-          Uses all recorded time (agent-tracked and approved manual time). Hours are rounded to the minute, then to two decimals. Approved expenses not yet
-          paid, and the bonuses and deductions set under Rates, get their own columns. Files expire after 24 hours; each download is recorded in the access
-          log of everyone in the file.
+          {t('money.payroll.explain')}
         </p>
         <ActionError error={create.error} />
         <div className={formActionsClass}>
           <Button type="submit" variant="primary" disabled={create.busy || from > to}>
-            {create.busy ? 'Queuing…' : 'Create payroll export →'}
+            {create.busy ? t('money.payroll.queuing') : t('money.payroll.create')}
           </Button>
         </div>
       </form>
-      <Resource {...exportsRes} label="Loading payroll exports">
+      <Resource {...exportsRes} label={t('money.payroll.loading')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No payroll exports yet" />
+            <Empty title={t('money.payroll.none')} />
           ) : (
-            <TableBox label="Payroll exports">
+            <TableBox label={t('money.payroll.table')}>
               <table className={tableClass} style={{ minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Created</th>
-                    <th scope="col">Pay period</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('money.payroll.created')}</th>
+                    <th scope="col">{t('money.payroll.period')}</th>
+                    <th scope="col">{t('money.payroll.statusCol')}</th>
                     <th scope="col" className={numClass}>
-                      Rows
+                      {t('money.payroll.rows')}
                     </th>
                     <th scope="col">
-                      <span className="visually-hidden">Download</span>
+                      <span className="visually-hidden">{t('money.payroll.downloadCol')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -116,7 +109,7 @@ export function Payroll({ tz, today }: { tz: string; today: string }) {
                         {formatDayLabel(e.period_from)} – {formatDayLabel(e.period_to)}
                       </td>
                       <td>
-                        <Badge tone={e.status === 'ready' ? 'solid' : 'outline'}>{EXPORT_STATUS[e.status]}</Badge>
+                        <Badge tone={e.status === 'ready' ? 'solid' : 'outline'}>{exportStatus(e.status)}</Badge>
                       </td>
                       <td className={numClass}>{e.row_count ?? '—'}</td>
                       <td>

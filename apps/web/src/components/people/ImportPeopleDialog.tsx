@@ -8,7 +8,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { TextArea } from '@/components/ui/Field';
 import { Badge, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { plural } from '@/lib/format';
+import { t, tPlural } from '@/lib/i18n';
 import { IMPORT_TEMPLATE, rowsFromCsv } from '@/lib/peopleImport';
 import { useAction } from '@/lib/useApi';
 
@@ -58,26 +58,26 @@ export function ImportPeopleDialog({ open, onClose, onDone, defaultTz }: { open:
       open={open}
       onClose={close}
       size="lg"
-      eyebrow="Admin · People"
-      title={done ? `${plural(done.ok, 'invite')} sent` : 'Import people from CSV'}
-      description={
-        done
-          ? undefined
-          : 'One person per line. Required columns: email and name. Optional: role (employee, admin, auditor, finance), timezone, tracks time (yes/no), team (created if new).'
-      }
+      eyebrow={t('mgr.users.eyebrow')}
+      title={done ? tPlural(done.ok, 'mgr.import.sentOne', 'mgr.import.sentOther') : t('mgr.import.title')}
+      description={done ? undefined : t('mgr.import.desc')}
       footer={
         done ? (
           <Button variant="primary" onClick={close}>
-            Done
+            {t('security.done')}
           </Button>
         ) : (
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button onClick={check} disabled={!parsed?.rows.length || !!parsed.problem || tooMany || action.busy}>
-              {action.busy && !checked ? 'Checking…' : 'Check rows'}
+              {action.busy && !checked ? t('mgr.import.checking') : t('mgr.import.check')}
             </Button>
             <Button variant="primary" onClick={run} disabled={!checked || checked.ok === 0 || action.busy}>
-              {action.busy && checked ? 'Inviting…' : checked ? `Invite ${plural(checked.ok, 'person', 'people')}` : 'Invite'}
+              {action.busy && checked
+                ? t('mgr.import.inviting')
+                : checked
+                  ? tPlural(checked.ok, 'mgr.import.inviteOne', 'mgr.import.inviteOther')
+                  : t('mgr.import.invite')}
             </Button>
           </>
         )
@@ -85,9 +85,9 @@ export function ImportPeopleDialog({ open, onClose, onDone, defaultTz }: { open:
     >
       {!done ? (
         <>
-          <input type="file" accept=".csv,text/csv" aria-label="CSV file" onChange={(e) => void readFile(e.target.files?.[0])} />
+          <input type="file" accept=".csv,text/csv" aria-label={t('mgr.import.file')} onChange={(e) => void readFile(e.target.files?.[0])} />
           <TextArea
-            label="Or paste CSV"
+            label={t('mgr.import.paste')}
             rows={6}
             className="mono"
             placeholder={IMPORT_TEMPLATE}
@@ -99,14 +99,14 @@ export function ImportPeopleDialog({ open, onClose, onDone, defaultTz }: { open:
           />
           <p className="small muted">
             <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(IMPORT_TEMPLATE)}`} download="people-template.csv">
-              Download a template
-            </a>{' '}
-            · Up to {USER_IMPORT_MAX_ROWS} people at a time. Time zone defaults to {defaultTz}. Nobody is emailed until you press Invite.
+              {t('mgr.import.template')}
+            </a>
+            {t('mgr.import.limits', { max: USER_IMPORT_MAX_ROWS, tz: defaultTz })}
           </p>
           {parsed?.problem ? <p className="small" role="alert">{parsed.problem}</p> : null}
           {tooMany ? (
             <p className="small" role="alert">
-              That&apos;s {parsed!.rows.length} people; import at most {USER_IMPORT_MAX_ROWS} at a time.
+              {t('mgr.import.tooMany', { n: parsed!.rows.length, max: USER_IMPORT_MAX_ROWS })}
             </p>
           ) : null}
         </>
@@ -115,16 +115,16 @@ export function ImportPeopleDialog({ open, onClose, onDone, defaultTz }: { open:
         <>
           <p className="small secondary" role="status">
             {done
-              ? `${plural(done.ok, 'person', 'people')} invited${done.failed ? `, ${done.failed} skipped` : ''}.`
-              : `${plural(result.ok, 'row')} ready${result.failed ? `, ${result.failed} can't be imported (fix them in the file and check again, or invite the rest)` : ''}.`}
+              ? `${tPlural(done.ok, 'mgr.import.invitedOne', 'mgr.import.invitedOther')}${done.failed ? t('mgr.import.skipped', { n: done.failed }) : ''}.`
+              : `${tPlural(result.ok, 'mgr.import.readyOne', 'mgr.import.readyOther')}${result.failed ? t('mgr.import.cantImport', { n: result.failed }) : ''}.`}
           </p>
-          <TableBox label="Rows">
+          <TableBox label={t('mgr.import.rows')}>
             <table className={tableClass}>
               <thead>
                 <tr>
-                  <th scope="col">Row</th>
-                  <th scope="col">Email</th>
-                  <th scope="col">Result</th>
+                  <th scope="col">{t('mgr.import.colRow')}</th>
+                  <th scope="col">{t('mgr.import.colEmail')}</th>
+                  <th scope="col">{t('mgr.import.colResult')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -135,12 +135,12 @@ export function ImportPeopleDialog({ open, onClose, onDone, defaultTz }: { open:
                     <td className="small">
                       {r.ok ? (
                         <>
-                          <Badge tone="solid">{done ? 'Invited' : 'Ready'}</Badge>
-                          {r.team === 'created' ? ' · new team' : r.team === 'joined' ? ' · joins team' : ''}
+                          <Badge tone="solid">{done ? t('mgr.import.invited') : t('mgr.import.ready')}</Badge>
+                          {r.team === 'created' ? t('mgr.import.newTeam') : r.team === 'joined' ? t('mgr.import.joinsTeam') : ''}
                         </>
                       ) : (
                         <>
-                          <Badge tone="warn">Skipped</Badge> {r.message}
+                          <Badge tone="warn">{t('mgr.import.skippedBadge')}</Badge> {r.message}
                         </>
                       )}
                     </td>

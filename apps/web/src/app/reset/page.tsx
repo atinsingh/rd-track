@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { ActionError } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { rd } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useAction } from '@/lib/useApi';
 import { AuthFrame } from '../login/AuthFrame';
 import s from '../login/login.module.css';
@@ -14,6 +15,7 @@ function RequestLink() {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState<string | null>(null);
   const action = useAction();
+  const t = useT();
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     const ok = await action.run(() => rd.auth.requestPasswordReset(email.trim()));
@@ -22,29 +24,29 @@ function RequestLink() {
   if (sent) {
     return (
       <div className={s.form} role="status">
-        <span className="eyebrow">Track · Check your email</span>
-        <h1 style={{ fontSize: 28 }}>Check your email</h1>
+        <span className="eyebrow">{t('pub.signup.checkEyebrow')}</span>
+        <h1 style={{ fontSize: 28 }}>{t('pub.reset.checkTitle')}</h1>
         <p>
-          If <strong>{sent}</strong> has an account, a link to choose a new password is on its way. It works once, for 60 minutes.
+          {t('pub.reset.ifBefore')} <strong>{sent}</strong> {t('pub.reset.ifAfter')}
         </p>
         <p className={s.fine}>
-          Remembered it? <a href="/login">Sign in</a>
+          {t('pub.reset.remembered')} <a href="/login">{t('pub.signup.signIn')}</a>
         </p>
       </div>
     );
   }
   return (
     <form className={s.form} onSubmit={submit} noValidate>
-      <span className="eyebrow">Track · Reset password</span>
-      <h1 style={{ fontSize: 28 }}>Forgot your password?</h1>
-      <p className="secondary">Enter your work email and we’ll send a link to choose a new one.</p>
-      <TextField label="Work email" type="email" name="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
+      <span className="eyebrow">{t('pub.reset.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.reset.title')}</h1>
+      <p className="secondary">{t('pub.reset.intro')}</p>
+      <TextField label={t('login.email')} type="email" name="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
       <ActionError error={action.error} />
       <Button type="submit" variant="primary" disabled={action.busy || !email.includes('@')}>
-        {action.busy ? 'Sending…' : 'Send the link →'}
+        {action.busy ? t('email.sending') : t('pub.reset.send')}
       </Button>
       <p className={s.fine}>
-        <a href="/login">Back to sign in</a>
+        <a href="/login">{t('pub.reset.back')}</a>
       </p>
     </form>
   );
@@ -55,6 +57,7 @@ function ChooseNew({ token }: { token: string }) {
   const [again, setAgain] = useState('');
   const [done, setDone] = useState(false);
   const action = useAction();
+  const t = useT();
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (password.length < 12 || password !== again) return;
@@ -63,47 +66,47 @@ function ChooseNew({ token }: { token: string }) {
   if (done) {
     return (
       <div className={s.form} role="status">
-        <span className="eyebrow">Track · Password changed</span>
-        <h1 style={{ fontSize: 28 }}>Your password is changed</h1>
-        <p>You were signed out everywhere else. Sign in with your new password.</p>
+        <span className="eyebrow">{t('pub.reset.changedEyebrow')}</span>
+        <h1 style={{ fontSize: 28 }}>{t('pub.reset.changedTitle')}</h1>
+        <p>{t('pub.reset.changedBody')}</p>
         <a className={s.primaryLink} href="/login">
-          Sign in →
+          {t('login.submit')}
         </a>
       </div>
     );
   }
   return (
     <form className={s.form} onSubmit={submit} noValidate>
-      <span className="eyebrow">Track · Reset password</span>
-      <h1 style={{ fontSize: 28 }}>Choose a new password</h1>
+      <span className="eyebrow">{t('pub.reset.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.reset.chooseTitle')}</h1>
       <TextField
-        label="New password"
+        label={t('password.new')}
         type="password"
         name="new-password"
         autoComplete="new-password"
         required
         value={password}
         onChange={(e) => setPassword(e.target.value)}
-        error={password.length > 0 && password.length < 12 ? 'Use at least 12 characters.' : null}
+        error={password.length > 0 && password.length < 12 ? t('password.tooShort') : null}
       />
       <TextField
-        label="New password again"
+        label={t('password.again')}
         type="password"
         name="confirm-password"
         autoComplete="new-password"
         required
         value={again}
         onChange={(e) => setAgain(e.target.value)}
-        error={again.length > 0 && again !== password ? 'The passwords don’t match.' : null}
+        error={again.length > 0 && again !== password ? t('password.mismatch') : null}
       />
       <ActionError error={action.error} />
       {action.error?.code === 'link_invalid' ? (
         <p className={s.fine}>
-          <a href="/reset">Get a new link</a>
+          <a href="/reset">{t('pub.reset.newLink')}</a>
         </p>
       ) : null}
       <Button type="submit" variant="primary" disabled={action.busy || password.length < 12 || password !== again}>
-        {action.busy ? 'Saving…' : 'Change password →'}
+        {action.busy ? t('common.saving') : t('pub.reset.change')}
       </Button>
     </form>
   );

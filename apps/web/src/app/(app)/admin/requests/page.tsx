@@ -8,7 +8,8 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Segmented, TextArea } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { humanize, plural } from '@/lib/format';
+import { humanize } from '@/lib/format';
+import { t, tPlural } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { formatDateTime } from '@/lib/time';
 import { useAction, useApi, type ApiResource } from '@/lib/useApi';
@@ -16,11 +17,28 @@ import { NoAccess } from '../../NoAccess';
 
 type Filter = 'pending' | 'all';
 
-const ERASURE_STATUS: Record<ErasureRequestDTO['status'], string> = { pending: 'Pending', approved: 'Erasing', declined: 'Declined', completed: 'Erased' };
+/** What an erasure removes, by table (apps/api lifecycle/person.ts); anything newer falls back to its name. */
+const ERASED_TABLES = [
+  'activity_buckets',
+  'app_usage',
+  'data_gaps',
+  'idle_decisions',
+  'screenshots',
+  'expenses',
+  'notifications',
+  'notification_preferences',
+  'auth_tokens',
+  'mfa_recovery_codes',
+  'enrollment_codes',
+  'user_sessions',
+  'data_exports',
+] as const;
+type ErasedTable = (typeof ERASED_TABLES)[number];
+const tableLabel = (k: string) => ((ERASED_TABLES as readonly string[]).includes(k) ? t(`adm.req.tbl.${k as ErasedTable}`) : humanize(k).toLowerCase());
 const counts = (r: Record<string, number>) =>
   Object.entries(r)
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => `${n} ${humanize(k).toLowerCase()}`)
+    .map(([k, n]) => `${n} ${tableLabel(k)}`)
     .join(', ');
 
 /** G18: an employee asks for their data to be erased; another admin decides. */
@@ -44,22 +62,25 @@ function ErasureRequests({ res, tz, myId }: { res: ApiResource<ErasureRequestDTO
   };
   const waiting = (res.data ?? []).filter((r) => r.status === 'pending').length;
   return (
-    <Card title={waiting ? `${plural(waiting, 'erasure request')} waiting` : 'Erasure requests'} subtitle="People asking for everything Track measured about them to be erased">
-      <Resource {...res} label="Loading erasure requests">
+    <Card
+      title={waiting ? tPlural(waiting, 'adm.req.erWaiting.one', 'adm.req.erWaiting.other') : t('adm.req.erTitle')}
+      subtitle={t('adm.req.erSub')}
+    >
+      <Resource {...res} label={t('adm.req.erLoading')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No erasure requests" />
+            <Empty title={t('adm.req.erNone')} />
           ) : (
-            <TableBox label="Erasure requests">
+            <TableBox label={t('adm.req.erTitle')}>
               <table className={tableClass} style={{ minWidth: 760 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Requested</th>
-                    <th scope="col">Person</th>
-                    <th scope="col">Reason</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('adm.req.requested')}</th>
+                    <th scope="col">{t('adm.common.person')}</th>
+                    <th scope="col">{t('adm.req.reason')}</th>
+                    <th scope="col">{t('adm.req.status')}</th>
                     <th scope="col">
-                      <span className="visually-hidden">Actions</span>
+                      <span className="visually-hidden">{t('adm.common.actions')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -72,30 +93,30 @@ function ErasureRequests({ res, tz, myId }: { res: ApiResource<ErasureRequestDTO
                       <td style={{ fontWeight: 600 }}>{r.user_name}</td>
                       <td className="small secondary">
                         {r.reason ?? '—'}
-                        {r.status === 'declined' && r.decline_reason ? <div>Declined: {r.decline_reason}</div> : null}
+                        {r.status === 'declined' && r.decline_reason ? <div>{t('adm.req.declinedColon', { reason: r.decline_reason })}</div> : null}
                         {r.result ? (
                           <div>
-                            Erased {counts(r.result.deleted) || 'nothing measured'}
-                            {counts(r.result.kept_for_legal_hold) ? ` · kept for a legal hold: ${counts(r.result.kept_for_legal_hold)}` : ''}
+                            {t('adm.req.erasedList', { list: counts(r.result.deleted) || t('adm.req.nothingMeasured') })}
+                            {counts(r.result.kept_for_legal_hold) ? t('adm.req.keptHold', { list: counts(r.result.kept_for_legal_hold) }) : ''}
                           </div>
                         ) : null}
                       </td>
                       <td>
-                        <Badge tone={r.status === 'pending' ? 'outline' : r.status === 'declined' ? 'warn' : 'solid'}>{ERASURE_STATUS[r.status]}</Badge>
+                        <Badge tone={r.status === 'pending' ? 'outline' : r.status === 'declined' ? 'warn' : 'solid'}>{t(`adm.req.er.${r.status}`)}</Badge>
                         {r.decided_by_name ? <span className="small muted"> · {r.decided_by_name}</span> : null}
                       </td>
                       <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {r.status === 'pending' && r.user_id !== myId ? (
                           <span style={{ display: 'inline-flex', gap: 8 }}>
                             <Button size="sm" variant="quiet" onClick={() => setDeciding({ req: r, approve: false })}>
-                              Decline
+                              {t('adm.req.decline')}
                             </Button>
                             <Button size="sm" variant="primary" onClick={() => setDeciding({ req: r, approve: true })}>
-                              Approve
+                              {t('adm.req.approve')}
                             </Button>
                           </span>
                         ) : r.status === 'pending' ? (
-                          <span className="small muted">Another admin decides</span>
+                          <span className="small muted">{t('adm.req.anotherAdmin')}</span>
                         ) : null}
                       </td>
                     </tr>
@@ -110,22 +131,18 @@ function ErasureRequests({ res, tz, myId }: { res: ApiResource<ErasureRequestDTO
         open={deciding !== null}
         onClose={close}
         size="sm"
-        title={deciding?.approve ? `Erase ${deciding.req.user_name}'s data?` : 'Decline this request?'}
-        description={
-          deciding?.approve
-            ? 'Their account is closed now. Activity, app usage and screenshots are deleted, except what a legal hold covers. Hours, timesheets and pay stay under "Erased person". This can\'t be undone.'
-            : `${deciding?.req.user_name ?? 'They'} will see your reason.`
-        }
+        title={deciding?.approve ? t('adm.req.eraseTitle', { name: deciding.req.user_name }) : t('adm.req.declineTitle')}
+        description={deciding?.approve ? t('adm.req.eraseBody') : t('adm.req.seeReason', { name: deciding?.req.user_name ?? t('adm.req.they') })}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={decide} disabled={action.busy || (!deciding?.approve && reason.trim().length < 3)}>
-              {action.busy ? 'Saving…' : deciding?.approve ? 'Approve and erase' : 'Decline request'}
+              {action.busy ? t('common.saving') : deciding?.approve ? t('adm.req.approveErase') : t('adm.req.declineRequest')}
             </Button>
           </>
         }
       >
-        {deciding && !deciding.approve ? <TextArea label="Reason" required rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} /> : null}
+        {deciding && !deciding.approve ? <TextArea label={t('adm.req.reason')} required rows={3} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} /> : null}
         <ActionError error={action.error} />
       </Dialog>
     </Card>
@@ -139,7 +156,7 @@ export default function DeletionRequestsPage() {
   const [filter, setFilter] = useState<Filter>('pending');
   const [deciding, setDeciding] = useState<{ req: DeletionRequestDTO; approve: boolean } | null>(null);
   const action = useAction();
-  if (!access.isAdmin) return <NoAccess what="Data requests are reviewed by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('adm.req.noAccess')} />;
 
   const pendingCount = (requests.data ?? []).filter((r) => r.status === 'pending').length;
 
@@ -156,49 +173,46 @@ export default function DeletionRequestsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Employee requests"
-        title="Data requests"
-        description="Employees asking to erase their data, or to delete one of their screenshots. Reviewers never see the data — only who asked, when and why."
+        eyebrow={t('adm.req.eyebrow')}
+        title={t('adm.req.title')}
+        description={t('adm.req.description')}
       />
       <ErasureRequests res={erasures} tz={tz} myId={me.user.id} />
-      <Banner tag="NOTE">
-        Under self-service policy, requests without a legal hold are approved automatically and only appear here for the record. Approving
-        deletes the image; the audit entry keeps the screenshot id and outcome.
-      </Banner>
+      <Banner tag={t('adm.common.noteTag')}>{t('adm.req.banner')}</Banner>
       <Card
-        title={pendingCount ? `${plural(pendingCount, 'screenshot deletion')} waiting` : 'Screenshot deletions'}
+        title={pendingCount ? tPlural(pendingCount, 'adm.req.delWaiting.one', 'adm.req.delWaiting.other') : t('adm.req.delTitle')}
         actions={
           <Segmented<Filter>
-            legend="Show"
+            legend={t('adm.req.show')}
             name="req-filter"
             value={filter}
             onChange={setFilter}
             options={[
-              { value: 'pending', label: 'Pending' },
-              { value: 'all', label: 'All' },
+              { value: 'pending', label: t('adm.req.filterPending') },
+              { value: 'all', label: t('adm.req.filterAll') },
             ]}
           />
         }
       >
-        <Resource {...requests} label="Loading requests">
+        <Resource {...requests} label={t('adm.req.loading')}>
           {(list) => {
             const rows = list
               .filter((r) => filter === 'all' || r.status === 'pending')
               .sort((a, b) => (filter === 'pending' ? a.created_at.localeCompare(b.created_at) : b.created_at.localeCompare(a.created_at)));
             return rows.length === 0 ? (
-              <Empty title={filter === 'pending' ? 'Nothing waiting for review' : 'No requests yet'} />
+              <Empty title={filter === 'pending' ? t('adm.req.nothingWaiting') : t('adm.req.noRequests')} />
             ) : (
-              <TableBox label="Deletion requests">
+              <TableBox label={t('adm.req.delTable')}>
                 <table className={tableClass} style={{ minWidth: 760 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Requested</th>
-                      <th scope="col">Person</th>
-                      <th scope="col">Screenshot</th>
-                      <th scope="col">Reason</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('adm.req.requested')}</th>
+                      <th scope="col">{t('adm.common.person')}</th>
+                      <th scope="col">{t('adm.req.screenshot')}</th>
+                      <th scope="col">{t('adm.req.reason')}</th>
+                      <th scope="col">{t('adm.req.status')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -214,16 +228,16 @@ export default function DeletionRequestsPage() {
                         </td>
                         <td className="small secondary">{r.reason}</td>
                         <td>
-                          <Badge tone={r.status === 'pending' ? 'outline' : 'solid'}>{r.status}</Badge>
+                          <Badge tone={r.status === 'pending' ? 'outline' : 'solid'}>{t(`adm.req.del.${r.status}`)}</Badge>
                         </td>
                         <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                           {r.status === 'pending' ? (
                             <span style={{ display: 'inline-flex', gap: 8 }}>
                               <Button size="sm" variant="quiet" onClick={() => setDeciding({ req: r, approve: false })}>
-                                Reject
+                                {t('adm.req.reject')}
                               </Button>
                               <Button size="sm" variant="primary" onClick={() => setDeciding({ req: r, approve: true })}>
-                                Approve
+                                {t('adm.req.approve')}
                               </Button>
                             </span>
                           ) : null}
@@ -244,17 +258,17 @@ export default function DeletionRequestsPage() {
           action.reset();
         }}
         size="sm"
-        title={deciding?.approve ? 'Approve and delete the screenshot?' : 'Reject this request?'}
+        title={deciding?.approve ? t('adm.req.approveDeleteTitle') : t('adm.req.rejectTitle')}
         description={
           deciding?.approve
-            ? `The image is deleted permanently. ${deciding.req.requester_name} is told it was deleted.`
-            : `The screenshot stays until its retention date. ${deciding?.req.requester_name ?? 'The person'} is told the request was declined.`
+            ? t('adm.req.approveDeleteBody', { name: deciding.req.requester_name })
+            : t('adm.req.rejectBody', { name: deciding?.req.requester_name ?? t('adm.req.thePerson') })
         }
         footer={
           <>
-            <Button onClick={() => setDeciding(null)}>Cancel</Button>
+            <Button onClick={() => setDeciding(null)}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={decide} disabled={action.busy}>
-              {action.busy ? 'Saving…' : deciding?.approve ? 'Approve and delete' : 'Reject request'}
+              {action.busy ? t('common.saving') : deciding?.approve ? t('adm.req.approveDelete') : t('adm.req.rejectRequest')}
             </Button>
           </>
         }

@@ -8,11 +8,13 @@ import { Empty, Resource } from '@/components/ui/DataState';
 import { Badge, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { Tiles } from '@/components/workspace/Tiles';
 import { rd } from '@/lib/api';
-import { formatDuration, formatMoney, plural } from '@/lib/format';
+import { formatDuration, formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { formatDayMonth, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
-import { INVOICE_STATE_LABEL, invoiceState, totalsByCurrency } from '@/lib/workspaces';
+import { invoiceStateLabel } from '@/lib/money';
+import { invoiceState, totalsByCurrency } from '@/lib/workspaces';
+import { t, tPlural } from '@/lib/i18n';
 import { MoneyGate } from '../admin/MoneyGate';
 
 const moneyList = (rows: readonly { currency: string; total_cents: number }[]) =>
@@ -20,21 +22,21 @@ const moneyList = (rows: readonly { currency: string; total_cents: number }[]) =
 
 function OpenInvoices({ o, today }: { o: MoneyOverview; today: string }) {
   return (
-    <Card title="Invoices to finish" subtitle="Drafts to issue and issued invoices not yet paid, oldest first" actions={<Link href="/admin/invoices">All invoices →</Link>}>
+    <Card title={t('money.home.toFinish')} subtitle={t('money.home.toFinishSub')} actions={<Link href="/admin/invoices">{t('money.home.allInvoices')}</Link>}>
       {o.open_invoices.length === 0 ? (
-        <Empty title="Nothing outstanding">Every issued invoice is marked paid.</Empty>
+        <Empty title={t('money.home.nothingOutstanding')}>{t('money.home.allPaid')}</Empty>
       ) : (
-        <TableBox label="Open invoices">
+        <TableBox label={t('money.home.openInvoices')}>
           <table className={tableClass}>
             <thead>
               <tr>
-                <th scope="col">Invoice</th>
-                <th scope="col">Client</th>
-                <th scope="col">Period</th>
-                <th scope="col">Due</th>
-                <th scope="col">State</th>
+                <th scope="col">{t('money.col.invoice')}</th>
+                <th scope="col">{t('money.col.client')}</th>
+                <th scope="col">{t('money.col.period')}</th>
+                <th scope="col">{t('money.col.due')}</th>
+                <th scope="col">{t('money.col.state')}</th>
                 <th scope="col" className={numClass}>
-                  Total
+                  {t('money.col.total')}
                 </th>
               </tr>
             </thead>
@@ -44,7 +46,7 @@ function OpenInvoices({ o, today }: { o: MoneyOverview; today: string }) {
                 return (
                   <tr key={i.id}>
                     <th scope="row">
-                      <Link href={`/admin/invoices/${i.id}`}>{i.number ?? 'Draft'}</Link>
+                      <Link href={`/admin/invoices/${i.id}`}>{i.number ?? t('money.draft')}</Link>
                     </th>
                     <td>{i.client_name}</td>
                     <td className="small">
@@ -52,8 +54,8 @@ function OpenInvoices({ o, today }: { o: MoneyOverview; today: string }) {
                     </td>
                     <td className="small">{i.due_date ? formatDayMonth(i.due_date) : '—'}</td>
                     <td>
-                      <Badge tone={state === 'overdue' ? 'warn' : 'outline'}>{INVOICE_STATE_LABEL[state]}</Badge>
-                      {i.sent_at ? <span className="small muted"> Sent</span> : null}
+                      <Badge tone={state === 'overdue' ? 'warn' : 'outline'}>{invoiceStateLabel(state)}</Badge>
+                      {i.sent_at ? <span className="small muted">{t('money.sent')}</span> : null}
                     </td>
                     <td className={numClass}>{formatMoney(i.total_cents, i.currency)}</td>
                   </tr>
@@ -69,21 +71,21 @@ function OpenInvoices({ o, today }: { o: MoneyOverview; today: string }) {
 
 function Unbilled({ o }: { o: MoneyOverview }) {
   return (
-    <Card title="Not yet invoiced" subtitle="Recorded time on each client's projects since its last issued invoice (up to 90 days back)">
+    <Card title={t('money.home.notInvoiced')} subtitle={t('money.home.notInvoicedSub')}>
       {o.unbilled.length === 0 ? (
-        <Empty title="Everything recorded has been invoiced" />
+        <Empty title={t('money.home.allInvoiced')} />
       ) : (
-        <TableBox label="Time not yet invoiced">
+        <TableBox label={t('money.home.notInvoicedTable')}>
           <table className={tableClass}>
             <thead>
               <tr>
-                <th scope="col">Client</th>
-                <th scope="col">Since</th>
+                <th scope="col">{t('money.col.client')}</th>
+                <th scope="col">{t('money.col.since')}</th>
                 <th scope="col" className={numClass}>
-                  Recorded time
+                  {t('money.col.recorded')}
                 </th>
                 <th scope="col">
-                  <span className="visually-hidden">Action</span>
+                  <span className="visually-hidden">{t('money.col.action')}</span>
                 </th>
               </tr>
             </thead>
@@ -94,7 +96,7 @@ function Unbilled({ o }: { o: MoneyOverview }) {
                   <td className="small">{formatDayMonth(u.since)}</td>
                   <td className={numClass}>{formatDuration(u.seconds)}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <Link href={`/admin/invoices?client=${u.client_id}&from=${u.since}`}>Draft an invoice →</Link>
+                    <Link href={`/admin/invoices?client=${u.client_id}&from=${u.since}`}>{t('money.home.draftInvoice')}</Link>
                   </td>
                 </tr>
               ))}
@@ -109,7 +111,7 @@ function Unbilled({ o }: { o: MoneyOverview }) {
 function Budgets({ o }: { o: MoneyOverview }) {
   if (o.budgets.length === 0) return null;
   return (
-    <Card title="Budgets near or over" subtitle="Projects at 80% of their budget or more" actions={<Link href="/admin/rates">Rates and budgets →</Link>}>
+    <Card title={t('money.home.budgets')} subtitle={t('money.home.budgetsSub')} actions={<Link href="/admin/rates">{t('money.home.ratesLink')}</Link>}>
       {o.budgets.map((b) => (
         <div key={b.project_id}>
           <strong>{b.project_name}</strong>
@@ -128,37 +130,37 @@ function PeriodClose() {
   return (
     <>
       <PageHeader
-        eyebrow="Finance · Home"
-        title="Period close"
-        description="This pay period's hours, payroll, invoices to finish and time not yet billed. Amounts are never added across currencies."
+        eyebrow={t('money.home.eyebrow')}
+        title={t('money.home.title')}
+        description={t('money.home.description')}
       />
-      <Resource {...overview} label="Loading the period">
+      <Resource {...overview} label={t('money.home.loading')}>
         {(o) => {
           const unpaid = o.open_invoices.filter((i) => i.status === 'issued');
           const overdue = unpaid.filter((i) => invoiceState(i, today) === 'overdue');
           const drafts = o.open_invoices.filter((i) => i.status === 'draft');
-          const t = o.timesheets;
+          const ts = o.timesheets;
           return (
             <>
               <Tiles
-                label={`Pay period ${formatDayMonth(o.period.from)} – ${formatDayMonth(o.period.to)}`}
+                label={t('money.home.payPeriod', { from: formatDayMonth(o.period.from), to: formatDayMonth(o.period.to) })}
                 tiles={[
-                  t
+                  ts
                     ? {
-                        label: 'Approved this month',
-                        value: formatDuration(t.approved_seconds),
-                        sub: `${plural(t.approved, 'week')} approved · ${t.submitted} waiting · ${t.sent_back} sent back`,
-                        alert: t.submitted + t.sent_back > 0,
+                        label: t('money.home.approved'),
+                        value: formatDuration(ts.approved_seconds),
+                        sub: tPlural(ts.approved, 'money.home.approvedSub.one', 'money.home.approvedSub.other', { waiting: ts.submitted, back: ts.sent_back }),
+                        alert: ts.submitted + ts.sent_back > 0,
                       }
-                    : { label: 'Approved this month', value: '—', sub: 'Timesheets are part of Standard and Pro' },
+                    : { label: t('money.home.approved'), value: '—', sub: t('money.home.timesheetsPlan') },
                   {
-                    label: 'Unpaid invoices',
+                    label: t('money.home.unpaid'),
                     value: unpaid.length,
-                    sub: overdue.length ? `${overdue.length} overdue · ${moneyList(totalsByCurrency(unpaid))}` : moneyList(totalsByCurrency(unpaid)),
+                    sub: overdue.length ? t('money.home.overdue', { n: overdue.length, amounts: moneyList(totalsByCurrency(unpaid)) }) : moneyList(totalsByCurrency(unpaid)),
                     alert: overdue.length > 0,
                   },
-                  { label: 'Drafts to issue', value: drafts.length, sub: drafts.length ? moneyList(totalsByCurrency(drafts)) : 'None' },
-                  { label: 'Paid this month', value: o.paid_this_period.count, sub: moneyList(o.paid_this_period.by_currency) },
+                  { label: t('money.home.drafts'), value: drafts.length, sub: drafts.length ? moneyList(totalsByCurrency(drafts)) : t('money.home.none') },
+                  { label: t('money.home.paid'), value: o.paid_this_period.count, sub: moneyList(o.paid_this_period.by_currency) },
                 ]}
               />
               <OpenInvoices o={o} today={today} />
@@ -175,7 +177,7 @@ function PeriodClose() {
 
 export default function MoneyHome() {
   return (
-    <MoneyGate title="Period close">
+    <MoneyGate title={t('money.home.title')}>
       <PeriodClose />
     </MoneyGate>
   );

@@ -11,20 +11,22 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Checkbox, Segmented, SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridClass, tableClass } from '@/components/ui/Layout';
 import { rd, type ApiError } from '@/lib/api';
-import { byName, plural } from '@/lib/format';
+import { byName } from '@/lib/format';
+import { t, tPlural, type MessageKey } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { timeZoneOptions } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from './users.module.css';
 
-const ROLE_LABEL: Record<OrgRole, string> = {
-  employee: 'Employee',
-  org_admin: 'Org admin',
-  auditor: 'Auditor',
-  super_admin: 'Super admin',
-  finance: 'Finance',
+const ROLE_KEY: Record<OrgRole, MessageKey> = {
+  employee: 'role.employee',
+  org_admin: 'role.orgAdmin',
+  auditor: 'role.auditor',
+  super_admin: 'role.superAdmin',
+  finance: 'role.finance',
 };
+const roleLabel = (r: OrgRole) => t(ROLE_KEY[r]);
 
 function SeatError({ error }: { error: ApiError | null }) {
   if (!error) return null;
@@ -33,12 +35,10 @@ function SeatError({ error }: { error: ApiError | null }) {
       <Banner
         tone="warn"
         role="alert"
-        title={error.code === 'seat_limit_reached' ? 'No seat available' : 'Your plan needs an upgrade'}
-        actions={<Link href="/admin/billing">Open billing →</Link>}
+        title={error.code === 'seat_limit_reached' ? t('mgr.users.noSeat') : t('mgr.users.upgrade')}
+        actions={<Link href="/admin/billing">{t('licence.openBilling')}</Link>}
       >
-        {error.code === 'seat_limit_reached'
-          ? 'Every licensed seat and the overage allowance are in use. Add seats, or turn tracking off for someone who no longer needs it.'
-          : 'The Free plan covers up to 2 people who track time. Move to Standard or Pro to add more.'}
+        {error.code === 'seat_limit_reached' ? t('mgr.users.noSeatBody') : t('mgr.users.upgradeBody')}
       </Banner>
     );
   }
@@ -83,13 +83,13 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
     <Dialog
       open={open}
       onClose={close}
-      title={created ? 'Invite sent' : 'Invite a person'}
-      eyebrow="Admin · People"
-      description={created ? undefined : 'They get an email to choose their own password. People who track time use a billable seat; viewers are free.'}
+      title={created ? t('mgr.users.inviteSent') : t('mgr.users.invite')}
+      eyebrow={t('mgr.users.eyebrow')}
+      description={created ? undefined : t('mgr.users.inviteDesc')}
       footer={
         created ? (
           <Button variant="primary" onClick={close}>
-            Done
+            {t('security.done')}
           </Button>
         ) : undefined
       }
@@ -97,26 +97,25 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
       {created ? (
         <>
           <p>
-            We emailed <strong>{created.display_name}</strong> at {created.email}. The link works once, for 7 days; they choose their own
-            password, so nobody else ever knows it.
+            {t('mgr.users.emailedPre')}
+            <strong>{created.display_name}</strong>
+            {t('mgr.users.emailedPost', { email: created.email })}
           </p>
-          <p className="secondary small">
-            Didn’t arrive? Use “Resend invite” on their row. Until they join they can’t sign in, and they don’t use a seat unless tracking is on.
-          </p>
+          <p className="secondary small">{t('mgr.users.didntArrive')}</p>
         </>
       ) : (
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }} noValidate>
           <div className={formGridClass}>
-            <TextField label="Name" required value={form.display_name} error={errors.display_name} onChange={(e) => set({ display_name: e.target.value })} />
-            <TextField label="Work email" type="email" required value={form.email} error={errors.email} onChange={(e) => set({ email: e.target.value })} />
-            <SelectField label="Role" value={form.org_role} onChange={(e) => set({ org_role: e.target.value as OrgRole })}>
+            <TextField label={t('profile.name')} required value={form.display_name} error={errors.display_name} onChange={(e) => set({ display_name: e.target.value })} />
+            <TextField label={t('login.email')} type="email" required value={form.email} error={errors.email} onChange={(e) => set({ email: e.target.value })} />
+            <SelectField label={t('mgr.users.role')} value={form.org_role} onChange={(e) => set({ org_role: e.target.value as OrgRole })}>
               {ORG_ROLES.map((r) => (
                 <option key={r} value={r}>
-                  {ROLE_LABEL[r]}
+                  {roleLabel(r)}
                 </option>
               ))}
             </SelectField>
-            <SelectField label="Time zone" value={form.timezone} onChange={(e) => set({ timezone: e.target.value })}>
+            <SelectField label={t('date.timeZone')} value={form.timezone} onChange={(e) => set({ timezone: e.target.value })}>
               {zones.map((z) => (
                 <option key={z} value={z}>
                   {z}
@@ -125,22 +124,22 @@ function CreateUserDialog({ open, onClose, onCreated, defaultTz }: { open: boole
             </SelectField>
           </div>
           <Checkbox
-            label="Tracks their own time"
-            hint="Lets them start work sessions. This uses one billable seat."
+            label={t('mgr.users.tracksOwn')}
+            hint={t('mgr.users.tracksOwnHint')}
             checked={form.tracking_enabled}
             onChange={(e) => set({ tracking_enabled: e.target.checked })}
           />
           {form.org_role === 'finance' ? (
-            <p className="small secondary">Finance runs rates, invoices, budgets and payroll. They never see activity, apps or screenshots.</p>
+            <p className="small secondary">{t('mgr.users.financeNote')}</p>
           ) : null}
           {form.org_role === 'org_admin' || form.org_role === 'super_admin' || form.org_role === 'finance' ? (
-            <p className="small secondary">They must set up two-factor sign-in the first time they sign in.</p>
+            <p className="small secondary">{t('mgr.users.mfaNote')}</p>
           ) : null}
           <SeatError error={action.error} />
           <div className={formActionsClass}>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button type="submit" variant="primary" disabled={action.busy}>
-              {action.busy ? 'Sending…' : 'Send invite'}
+              {action.busy ? t('mgr.ap.sending') : t('mgr.users.sendInvite')}
             </Button>
           </div>
         </form>
@@ -166,7 +165,7 @@ export default function AdminUsersPage() {
   const [search, setSearch] = useState('');
   const [show, setShow] = useState<'active' | 'invited' | 'deactivated' | 'all'>('active');
 
-  if (!access.isAdmin) return <NoAccess what="People are managed by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('mgr.users.noAccess')} />;
 
   const replace = (u: UserDTO) => users.mutate((prev) => prev?.map((x) => (x.id === u.id ? u : x)));
 
@@ -198,7 +197,7 @@ export default function AdminUsersPage() {
     if (r) {
       replace(r);
       sub.reload();
-      setRowNote(`${u.display_name} is active again. Add them back to their teams, and they enrol their computer again.`);
+      setRowNote(t('mgr.users.reactivated', { name: u.display_name }));
     }
   };
 
@@ -208,7 +207,7 @@ export default function AdminUsersPage() {
     const ok = await rowAction.run(() => rd.admin.resendInvite(u.id));
     setBusyId(null);
     if (ok) {
-      setRowNote(`A new invite went to ${u.email}; the earlier link no longer works.`);
+      setRowNote(t('mgr.users.resent', { email: u.email }));
       replace({ ...u, invited_at: new Date().toISOString() });
     }
   };
@@ -218,7 +217,7 @@ export default function AdminUsersPage() {
     const ok = await rowAction.run(() => rd.admin.resetMfa(u.id));
     setResettingMfa(null);
     if (ok) {
-      setRowNote(`Two-factor sign-in was reset for ${u.display_name}. They were signed out and set it up again at next sign-in.`);
+      setRowNote(t('mgr.users.mfaReset', { name: u.display_name }));
       replace({ ...u, mfa_enabled: false });
     }
   };
@@ -228,7 +227,7 @@ export default function AdminUsersPage() {
   const needle = search.trim().toLowerCase();
   const matches = (u: UserDTO) =>
     (show === 'all' || stateOf(u) === show) &&
-    (!needle || u.display_name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle) || u.teams.some((t) => t.name.toLowerCase().includes(needle)));
+    (!needle || u.display_name.toLowerCase().includes(needle) || u.email.toLowerCase().includes(needle) || u.teams.some((tm) => tm.name.toLowerCase().includes(needle)));
   const countOf = (k: 'active' | 'invited' | 'deactivated') => list.filter((u) => stateOf(u) === k).length;
   const active = list.filter((u) => u.status === 'active');
   const tracking = active.filter((u) => u.tracking_enabled).length;
@@ -236,71 +235,74 @@ export default function AdminUsersPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · People"
-        title="People"
+        eyebrow={t('mgr.users.eyebrow')}
+        title={t('mgr.users.title')}
         description={
           users.data
-            ? `${plural(active.length, 'active person', 'active people')} · ${tracking} tracking time (billable) · ${active.length - tracking} viewers (free)`
-            : 'Everyone in your organization.'
+            ? tPlural(active.length, 'mgr.users.summaryOne', 'mgr.users.summaryOther', { tracking, viewers: active.length - tracking })
+            : t('mgr.users.everyoneDesc')
         }
         actions={
           <>
-            <Button onClick={() => setImporting(true)}>Import CSV…</Button>
+            <Button onClick={() => setImporting(true)}>{t('mgr.users.importCsv')}</Button>
             <Button variant="primary" onClick={() => setAdding(true)}>
-              Invite a person →
+              {t('mgr.users.inviteArrow')}
             </Button>
           </>
         }
       />
       {sub.data ? (
-        <Banner tag="SEATS" actions={<Link href="/admin/billing">Billing →</Link>}>
-          <span className="mono">{sub.data.billable_seats}</span> of <span className="mono">{sub.data.seats}</span> licensed seats in use
-          {sub.data.seat_ceiling > sub.data.seats ? `, up to ${sub.data.seat_ceiling} with the overage allowance` : ''}. Turning tracking on for
-          someone uses a seat; turning it off or deactivating frees it.
+        <Banner tag={t('mgr.users.seatsTag')} actions={<Link href="/admin/billing">{t('mgr.users.billing')}</Link>}>
+          <span className="mono">{sub.data.billable_seats}</span>
+          {t('mgr.users.seatsPre')}
+          <span className="mono">{sub.data.seats}</span>
+          {t('mgr.users.seatsInUse')}
+          {sub.data.seat_ceiling > sub.data.seats ? t('mgr.users.seatsCeiling', { n: sub.data.seat_ceiling }) : ''}
+          {t('mgr.users.seatsPost')}
         </Banner>
       ) : null}
       <SeatError error={toggle.error} />
       <ActionError error={rowAction.error} />
       {rowNote ? (
-        <Banner role="status" title={rowNote} actions={<Button size="sm" variant="quiet" onClick={() => setRowNote(null)}>Dismiss</Button>} />
+        <Banner role="status" title={rowNote} actions={<Button size="sm" variant="quiet" onClick={() => setRowNote(null)}>{t('common.dismiss')}</Button>} />
       ) : null}
 
       <Card
-        title="Everyone"
+        title={t('mgr.users.everyone')}
         actions={
           <Segmented<typeof show>
-            legend="Show"
+            legend={t('mgr.users.show')}
             name="people-show"
             value={show}
             onChange={setShow}
             options={[
-              { value: 'active', label: `Active ${countOf('active')}` },
-              { value: 'invited', label: `Invited ${countOf('invited')}` },
-              { value: 'deactivated', label: `Deactivated ${countOf('deactivated')}` },
-              { value: 'all', label: 'All' },
+              { value: 'active', label: t('mgr.users.showActive', { n: countOf('active') }) },
+              { value: 'invited', label: t('mgr.users.showInvited', { n: countOf('invited') }) },
+              { value: 'deactivated', label: t('mgr.users.showDeactivated', { n: countOf('deactivated') }) },
+              { value: 'all', label: t('mgr.tab.all') },
             ]}
           />
         }
       >
-        <TextField label="Search" placeholder="Name, email or team" value={search} onChange={(e) => setSearch(e.target.value)} type="search" />
-        <Resource {...users} label="Loading people">
+        <TextField label={t('mgr.users.search')} placeholder={t('mgr.users.searchPh')} value={search} onChange={(e) => setSearch(e.target.value)} type="search" />
+        <Resource {...users} label={t('mgr.users.loading')}>
           {(all) => {
             const rows = all.filter(matches);
             return rows.length === 0 ? (
-              <Empty title={all.length === 0 ? 'No people yet' : 'Nobody matches'} />
+              <Empty title={all.length === 0 ? t('mgr.users.noPeople') : t('mgr.users.noMatch')} />
             ) : (
-              <TableBox label="People">
+              <TableBox label={t('mgr.users.title')}>
                 <table className={tableClass} style={{ minWidth: 860 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Person</th>
-                      <th scope="col">Role</th>
-                      <th scope="col">Teams</th>
-                      <th scope="col">Tracks time</th>
-                      <th scope="col">Two-factor</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('mgr.users.colPerson')}</th>
+                      <th scope="col">{t('mgr.users.role')}</th>
+                      <th scope="col">{t('mgr.users.colTeams')}</th>
+                      <th scope="col">{t('mgr.users.colTracks')}</th>
+                      <th scope="col">{t('mgr.users.colMfa')}</th>
+                      <th scope="col">{t('mgr.users.colStatus')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('mgr.users.colActions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -315,57 +317,57 @@ export default function AdminUsersPage() {
                               <span className="small muted">{u.email}</span>
                             </span>
                           </td>
-                          <td>{ROLE_LABEL[u.org_role]}</td>
+                          <td>{roleLabel(u.org_role)}</td>
                           <td className="small">
-                            {u.teams.length ? u.teams.map((t) => `${t.name}${t.role === 'manager' ? ' (manager)' : ''}`).join(', ') : '—'}
+                            {u.teams.length ? u.teams.map((tm) => `${tm.name}${tm.role === 'manager' ? t('mgr.users.asManager') : ''}`).join(', ') : '—'}
                           </td>
                           <td>
                             <Button
                               size="sm"
                               variant="quiet"
                               aria-pressed={u.tracking_enabled}
-                              aria-label={`Tracks time: ${u.tracking_enabled ? 'on' : 'off'} for ${u.display_name}`}
+                              aria-label={t('mgr.users.tracksAria', { state: u.tracking_enabled ? t('mgr.users.on') : t('mgr.users.off'), name: u.display_name })}
                               disabled={inactive || busyId === u.id}
                               onClick={() => setTracking(u, !u.tracking_enabled)}
-                              title={u.tracking_enabled ? 'Turn off: frees a seat' : 'Turn on: uses a billable seat'}
+                              title={u.tracking_enabled ? t('mgr.users.turnOff') : t('mgr.users.turnOn')}
                             >
-                              {busyId === u.id ? 'Saving…' : u.tracking_enabled ? 'On · uses a seat' : 'Off'}
+                              {busyId === u.id ? t('common.saving') : u.tracking_enabled ? t('mgr.users.onSeat') : t('mgr.users.offBtn')}
                             </Button>
                           </td>
-                          <td>{u.mfa_enabled ? <Badge>On</Badge> : <span className="muted">Off</span>}</td>
+                          <td>{u.mfa_enabled ? <Badge>{t('mgr.users.mfaOn')}</Badge> : <span className="muted">{t('mgr.users.mfaOff')}</span>}</td>
                           <td>
                             {inactive ? (
-                              <Badge>Deactivated</Badge>
+                              <Badge>{t('mgr.users.badgeDeactivated')}</Badge>
                             ) : u.invite_pending ? (
-                              <Badge tone="warn">Invited</Badge>
+                              <Badge tone="warn">{t('mgr.users.badgeInvited')}</Badge>
                             ) : (
-                              <Badge tone="solid">Active</Badge>
+                              <Badge tone="solid">{t('mgr.users.badgeActive')}</Badge>
                             )}
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             <span className={s.rowActions}>
                               {inactive ? (
                                 <Button size="sm" variant="quiet" disabled={busyId === u.id} onClick={() => void reactivate(u)}>
-                                  {busyId === u.id ? 'Reactivating…' : 'Reactivate'}
+                                  {busyId === u.id ? t('mgr.users.reactivating') : t('mgr.users.reactivate')}
                                 </Button>
                               ) : (
-                                <Button size="sm" variant="quiet" onClick={() => setEditing(u)} aria-label={`Edit ${u.display_name}`}>
-                                  Edit
+                                <Button size="sm" variant="quiet" onClick={() => setEditing(u)} aria-label={t('mgr.users.editAria', { name: u.display_name })}>
+                                  {t('mgr.users.edit')}
                                 </Button>
                               )}
                               {!inactive && u.invite_pending ? (
                                 <Button size="sm" variant="quiet" disabled={busyId === u.id} onClick={() => void resend(u)}>
-                                  {busyId === u.id ? 'Sending…' : 'Resend invite'}
+                                  {busyId === u.id ? t('mgr.ap.sending') : t('mgr.users.resend')}
                                 </Button>
                               ) : null}
                               {!inactive && u.mfa_enabled && u.id !== me.user.id ? (
                                 <Button size="sm" variant="quiet" onClick={() => setResettingMfa(u)}>
-                                  Reset two-factor
+                                  {t('mgr.users.resetMfa')}
                                 </Button>
                               ) : null}
                               {!inactive && u.id !== me.user.id ? (
                                 <Button size="sm" variant="danger" onClick={() => setDeactivating(u)}>
-                                  {u.invite_pending ? 'Cancel invite' : 'Deactivate'}
+                                  {u.invite_pending ? t('mgr.users.cancelInvite') : t('mgr.users.deactivate')}
                                 </Button>
                               ) : null}
                             </span>
@@ -382,7 +384,7 @@ export default function AdminUsersPage() {
       </Card>
 
       {editing ? (
-        <EditUserDialog user={editing} isSelf={editing.id === me.user.id} roleLabel={ROLE_LABEL} onClose={() => setEditing(null)} onSaved={replace} />
+        <EditUserDialog user={editing} isSelf={editing.id === me.user.id} roleLabel={roleLabel} onClose={() => setEditing(null)} onSaved={replace} />
       ) : null}
       <ImportPeopleDialog
         open={importing}
@@ -409,13 +411,13 @@ export default function AdminUsersPage() {
           deact.reset();
         }}
         size="sm"
-        title={`Deactivate ${deactivating?.display_name ?? ''}?`}
-        description="They can no longer sign in, their devices stop collecting, and their seat is freed. Their records stay under retention."
+        title={t('mgr.users.deactivateTitle', { name: deactivating?.display_name ?? '' })}
+        description={t('mgr.users.deactivateDesc')}
         footer={
           <>
-            <Button onClick={() => setDeactivating(null)}>Cancel</Button>
+            <Button onClick={() => setDeactivating(null)}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={confirmDeactivate} disabled={deact.busy}>
-              {deact.busy ? 'Deactivating…' : 'Deactivate'}
+              {deact.busy ? t('mgr.users.deactivating') : t('mgr.users.deactivate')}
             </Button>
           </>
         }
@@ -426,13 +428,13 @@ export default function AdminUsersPage() {
         open={resettingMfa !== null}
         onClose={() => setResettingMfa(null)}
         size="sm"
-        title={`Reset two-factor for ${resettingMfa?.display_name ?? ''}?`}
-        description="Use this when they lost their phone and their recovery codes. They are signed out everywhere and set up two-factor again the next time they sign in. They get a security notice."
+        title={t('mgr.users.resetTitle', { name: resettingMfa?.display_name ?? '' })}
+        description={t('mgr.users.resetDesc')}
         footer={
           <>
-            <Button onClick={() => setResettingMfa(null)}>Cancel</Button>
+            <Button onClick={() => setResettingMfa(null)}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={() => void confirmResetMfa()} disabled={rowAction.busy}>
-              {rowAction.busy ? 'Resetting…' : 'Reset two-factor'}
+              {rowAction.busy ? t('mgr.users.resetting') : t('mgr.users.resetMfa')}
             </Button>
           </>
         }

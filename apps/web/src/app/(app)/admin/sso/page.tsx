@@ -11,6 +11,7 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Checkbox, Segmented, TextArea, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, PageHeader, TableBox, dlClass, formGridClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { ssoErrorText, t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { certificateWarning, samlManualReady } from '@/lib/sso';
 import { formatDateTime, formatRelative } from '@/lib/time';
@@ -36,11 +37,11 @@ function Provider({ res, settings, tz }: { res: Res; settings: SsoSettings; tz: 
   const switching = c && c.protocol !== protocol;
   return (
     <Card
-      title="1. Your identity provider"
-      subtitle="Microsoft Entra ID, Google Workspace, Okta, OneLogin, JumpCloud, AD FS or any other OpenID Connect or SAML 2.0 provider"
+      title={t('cfg.sso.providerTitle')}
+      subtitle={t('cfg.sso.providerSubtitle')}
     >
       <Segmented<SsoProtocol>
-        legend="Protocol"
+        legend={t('cfg.sso.protocol')}
         name="sso-protocol"
         value={protocol}
         onChange={(p) => {
@@ -53,7 +54,7 @@ function Provider({ res, settings, tz }: { res: Res; settings: SsoSettings; tz: 
         ]}
       />
       {switching ? (
-        <p className="small secondary">Saving replaces the {c.protocol === 'oidc' ? 'OpenID Connect' : 'SAML'} connection, and single sign-on goes back to a draft until it&apos;s tested.</p>
+        <p className="small secondary">{t('cfg.sso.switching', { protocol: c.protocol === 'oidc' ? 'OpenID Connect' : 'SAML' })}</p>
       ) : null}
       {protocol === 'oidc' ? (
         <OidcProvider key={`${c?.issuer}|${c?.client_id}`} settings={settings} busy={action.busy} save={save} />
@@ -64,7 +65,7 @@ function Provider({ res, settings, tz }: { res: Res; settings: SsoSettings; tz: 
       {c ? (
         <div>
           <Button variant="quiet" onClick={remove} disabled={action.busy}>
-            Remove connection
+            {t('cfg.sso.removeConnection')}
           </Button>
         </div>
       ) : null}
@@ -86,36 +87,36 @@ function OidcProvider({ settings, busy, save }: { settings: SsoSettings; busy: b
   return (
     <>
       <dl className={dlClass}>
-        <dt>Redirect URI</dt>
+        <dt>{t('cfg.sso.redirectUri')}</dt>
         <dd>
           <span className="mono small">{settings.redirect_uri}</span> <CopyButton text={settings.redirect_uri} />
         </dd>
-        <dt>Scopes</dt>
+        <dt>{t('cfg.sso.scopes')}</dt>
         <dd className="mono small">openid email profile</dd>
       </dl>
       <p className="small secondary">
-        Create a web application in your provider with this redirect URI, then copy its issuer, client ID and client secret here. Entra ID&apos;s
-        issuer looks like <span className="mono">https://login.microsoftonline.com/&lt;tenant-id&gt;/v2.0</span>, Google&apos;s is{' '}
-        <span className="mono">https://accounts.google.com</span>, Okta&apos;s is your Okta domain.
+        {t('cfg.sso.oidcHelpA')} <span className="mono">https://login.microsoftonline.com/&lt;tenant-id&gt;/v2.0</span>
+        {t('cfg.sso.oidcHelpB')} <span className="mono">https://accounts.google.com</span>
+        {t('cfg.sso.oidcHelpC')}
       </p>
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div className={formGridClass}>
-          <TextField label="Issuer URL" type="url" required placeholder="https://" value={f.issuer} onChange={(e) => setF({ ...f, issuer: e.target.value })} />
-          <TextField label="Client ID" required value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} />
+          <TextField label={t('cfg.sso.issuer')} type="url" required placeholder="https://" value={f.issuer} onChange={(e) => setF({ ...f, issuer: e.target.value })} />
+          <TextField label={t('cfg.sso.clientId')} required value={f.client_id} onChange={(e) => setF({ ...f, client_id: e.target.value })} />
           <TextField
-            label="Client secret"
+            label={t('cfg.sso.clientSecret')}
             type="password"
             autoComplete="off"
             required={!c}
-            placeholder={c ? 'Stored — leave blank to keep it' : ''}
+            placeholder={c ? t('cfg.sso.secretStored') : ''}
             value={f.client_secret}
             onChange={(e) => setF({ ...f, client_secret: e.target.value })}
           />
         </div>
-        {c ? <p className="small secondary">Changing these puts single sign-on back to a draft until someone tests it again.</p> : null}
+        {c ? <p className="small secondary">{t('cfg.sso.oidcDraftNote')}</p> : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button type="submit" variant="primary" disabled={busy || !dirty || !f.issuer || !f.client_id || (!c && !f.client_secret)}>
-            {busy ? 'Checking the provider…' : 'Save'}
+            {busy ? t('cfg.sso.checking') : t('common.save')}
           </Button>
         </div>
       </form>
@@ -146,65 +147,66 @@ function SamlProvider({ settings, tz, busy, save }: { settings: SsoSettings; tz:
   return (
     <>
       <dl className={dlClass}>
-        <dt>Entity ID (audience)</dt>
+        <dt>{t('cfg.sso.entityId')}</dt>
         <dd>
           <span className="mono small">{sp.entity_id}</span> <CopyButton text={sp.entity_id} />
         </dd>
-        <dt>Reply URL (ACS)</dt>
+        <dt>{t('cfg.sso.acs')}</dt>
         <dd>
           <span className="mono small">{sp.acs_url}</span> <CopyButton text={sp.acs_url} />
         </dd>
-        <dt>Metadata</dt>
+        <dt>{t('cfg.sso.metadata')}</dt>
         <dd>
           <a className="mono small" href={sp.metadata_url} target="_blank" rel="noreferrer">
             {sp.metadata_url}
           </a>
         </dd>
-        <dt>Name ID</dt>
-        <dd className="small">Email address or a persistent ID; send the address as an <span className="mono">email</span> attribute if it isn&apos;t the name ID</dd>
+        <dt>{t('cfg.sso.nameId')}</dt>
+        <dd className="small">
+          {t('cfg.sso.nameIdA')} <span className="mono">email</span> {t('cfg.sso.nameIdB')}
+        </dd>
       </dl>
       <p className="small secondary">
-        Add Track as a SAML application in your provider (most can import the metadata URL), then paste the provider&apos;s own metadata here. Track signs
-        people in from its own sign-in page; starting from the provider&apos;s app list isn&apos;t supported.
+        {t('cfg.sso.samlHelp')}
       </p>
       {c?.saml ? (
         <dl className={dlClass}>
-          <dt>Provider</dt>
+          <dt>{t('cfg.sso.provider')}</dt>
           <dd className="mono small">{c.saml.entity_id}</dd>
-          <dt>Sign-in URL</dt>
+          <dt>{t('cfg.sso.signInUrl')}</dt>
           <dd className="mono small" style={{ wordBreak: 'break-all' }}>
             {c.saml.sso_url}
           </dd>
-          <dt>{c.saml.certificates.length > 1 ? 'Certificates' : 'Certificate'}</dt>
+          <dt>{c.saml.certificates.length > 1 ? t('cfg.sso.certificates') : t('cfg.sso.certificate')}</dt>
           <dd className="small">
             {c.saml.certificates.map((x) => (
               <div key={`${x.subject}|${x.expires_at}`}>
-                {x.subject} · expires {formatDateTime(x.expires_at, tz)}
+                {t('cfg.sso.certExpires', { subject: x.subject, when: formatDateTime(x.expires_at, tz) })}
               </div>
             ))}
           </dd>
         </dl>
       ) : null}
       {warning ? (
-        <Banner tone="warn" title={warning.expired ? "The provider's certificate has expired" : "The provider's certificate expires soon"}>
-          Paste the provider&apos;s metadata again once it has a new certificate. While both are listed, sign-in keeps working.
+        <Banner tone="warn" title={warning.expired ? t('cfg.sso.certExpired') : t('cfg.sso.certSoon')}>
+          {t('cfg.sso.certBody')}
         </Banner>
       ) : null}
       <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         <Segmented<'metadata' | 'manual'>
-          legend="How to add the provider"
+          legend={t('cfg.sso.howToAdd')}
           name="saml-mode"
           value={mode}
           onChange={setMode}
           options={[
-            { value: 'metadata', label: 'Paste metadata' },
-            { value: 'manual', label: 'Enter by hand' },
+            { value: 'metadata', label: t('cfg.sso.pasteMetadata') },
+            { value: 'manual', label: t('cfg.sso.byHand') },
           ]}
         />
         {mode === 'metadata' ? (
           <TextArea
-            label="Provider metadata (XML)"
-            hint="Federation metadata from Entra ID, Okta's IdP metadata, Google's IdP metadata file"
+            label={t('cfg.sso.metadataXml')}
+            hint={t('cfg.sso.metadataHint')}
             rows={6}
             spellCheck={false}
             style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
@@ -214,11 +216,11 @@ function SamlProvider({ settings, tz, busy, save }: { settings: SsoSettings; tz:
           />
         ) : (
           <div className={formGridClass}>
-            <TextField label="Provider entity ID (issuer)" required value={f.idp_entity_id} onChange={(e) => setF({ ...f, idp_entity_id: e.target.value })} />
-            <TextField label="Sign-in URL (HTTP-Redirect)" type="url" required placeholder="https://" value={f.sso_url} onChange={(e) => setF({ ...f, sso_url: e.target.value })} />
+            <TextField label={t('cfg.sso.idpEntityId')} required value={f.idp_entity_id} onChange={(e) => setF({ ...f, idp_entity_id: e.target.value })} />
+            <TextField label={t('cfg.sso.ssoUrl')} type="url" required placeholder="https://" value={f.sso_url} onChange={(e) => setF({ ...f, sso_url: e.target.value })} />
             <TextArea
-              label="Signing certificate"
-              hint="PEM or base64; paste both while the provider rolls its key"
+              label={t('cfg.sso.signingCert')}
+              hint={t('cfg.sso.signingCertHint')}
               rows={4}
               spellCheck={false}
               style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}
@@ -228,10 +230,10 @@ function SamlProvider({ settings, tz, busy, save }: { settings: SsoSettings; tz:
             />
           </div>
         )}
-        {c ? <p className="small secondary">A new provider or sign-in URL puts single sign-on back to a draft until it&apos;s tested. A new certificate alone doesn&apos;t.</p> : null}
+        {c ? <p className="small secondary">{t('cfg.sso.samlDraftNote')}</p> : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button type="submit" variant="primary" disabled={busy || !ready}>
-            {busy ? 'Saving…' : 'Save'}
+            {busy ? t('common.saving') : t('common.save')}
           </Button>
         </div>
       </form>
@@ -256,44 +258,40 @@ function TurnOn({ res, settings, tz }: { res: Res; settings: SsoSettings; tz: st
   const on = c.status === 'active';
   return (
     <Card
-      title="2. Test and turn on"
-      actions={<Badge tone={on ? 'solid' : 'outline'}>{on ? 'On' : 'Draft'}</Badge>}
+      title={t('cfg.sso.turnOnTitle')}
+      actions={<Badge tone={on ? 'solid' : 'outline'}>{on ? t('cfg.sso.on') : t('cfg.sso.draft')}</Badge>}
     >
       <p className="small secondary">
         {c.tested_at
-          ? `${c.tested_by_name ?? 'An admin'} signed in through it ${formatRelative(c.tested_at, tz)} (${formatDateTime(c.tested_at, tz)}).`
-          : "Sign in through your provider as yourself once. Nobody else is affected until it's on."}
+          ? t('cfg.sso.tested', { name: c.tested_by_name ?? t('cfg.sso.anAdmin'), rel: formatRelative(c.tested_at, tz), when: formatDateTime(c.tested_at, tz) })
+          : t('cfg.sso.testPrompt')}
       </p>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <Button onClick={test} disabled={action.busy}>
-          Test sign-in →
+          {t('cfg.sso.test')}
         </Button>
         {on ? (
           <Button variant="quiet" onClick={() => set({ active: false })} disabled={action.busy}>
-            Turn off
+            {t('cfg.sso.turnOff')}
           </Button>
         ) : (
           <Button variant="primary" onClick={() => set({ active: true })} disabled={action.busy || !c.tested_at}>
-            Turn on
+            {t('cfg.sso.turnOn')}
           </Button>
         )}
       </div>
       {on ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <Checkbox
-            label="Require single sign-on"
-            hint="Passwords stop working for everyone except org admins, who keep password + authenticator code as a way back in if the provider breaks."
+            label={t('cfg.sso.require')}
+            hint={t('cfg.sso.requireHint')}
             checked={c.enforced}
             disabled={action.busy}
             onChange={(e) => set({ enforced: e.target.checked })}
           />
           <Checkbox
-            label="Create accounts on first sign-in"
-            hint={
-              hasVerified
-                ? 'Anyone at a verified domain who can sign in to your provider joins as an employee, with tracking off until an admin turns it on.'
-                : 'Verify one of your email domains below first.'
-            }
+            label={t('cfg.sso.jit')}
+            hint={hasVerified ? t('cfg.sso.jitHint') : t('cfg.sso.jitNeedsDomain')}
             checked={c.jit_provisioning}
             disabled={action.busy || (!hasVerified && !c.jit_provisioning)}
             onChange={(e) => set({ jit_provisioning: e.target.checked })}
@@ -324,19 +322,19 @@ function Domains({ res, settings }: { res: Res; settings: SsoSettings }) {
     if (await action.run(() => rd.admin.removeSsoDomain(id))) res.reload();
   };
   return (
-    <Card title="Email domains" subtitle="Prove you own a domain with a DNS record. Only one organization can verify a domain.">
+    <Card title={t('cfg.sso.domainsTitle')} subtitle={t('cfg.sso.domainsSubtitle')}>
       {settings.domains.length === 0 ? (
-        <Empty title="No domains yet">Add the domain in your people&apos;s work email addresses, like example.com.</Empty>
+        <Empty title={t('cfg.sso.noDomains')}>{t('cfg.sso.noDomainsBody')}</Empty>
       ) : (
-        <TableBox label="Email domains">
+        <TableBox label={t('cfg.sso.domainsTitle')}>
           <table className={tableClass} style={{ minWidth: 760 }}>
             <thead>
               <tr>
-                <th scope="col">Domain</th>
-                <th scope="col">State</th>
-                <th scope="col">TXT record</th>
+                <th scope="col">{t('cfg.sso.colDomain')}</th>
+                <th scope="col">{t('cfg.sso.colState')}</th>
+                <th scope="col">{t('cfg.sso.colTxt')}</th>
                 <th scope="col">
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t('cfg.tok.colActions')}</span>
                 </th>
               </tr>
             </thead>
@@ -344,17 +342,17 @@ function Domains({ res, settings }: { res: Res; settings: SsoSettings }) {
               {settings.domains.map((d) => (
                 <tr key={d.id}>
                   <th scope="row">{d.domain}</th>
-                  <td>{d.verified_at ? <Badge tone="solid">Verified</Badge> : <Badge>Waiting for DNS</Badge>}</td>
+                  <td>{d.verified_at ? <Badge tone="solid">{t('cfg.sso.verified')}</Badge> : <Badge>{t('cfg.sso.waitingDns')}</Badge>}</td>
                   <td className="small">
                     {d.verified_at ? (
                       '—'
                     ) : (
                       <>
                         <div>
-                          Name <span className="mono">{d.txt_name}</span>
+                          {t('cfg.sso.txtName')} <span className="mono">{d.txt_name}</span>
                         </div>
                         <div>
-                          Value <span className="mono">{d.txt_value}</span> <CopyButton text={d.txt_value} />
+                          {t('cfg.sso.txtValue')} <span className="mono">{d.txt_value}</span> <CopyButton text={d.txt_value} />
                         </div>
                       </>
                     )}
@@ -363,11 +361,11 @@ function Domains({ res, settings }: { res: Res; settings: SsoSettings }) {
                     <span style={{ display: 'inline-flex', gap: 8 }}>
                       {d.verified_at ? null : (
                         <Button size="sm" variant="primary" onClick={() => verify(d.id)} disabled={action.busy}>
-                          Verify
+                          {t('cfg.sso.verify')}
                         </Button>
                       )}
                       <Button size="sm" variant="quiet" onClick={() => remove(d.id)} disabled={action.busy}>
-                        Remove
+                        {t('cfg.brand.remove')}
                       </Button>
                     </span>
                   </td>
@@ -378,9 +376,9 @@ function Domains({ res, settings }: { res: Res; settings: SsoSettings }) {
         </TableBox>
       )}
       <form onSubmit={add} style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-        <TextField label="Add a domain" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
+        <TextField label={t('cfg.sso.addDomain')} placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} />
         <Button type="submit" disabled={action.busy || !domain.trim()}>
-          Add
+          {t('cfg.sso.add')}
         </Button>
       </form>
       <ActionError error={action.error} />
@@ -400,65 +398,64 @@ function Directory({ res, settings, tz }: { res: Res; settings: SsoSettings; tz:
     action.reset();
   };
   const create = async () => {
-    const t = await action.run(() => rd.admin.createScimToken(label.trim()));
-    if (t) {
-      setCreated(t);
-      const dto: ScimTokenDTO = { id: t.id, label: t.label, created_at: t.created_at, created_by_name: t.created_by_name, last_used_at: t.last_used_at };
+    const tok = await action.run(() => rd.admin.createScimToken(label.trim()));
+    if (tok) {
+      setCreated(tok);
+      const dto: ScimTokenDTO = { id: tok.id, label: tok.label, created_at: tok.created_at, created_by_name: tok.created_by_name, last_used_at: tok.last_used_at };
       res.mutate((prev) => prev && { ...prev, scim: { ...prev.scim, tokens: [dto, ...prev.scim.tokens] } });
     }
   };
   const revoke = async (id: string) => {
-    if (await action.run(() => rd.admin.revokeScimToken(id))) res.mutate((prev) => prev && { ...prev, scim: { ...prev.scim, tokens: prev.scim.tokens.filter((t) => t.id !== id) } });
+    if (await action.run(() => rd.admin.revokeScimToken(id))) res.mutate((prev) => prev && { ...prev, scim: { ...prev.scim, tokens: prev.scim.tokens.filter((x) => x.id !== id) } });
   };
   return (
     <Card
-      title="Directory sync (SCIM)"
-      subtitle="Your provider adds, renames and deactivates people, and keeps teams in step with its groups"
+      title={t('cfg.sso.scimTitle')}
+      subtitle={t('cfg.sso.scimSubtitle')}
       actions={
         <Button onClick={() => setCreating(true)} variant="primary">
-          New token →
+          {t('cfg.tok.new')}
         </Button>
       }
     >
       <dl className={dlClass}>
-        <dt>SCIM base URL</dt>
+        <dt>{t('cfg.sso.scimBase')}</dt>
         <dd>
           <span className="mono small">{settings.scim.base_url}</span> <CopyButton text={settings.scim.base_url} />
         </dd>
-        <dt>Authentication</dt>
-        <dd>Bearer token (create one here)</dd>
+        <dt>{t('cfg.sso.auth')}</dt>
+        <dd>{t('cfg.sso.bearer')}</dd>
       </dl>
       <p className="small secondary">
-        People from your directory join as employees, tracked while a seat is free. Removing someone in the directory deactivates them in Track — their
-        hours, timesheets and pay records stay. Groups become teams; a team&apos;s managers are still chosen in Track.
+        {t('cfg.sso.scimHelp')}
       </p>
       {settings.scim.tokens.length === 0 ? (
-        <Empty title="No tokens">Create one and paste it into your provider&apos;s provisioning settings.</Empty>
+        <Empty title={t('cfg.sso.noTokens')}>{t('cfg.sso.noTokensBody')}</Empty>
       ) : (
-        <TableBox label="Directory tokens">
+        <TableBox label={t('cfg.sso.tokensLabel')}>
           <table className={tableClass}>
             <thead>
               <tr>
-                <th scope="col">Name</th>
-                <th scope="col">Created</th>
-                <th scope="col">Last used</th>
+                <th scope="col">{t('cfg.tok.name')}</th>
+                <th scope="col">{t('cfg.hook.colCreated')}</th>
+                <th scope="col">{t('cfg.tok.colLastUsed')}</th>
                 <th scope="col">
-                  <span className="visually-hidden">Actions</span>
+                  <span className="visually-hidden">{t('cfg.tok.colActions')}</span>
                 </th>
               </tr>
             </thead>
             <tbody>
-              {settings.scim.tokens.map((t) => (
-                <tr key={t.id}>
-                  <th scope="row">{t.label}</th>
+              {settings.scim.tokens.map((tok) => (
+                <tr key={tok.id}>
+                  <th scope="row">{tok.label}</th>
                   <td className="small">
-                    {formatDateTime(t.created_at, tz)}
-                    {t.created_by_name ? ` · ${t.created_by_name}` : ''}
+                    {formatDateTime(tok.created_at, tz)}
+                    {tok.created_by_name ? ` · ${tok.created_by_name}` : ''}
                   </td>
-                  <td className="small">{t.last_used_at ? formatRelative(t.last_used_at, tz) : 'Never'}</td>
+                  <td className="small">{tok.last_used_at ? formatRelative(tok.last_used_at, tz) : t('time.never')}</td>
                   <td style={{ textAlign: 'right' }}>
-                    <Button size="sm" variant="quiet" onClick={() => revoke(t.id)} disabled={action.busy}>
-                      Revoke
+                    <Button size="sm" variant="quiet" onClick={() => revoke(tok.id)} disabled={action.busy}>
+                      {t('cfg.tok.revoke')}
                     </Button>
                   </td>
                 </tr>
@@ -471,18 +468,18 @@ function Directory({ res, settings, tz }: { res: Res; settings: SsoSettings; tz:
         open={creating}
         onClose={close}
         size="sm"
-        title={created ? 'Copy the token now' : 'New directory token'}
-        description={created ? "It won't be shown again. Paste it into your provider as the secret token." : undefined}
+        title={created ? t('cfg.sso.copyNow') : t('cfg.sso.newToken')}
+        description={created ? t('cfg.sso.copyNowBody') : undefined}
         footer={
           created ? (
             <Button variant="primary" onClick={close}>
-              Done
+              {t('cfg.hook.done')}
             </Button>
           ) : (
             <>
-              <Button onClick={close}>Cancel</Button>
+              <Button onClick={close}>{t('common.cancel')}</Button>
               <Button variant="primary" onClick={create} disabled={action.busy || !label.trim()}>
-                {action.busy ? 'Creating…' : 'Create token'}
+                {action.busy ? t('cfg.tok.creating') : t('cfg.tok.create')}
               </Button>
             </>
           )
@@ -498,7 +495,7 @@ function Directory({ res, settings, tz }: { res: Res; settings: SsoSettings; tz:
             </div>
           </div>
         ) : (
-          <TextField label="Name" placeholder="Entra ID provisioning" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <TextField label={t('cfg.tok.name')} placeholder={t('cfg.sso.tokenPlaceholder')} value={label} onChange={(e) => setLabel(e.target.value)} />
         )}
         <ActionError error={action.error} />
       </Dialog>
@@ -510,11 +507,13 @@ function TestResult() {
   const params = useSearchParams();
   const ok = params.get('test') === 'ok';
   const err = params.get('test_error') as SsoErrorCode | null;
-  if (ok) return <Banner role="status" title="Test sign-in worked">You can turn single sign-on on now.</Banner>;
+  if (ok) return <Banner role="status" title={t('cfg.sso.testOk')}>
+        {t('cfg.sso.testOkBody')}
+      </Banner>;
   if (err && SSO_ERRORS[err])
     return (
-      <Banner tone="warn" role="alert" title="Test sign-in didn't work">
-        {SSO_ERRORS[err]}
+      <Banner tone="warn" role="alert" title={t('cfg.sso.testFailed')}>
+        {ssoErrorText(t, err)}
       </Banner>
     );
   return null;
@@ -525,27 +524,27 @@ export default function SsoPage() {
   const { access, timezone: tz } = useMe();
   const allowed = access.isAdmin && access.entitlements.includes('sso');
   const settings = useApi(allowed ? 'admin:sso' : null, (signal) => rd.admin.sso(signal));
-  if (!access.isAdmin) return <NoAccess what="Single sign-on is managed by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('cfg.sso.noAccess')} />;
   if (!allowed)
     return (
       <>
-        <PageHeader eyebrow="Settings · Security" title="Single sign-on" />
-        <Banner title="Single sign-on and directory sync are part of Pro" actions={<Link href="/admin/billing">Compare plans →</Link>}>
-          Sign in through Microsoft Entra ID, Google Workspace or Okta, and let your directory add and remove people.
+        <PageHeader eyebrow={t('cfg.eyebrow.security')} title={t('nav.sso')} />
+        <Banner title={t('cfg.sso.proTitle')} actions={<Link href="/admin/billing">{t('cfg.dev.comparePlans')}</Link>}>
+          {t('cfg.sso.proBody')}
         </Banner>
       </>
     );
   return (
     <>
       <PageHeader
-        eyebrow="Settings · Security"
-        title="Single sign-on"
-        description="People sign in through your identity provider, and your directory keeps Track's people and teams up to date."
+        eyebrow={t('cfg.eyebrow.security')}
+        title={t('nav.sso')}
+        description={t('cfg.sso.description')}
       />
       <Suspense>
         <TestResult />
       </Suspense>
-      <Resource {...settings} label="Loading single sign-on">
+      <Resource {...settings} label={t('cfg.sso.loading')}>
         {(s) => (
           <>
             <Provider key={s.connection?.protocol ?? 'none'} res={settings} settings={s} tz={tz} />

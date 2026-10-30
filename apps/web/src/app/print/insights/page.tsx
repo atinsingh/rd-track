@@ -76,7 +76,7 @@ function PrintInsights() {
 export default function PrintInsightsPage() {
   return (
     <main className={s.page}>
-      <Suspense fallback={<Loading label="Loading" />}>
+      <Suspense fallback={<Loading label={t('common.loading')} />}>
         <PrintInsights />
       </Suspense>
     </main>

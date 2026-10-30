@@ -3,13 +3,16 @@
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import { ApiError, rd } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { AuthFrame } from '../../login/AuthFrame';
 import s from '../../login/login.module.css';
 
 function Verify() {
   const router = useRouter();
   const token = useSearchParams().get('token');
-  const [error, setError] = useState<string | null>(token ? null : 'This link is missing its token.');
+  const t = useT();
+  // null: no error; '' stands for the missing token, shown in the reader's language.
+  const [error, setError] = useState<string | null>(token ? null : '');
   const started = useRef(false);
 
   useEffect(() => {
@@ -19,22 +22,22 @@ function Verify() {
     rd.auth
       .verifySignup(token)
       .then(() => router.replace('/admin/billing'))
-      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : 'Something went wrong. Try the link again.'));
+      .catch((e: unknown) => setError(e instanceof ApiError ? e.message : 'failed'));
   }, [token, router]);
 
-  return error ? (
+  return error !== null ? (
     <div className={s.form} role="alert">
-      <span className="eyebrow">Track · Confirm email</span>
-      <h1 style={{ fontSize: 28 }}>That link didn&apos;t work</h1>
-      <p>{error}</p>
+      <span className="eyebrow">{t('pub.verify.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.verify.badTitle')}</h1>
+      <p>{error === '' ? t('pub.verify.missingToken') : error === 'failed' ? t('pub.verify.failed') : error}</p>
       <p className={s.fine}>
-        <a href="/signup">Sign up again</a> or <a href="/login">sign in</a>.
+        <a href="/signup">{t('pub.verify.signUpAgain')}</a> {t('pub.verify.or')} <a href="/login">{t('pub.verify.signIn')}</a>.
       </p>
     </div>
   ) : (
     <div className={s.form} role="status">
-      <span className="eyebrow">Track · Confirm email</span>
-      <h1 style={{ fontSize: 28 }}>Setting up your organization…</h1>
+      <span className="eyebrow">{t('pub.verify.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.verify.settingUp')}</h1>
     </div>
   );
 }

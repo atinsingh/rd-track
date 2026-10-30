@@ -12,78 +12,76 @@ import { Banner, Card, Meter, PageHeader } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { annualSavingPercent, invoiceCents, price, seatPriceText } from '@/lib/billing';
 import { cx } from '@/lib/cx';
-import { formatMoney, plural } from '@/lib/format';
+import { formatMoney, formatPercent } from '@/lib/format';
+import { t, tPlural, type MessageKey } from '@/lib/i18n';
+import { currentLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
-import { formatDateTime } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from './billing.module.css';
 
 /** Plan cards (commercial model §2). Privacy protections are in every plan — never an upsell. */
-const PLAN_FEATURES: Record<PlanId, { text: string; on: boolean }[]> = {
+const PLAN_FEATURES: Record<PlanId, { key: string; on: boolean }[]> = {
   free: [
-    { text: 'Sessions, projects, activity, app names', on: true },
-    { text: 'Employee self-service and corrections', on: true },
-    { text: 'Reports and CSV export', on: true },
-    { text: 'Team and project policies', on: false },
-    { text: 'Screenshots', on: false },
-    { text: 'SSO, API, legal hold', on: false },
+    { key: 'sessions', on: true },
+    { key: 'selfService', on: true },
+    { key: 'reports', on: true },
+    { key: 'policies', on: false },
+    { key: 'screenshots', on: false },
+    { key: 'sso', on: false },
   ],
   standard: [
-    { text: 'Everything in Free, unlimited people', on: true },
-    { text: 'Manager approval for corrections', on: true },
-    { text: 'Reports and CSV export', on: true },
-    { text: 'Team and project policies', on: false },
-    { text: 'Screenshots', on: false },
-    { text: 'SSO, API, legal hold', on: false },
+    { key: 'everythingFree', on: true },
+    { key: 'managerApproval', on: true },
+    { key: 'reports', on: true },
+    { key: 'policies', on: false },
+    { key: 'screenshots', on: false },
+    { key: 'sso', on: false },
   ],
   pro: [
-    { text: 'Everything in Standard', on: true },
-    { text: 'Team, project and device policies', on: true },
-    { text: 'Optional, policy-governed screenshots', on: true },
-    { text: 'SSO / SCIM, REST API, webhooks', on: true },
-    { text: 'Legal hold, longer retention', on: true },
-    { text: 'Data residency, MDM rollout', on: true },
+    { key: 'everythingStandard', on: true },
+    { key: 'allPolicies', on: true },
+    { key: 'optScreenshots', on: true },
+    { key: 'ssoScim', on: true },
+    { key: 'legalHold', on: true },
+    { key: 'residency', on: true },
   ],
 };
 
-const STATUS_LABEL: Record<SubscriptionDTO['status'], string> = {
-  trialing: 'Pro trial',
-  active: 'Active',
-  past_due: 'Payment overdue',
-  grace: 'Grace period',
-  inactive: 'Inactive',
-  canceled: 'Canceled',
-};
+const statusLabel = (st: SubscriptionDTO['status']) => t(`money.billing.status.${st}`);
 
-const day = (iso: string | null, tz: string) => (iso ? formatDateTime(iso, tz).replace(/, \d\d:\d\d$/, '') : null);
+/** "27 Oct 2026" in `tz`, as the locale writes dates. */
+const day = (iso: string | null, tz: string) =>
+  iso ? new Intl.DateTimeFormat(currentLocale(), { timeZone: tz, day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(iso)) : null;
 
 function statusLine(sub: SubscriptionDTO, tz: string): string {
-  const base = STATUS_LABEL[sub.status];
-  if (sub.status === 'trialing' && sub.trial_ends_at) return `${base} · ends ${day(sub.trial_ends_at, tz)}`;
-  if (sub.license === 'grace' && sub.grace_ends_at) return `${base} · until ${day(sub.grace_ends_at, tz)}`;
-  if (sub.license === 'active' && sub.current_period_end) return `${base} · renews ${day(sub.current_period_end, tz)}`;
-  return base;
+  const status = statusLabel(sub.status);
+  if (sub.status === 'trialing' && sub.trial_ends_at) return t('money.billing.statusEnds', { status, date: day(sub.trial_ends_at, tz)! });
+  if (sub.license === 'grace' && sub.grace_ends_at) return t('money.billing.statusUntil', { status, date: day(sub.grace_ends_at, tz)! });
+  if (sub.license === 'active' && sub.current_period_end) return t('money.billing.statusRenews', { status, date: day(sub.current_period_end, tz)! });
+  return status;
 }
 
 function StatusBanner({ sub, tz }: { sub: SubscriptionDTO; tz: string }) {
   if (sub.status === 'trialing')
     return (
-      <Banner tag="TRIAL" title={`Pro trial${sub.trial_ends_at ? ` until ${day(sub.trial_ends_at, tz)}` : ''}`}>
-        Screenshots stay off during the trial unless you publish a screenshot policy. Choose a plan below to keep going.
+      <Banner
+        tag={t('money.billing.trialTag')}
+        title={sub.trial_ends_at ? t('money.billing.trialUntil', { date: day(sub.trial_ends_at, tz)! }) : t('money.billing.status.trialing')}
+      >
+        {t('money.billing.trialBody')}
       </Banner>
     );
   if (sub.license === 'grace')
     return (
-      <Banner tone="warn" role="status" title="Payment failed — grace period">
-        Everything keeps working{sub.grace_ends_at ? ` until ${day(sub.grace_ends_at, tz)}` : ' for 14 days'}. After that, agents stop
-        collecting and tell employees why. No data is deleted.
+      <Banner tone="warn" role="status" title={t('money.billing.graceTitle')}>
+        {sub.grace_ends_at ? t('money.billing.graceUntil', { date: day(sub.grace_ends_at, tz)! }) : t('money.billing.graceDays')}
       </Banner>
     );
   if (sub.license === 'inactive')
     return (
-      <Banner tone="error" role="status" title="Subscription inactive — nothing is being collected">
-        Agents have stopped tracking with a visible notice. Reports and exports stay readable for 90 days. Choose a plan to resume.
+      <Banner tone="error" role="status" title={t('money.billing.inactiveTitle')}>
+        {t('money.billing.inactiveBody')}
       </Banner>
     );
   return null;
@@ -92,11 +90,13 @@ function StatusBanner({ sub, tz }: { sub: SubscriptionDTO; tz: string }) {
 /** One cell per seat up to the ceiling: used, licensed-but-free, overage allowance. */
 function SeatCells({ sub }: { sub: SubscriptionDTO }) {
   const total = Math.max(sub.seat_ceiling, sub.billable_seats, sub.seats);
-  const label = `${sub.billable_seats} of ${sub.seats} licensed seats in use; ${
-    sub.seat_ceiling > sub.seats ? `${sub.seat_ceiling - sub.seats} more allowed as overage before adding seats` : 'no overage on this plan'
-  }.`;
+  const label = t('money.billing.seatsLabel', {
+    used: sub.billable_seats,
+    seats: sub.seats,
+    rest: sub.seat_ceiling > sub.seats ? t('money.billing.seatsOverage', { n: sub.seat_ceiling - sub.seats }) : t('money.billing.seatsNoOverage'),
+  });
   if (total > 60 || total === 0)
-    return <Meter value={sub.billable_seats} max={Math.max(total, 1)} mark={sub.seats} label={label} scale={['0', `${sub.seat_ceiling} ceiling`]} />;
+    return <Meter value={sub.billable_seats} max={Math.max(total, 1)} mark={sub.seats} label={label} scale={['0', t('money.billing.ceiling', { n: sub.seat_ceiling })]} />;
   return (
     <div role="img" aria-label={label} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div className={s.cells}>
@@ -113,8 +113,8 @@ function SeatCells({ sub }: { sub: SubscriptionDTO }) {
       </div>
       <div className={s.cellScale} aria-hidden="true">
         <span>0</span>
-        <span>{sub.seats} licensed</span>
-        <span>{sub.seat_ceiling} ceiling</span>
+        <span>{t('money.billing.licensedN', { n: sub.seats })}</span>
+        <span>{t('money.billing.ceiling', { n: sub.seat_ceiling })}</span>
       </div>
     </div>
   );
@@ -136,9 +136,9 @@ export default function BillingPage() {
     () => new URLSearchParams(window.location.search).get('checkout'),
     () => null,
   );
-  if (!access.isAdmin) return <NoAccess what="Billing is managed by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('money.billing.noAccess')} />;
   if (sub.error) return <ErrorState error={sub.error} onRetry={sub.reload} />;
-  if (!sub.data) return <Loading label="Loading your subscription" />;
+  if (!sub.data) return <Loading label={t('money.billing.loading')} />;
 
   const d = sub.data;
   const plan = PLANS[d.plan];
@@ -154,7 +154,7 @@ export default function BillingPage() {
   const viewTerm: BillingInterval = term ?? (paid ? d.billing_interval : 'year');
   const annualTermEnd = annual && d.current_period_end && new Date(d.current_period_end) > new Date() ? d.current_period_end : null;
   const monthlyBlocked = viewTerm === 'month' && annualTermEnd !== null;
-  const invoiceLabel = paid && d.billing_interval === 'year' ? 'Each annual invoice' : 'Estimated this month';
+  const invoiceLabel = paid && d.billing_interval === 'year' ? t('money.billing.invoiceAnnual') : t('money.billing.invoiceMonth');
 
   const apply = async (target: PlanId, n: number, action: typeof seatAction, interval?: BillingInterval) => {
     const res = await action.run(() => rd.billing.changePlan(target, n, interval));
@@ -168,7 +168,7 @@ export default function BillingPage() {
       sub.mutate(() => r);
       setSeatsDraft(null);
       setSwitchTo(null);
-      setSaved(`You're on ${r.plan_name} with ${plural(r.seats, 'licensed seat')}`);
+      setSaved(tPlural(r.seats, 'money.billing.saved.one', 'money.billing.saved.other', { plan: r.plan_name }));
       reloadMe();
     }
     return !!r;
@@ -184,32 +184,42 @@ export default function BillingPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Billing"
-        title="Plan and licences"
-        description="You pay for people who track time. Admins, auditors and managers who don't track are free."
+        eyebrow={t('money.billing.eyebrow')}
+        title={t('money.billing.title')}
+        description={t('money.billing.description')}
       />
       <StatusBanner sub={d} tz={tz} />
       {checkout === 'success' ? (
-        <Banner role="status" title="Payment received">
-          Your new plan is applied as soon as the payment provider confirms it — usually within a few seconds. Refresh if it hasn&apos;t changed yet.
+        <Banner role="status" title={t('money.billing.paidTitle')}>
+          {t('money.billing.paidBody')}
         </Banner>
       ) : checkout === 'cancelled' ? (
-        <Banner role="status" title="Checkout cancelled">Nothing was charged and your plan hasn&apos;t changed.</Banner>
+        <Banner role="status" title={t('money.billing.cancelledTitle')}>
+          {t('money.billing.cancelledBody')}
+        </Banner>
       ) : null}
       {saved ? (
-        <Banner role="status" title={saved} actions={<Button size="sm" variant="quiet" onClick={() => setSaved(null)}>Dismiss</Button>}>
-          What&apos;s collected follows the plan at the agents&apos; next policy check; employees are told when anything turns off.
+        <Banner
+          role="status"
+          title={saved}
+          actions={
+            <Button size="sm" variant="quiet" onClick={() => setSaved(null)}>
+              {t('common.dismiss')}
+            </Button>
+          }
+        >
+          {t('money.billing.savedBody')}
         </Banner>
       ) : null}
 
       <div className={s.top}>
         <section className={s.planCard} aria-labelledby="plan-h">
-          <span className={s.cardLabel}>Current plan</span>
+          <span className={s.cardLabel}>{t('money.billing.currentPlan')}</span>
           <div className={s.planLine}>
             <h2 id="plan-h" className={s.planName}>
               {d.plan_name}
             </h2>
-            <span className={s.planPrice}>{pricePerSeat === 0 ? 'Free · up to 2 people' : seatPriceText(pricePerSeat, d.billing_interval)}</span>
+            <span className={s.planPrice}>{pricePerSeat === 0 ? t('money.billing.freeUpTo2') : seatPriceText(pricePerSeat, d.billing_interval)}</span>
           </div>
           <div className={s.status}>
             <span className={cx(s.statusDot, d.license !== 'active' && s.statusDotWarn)} aria-hidden="true" />
@@ -221,10 +231,11 @@ export default function BillingPage() {
           </div>
           <span className={s.fine}>
             {pricePerSeat === 0
-              ? 'No charge on Free.'
-              : d.billing_interval === 'year'
-                ? `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${price(pricePerSeat)} × 12 months. Seats added during the term are prorated by day.`
-                : `${plural(Math.max(d.seats, d.billable_seats), 'seat')} × ${price(pricePerSeat)}. Seats added mid-month are prorated by day.`}
+              ? t('money.billing.noChargeFree')
+              : t(d.billing_interval === 'year' ? 'money.billing.fineYear' : 'money.billing.fineMonth', {
+                  seats: tPlural(Math.max(d.seats, d.billable_seats), 'money.billing.seatCount.one', 'money.billing.seatCount.other'),
+                  price: price(pricePerSeat),
+                })}
           </span>
           {d.billing_provider === 'stripe' ? (
             <Button
@@ -236,31 +247,31 @@ export default function BillingPage() {
                 if (r) window.location.assign(r.url);
               }}
             >
-              {portalAction.busy ? 'Opening…' : 'Invoices and payment method →'}
+              {portalAction.busy ? t('money.billing.opening') : t('money.billing.portal')}
             </Button>
           ) : null}
-          {d.cancel_at_period_end ? <span className={s.fine}>Cancels at the end of this period; you&apos;ll move to Free.</span> : null}
+          {d.cancel_at_period_end ? <span className={s.fine}>{t('money.billing.cancels')}</span> : null}
           <ActionError error={portalAction.error} />
         </section>
 
         <section className={s.seats} aria-labelledby="seats-h">
-          <h2 id="seats-h">Seats</h2>
+          <h2 id="seats-h">{t('money.billing.seats')}</h2>
           <SeatCells sub={d} />
           <dl className={s.stats}>
             <div className={s.stat}>
-              <dt>Tracked (billable)</dt>
+              <dt>{t('money.billing.tracked')}</dt>
               <dd>{d.billable_seats}</dd>
             </div>
             <div className={s.stat}>
-              <dt>Licensed</dt>
+              <dt>{t('money.billing.licensed')}</dt>
               <dd>{d.seats}</dd>
             </div>
             <div className={s.stat}>
-              <dt>Overage allowed</dt>
+              <dt>{t('money.billing.overage')}</dt>
               <dd>{plan.allows_overage ? `+${Math.max(0, d.seat_ceiling - d.seats)}` : '—'}</dd>
             </div>
             <div className={s.stat}>
-              <dt>Free viewers</dt>
+              <dt>{t('money.billing.viewers')}</dt>
               <dd>{d.viewer_seats}</dd>
             </div>
           </dl>
@@ -272,7 +283,7 @@ export default function BillingPage() {
             }}
           >
             <label className={s.seatLabel} htmlFor="seats">
-              Licensed seats
+              {t('money.billing.licensedSeats')}
               <input
                 id="seats"
                 className={s.seatInput}
@@ -288,14 +299,16 @@ export default function BillingPage() {
               />
             </label>
             <Button type="submit" variant="primary" disabled={seatAction.busy || !seatsValid || seats === d.seats}>
-              {seatAction.busy ? 'Updating…' : 'Update seats →'}
+              {seatAction.busy ? t('money.billing.updating') : t('money.billing.updateSeats')}
             </Button>
             <span id="seats-hint" className="small secondary">
               {plan.max_billable_seats !== null
-                ? `Free covers up to ${plan.max_billable_seats} people who track time.`
-                : `At least ${d.billable_seats} — that many people track time.`}
+                ? t('money.billing.freeCovers', { n: plan.max_billable_seats })
+                : t('money.billing.atLeast', { n: d.billable_seats })}
               {seatsValid && seats !== d.seats && pricePerSeat > 0
-                ? ` New estimate ${formatMoney(pricePerSeat * Math.max(seats, d.billable_seats) * (d.billing_interval === 'year' ? 12 : 1))} / ${d.billing_interval === 'year' ? 'year' : 'month'}.`
+                ? ` ${t(d.billing_interval === 'year' ? 'money.billing.estimateYear' : 'money.billing.estimateMonth', {
+                    amount: formatMoney(pricePerSeat * Math.max(seats, d.billable_seats) * (d.billing_interval === 'year' ? 12 : 1)),
+                  })}`
                 : ''}
             </span>
           </form>
@@ -303,25 +316,25 @@ export default function BillingPage() {
         </section>
       </div>
 
-      <Card title="Plans" subtitle="Privacy protections — self-service, corrections, deletion requests, access audit — are in every plan.">
+      <Card title={t('money.billing.plans')} subtitle={t('money.billing.plansSub')}>
         <div className={s.termRow}>
           <Segmented<BillingInterval>
-            legend="Billing term"
+            legend={t('money.billing.term')}
             name="term"
             value={viewTerm}
             onChange={setTerm}
             describedBy="term-hint"
             options={[
-              { value: 'year', label: `Annual term · save ${annualSavingPercent('pro')}%` },
-              { value: 'month', label: 'Month to month' },
+              { value: 'year', label: t('money.billing.termAnnual', { pct: formatPercent(annualSavingPercent('pro')) }) },
+              { value: 'month', label: t('money.billing.termMonth') },
             ]}
           />
           <span id="term-hint" className="small secondary">
             {monthlyBlocked
-              ? `Your annual term runs until ${day(annualTermEnd, tz)}. Month-to-month billing can start from that date.`
+              ? t('money.billing.termBlocked', { date: day(annualTermEnd, tz)! })
               : viewTerm === 'year'
-                ? 'Billed once a year. Add seats any time; they are prorated to the end of the term.'
-                : 'Billed monthly. Change or cancel at the end of any month.'}
+                ? t('money.billing.termYearHint')
+                : t('money.billing.termMonthHint')}
           </span>
         </div>
         <div className={s.plans}>
@@ -336,41 +349,43 @@ export default function BillingPage() {
               <article key={id} className={cx(s.plan, current && s.planCurrent)} aria-labelledby={`plan-${id}`}>
                 <div className={s.planHead}>
                   <h3 id={`plan-${id}`}>{p.name}</h3>
-                  {current ? <span className={s.tag}>CURRENT</span> : null}
+                  {current ? <span className={s.tag}>{t('money.billing.currentTag')}</span> : null}
                 </div>
                 <div className={s.price}>
                   <span className={s.priceValue}>{price(perMonth)}</span>
-                  <span className="small muted">{p.max_billable_seats !== null ? `up to ${p.max_billable_seats} people` : 'per user / month'}</span>
+                  <span className="small muted">{p.max_billable_seats !== null ? t('money.billing.upTo', { n: p.max_billable_seats }) : t('money.billing.perUserMonth')}</span>
                 </div>
                 {perMonth > 0 ? (
                   <span className={s.priceTerm}>
                     {viewTerm === 'year'
-                      ? `Billed annually, ${price(perMonth * 12)} per user / year`
-                      : `Billed monthly · ${price(p.prices.year)} on an annual term`}
+                      ? t('money.billing.billedAnnually', { price: price(perMonth * 12) })
+                      : t('money.billing.billedMonthly', { price: price(p.prices.year) })}
                   </span>
                 ) : (
-                  <span className={s.priceTerm}>No card needed</span>
+                  <span className={s.priceTerm}>{t('money.billing.noCard')}</span>
                 )}
                 <ul className={s.features}>
                   {PLAN_FEATURES[id].map((f) => (
-                    <li key={f.text} className={f.on ? undefined : s.off}>
+                    <li key={f.key} className={f.on ? undefined : s.off}>
                       <span className={s.mark} aria-hidden="true">
                         {f.on ? '✓' : '–'}
                       </span>
                       <span>
-                        {f.text}
-                        <span className="visually-hidden">{f.on ? ' (included)' : ' (not included)'}</span>
+                        {t(`money.billing.feat.${f.key}` as MessageKey)}
+                        <span className="visually-hidden"> ({f.on ? t('money.billing.included') : t('money.billing.notIncluded')})</span>
                       </span>
                     </li>
                   ))}
                 </ul>
                 {current ? (
                   <Button className={s.currentBtn} disabled aria-disabled="true">
-                    Current plan
+                    {t('money.billing.currentPlan')}
                   </Button>
                 ) : (
                   <Button className={s.planBtn} disabled={blocked} onClick={() => setSwitchTo({ plan: id, interval: viewTerm })}>
-                    {samePlanOtherTerm ? `Switch to ${viewTerm === 'year' ? 'annual' : 'monthly'} billing` : `Switch to ${p.name}`}
+                    {samePlanOtherTerm
+                      ? t(viewTerm === 'year' ? 'money.billing.switchAnnual' : 'money.billing.switchMonthly')
+                      : t('money.billing.switchTo', { plan: p.name })}
                   </Button>
                 )}
               </article>
@@ -379,11 +394,8 @@ export default function BillingPage() {
         </div>
       </Card>
 
-      <Card title="If a payment fails">
-        <p className="secondary">
-          Everything keeps working for a 14-day grace period. After that, agents stop tracking and tell employees why — nothing is collected silently.
-          Reports and exports stay readable for 90 days, and retention keeps deleting data on schedule.
-        </p>
+      <Card title={t('money.billing.failTitle')}>
+        <p className="secondary">{t('money.billing.failBody')}</p>
       </Card>
 
       <Dialog
@@ -392,16 +404,22 @@ export default function BillingPage() {
           setSwitchTo(null);
           planAction.reset();
         }}
-        title={target ? (switchTo?.plan === d.plan ? `Switch to ${targetTerm === 'year' ? 'an annual term' : 'monthly billing'}?` : `Switch to ${target.name}?`) : 'Switch plan'}
+        title={
+          target
+            ? switchTo?.plan === d.plan
+              ? t(targetTerm === 'year' ? 'money.billing.dialogAnnual' : 'money.billing.dialogMonthly')
+              : t('money.billing.dialogPlan', { plan: target.name })
+            : t('money.billing.dialogDefault')
+        }
         footer={
           <>
-            <Button onClick={() => setSwitchTo(null)}>Cancel</Button>
+            <Button onClick={() => setSwitchTo(null)}>{t('common.cancel')}</Button>
             <Button
               variant="primary"
               disabled={planAction.busy || tooManyForTarget}
               onClick={() => switchTo && void apply(switchTo.plan, targetSeats, planAction, switchTo.plan === 'free' ? undefined : switchTo.interval)}
             >
-              {planAction.busy ? 'Switching…' : 'Confirm →'}
+              {planAction.busy ? t('money.billing.switching') : t('money.billing.confirm')}
             </Button>
           </>
         }
@@ -409,33 +427,32 @@ export default function BillingPage() {
         {target ? (
           <>
             <dl className={s.dlConfirm}>
-              <dt>Plan</dt>
+              <dt>{t('money.billing.plan')}</dt>
               <dd>{target.name}</dd>
-              <dt>Price</dt>
-              <dd>{target.id === 'free' ? '$0' : seatPriceText(target.prices[targetTerm], targetTerm)}</dd>
-              <dt>Licensed seats</dt>
+              <dt>{t('money.billing.price')}</dt>
+              <dd>{target.id === 'free' ? price(0) : seatPriceText(target.prices[targetTerm], targetTerm)}</dd>
+              <dt>{t('money.billing.licensedSeats')}</dt>
               <dd>{targetSeats}</dd>
-              <dt>{target.id !== 'free' && targetTerm === 'year' ? 'Each annual invoice' : 'Estimated monthly'}</dt>
+              <dt>{target.id !== 'free' && targetTerm === 'year' ? t('money.billing.invoiceAnnual') : t('money.billing.estimatedMonthly')}</dt>
               <dd>{formatMoney(target.id === 'free' ? 0 : invoiceCents(target.id, targetTerm, Math.max(targetSeats, d.billable_seats)))}</dd>
             </dl>
             {target.id !== 'free' && targetTerm === 'year' ? (
-              <p className="small secondary">
-                An annual term is a one-year commitment. During it you can change seats or plan (prorated by day); month-to-month billing can start from the renewal date.
-              </p>
+              <p className="small secondary">{t('money.billing.annualNote')}</p>
             ) : null}
             {target.id === 'free' && annualTermEnd ? (
-              <p className="small secondary">Your paid annual term runs to {day(annualTermEnd, tz)}; you move to Free after that.</p>
+              <p className="small secondary">{t('money.billing.toFree', { date: day(annualTermEnd, tz)! })}</p>
             ) : null}
             {tooManyForTarget ? (
-              <Banner tone="warn" role="alert" title={`${d.billable_seats} people track time; ${target.name} allows ${target.max_billable_seats}`}>
-                Turn tracking off for {d.billable_seats - (target.max_billable_seats ?? 0)} of them in People first.
+              <Banner tone="warn" role="alert" title={t('money.billing.tooManyTitle', { n: d.billable_seats, plan: target.name, max: target.max_billable_seats ?? 0 })}
+              >
+                {t('money.billing.tooManyBody', { n: d.billable_seats - (target.max_billable_seats ?? 0) })}
               </Banner>
             ) : null}
             {losesScreenshots || losesScopes ? (
-              <Banner tone="warn" title={`${target.name} collects less`}>
-                {losesScreenshots ? 'Screenshots and website domains stop at the agents’ next policy check; existing screenshots keep their retention date. ' : ''}
-                {losesScopes ? 'Team, project and device policies stop applying; only the organization policy remains. ' : ''}
-                No confirmation from employees is needed because nothing new is collected — they are notified.
+              <Banner tone="warn" title={t('money.billing.lessTitle', { plan: target.name })}>
+                {losesScreenshots ? `${t('money.billing.lessScreens')} ` : ''}
+                {losesScopes ? `${t('money.billing.lessScopes')} ` : ''}
+                {t('money.billing.lessNote')}
               </Banner>
             ) : null}
             <ActionError error={planAction.error} />

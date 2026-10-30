@@ -9,20 +9,23 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Checkbox, Segmented, SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Card, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { t } from '@/lib/i18n';
+import { currentLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
-import { formatDateTime, formatRelative } from '@/lib/time';
+import { formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import s from './developers.module.css';
 
 const DAY = 24 * 3600_000;
 const LIFETIMES: Record<ApiTokenKind, number[]> = { organization: [30, 90, 180, 365], personal: [30, 60, 90] };
-const lifetime = (d: number) => (d === 365 ? '1 year' : `${d} days`);
+const lifetime = (d: number) => (d === 365 ? t('cfg.tok.year') : t('cfg.tok.days', { n: d }));
 
-function expiry(t: ApiTokenDTO, tz: string, now: number): { text: string; soon: boolean } {
-  const left = Date.parse(t.expires_at) - now;
-  if (t.expired || left <= 0) return { text: 'Expired', soon: true };
-  if (left < 14 * DAY) return { text: `in ${Math.max(1, Math.ceil(left / DAY))} days`, soon: true };
-  return { text: formatDateTime(t.expires_at, tz).replace(/, \d\d:\d\d$/, ''), soon: false };
+function expiry(tok: ApiTokenDTO, tz: string, now: number): { text: string; soon: boolean } {
+  const left = Date.parse(tok.expires_at) - now;
+  if (tok.expired || left <= 0) return { text: t('cfg.tok.expired'), soon: true };
+  if (left < 14 * DAY) return { text: t('cfg.tok.inDays', { n: Math.max(1, Math.ceil(left / DAY)) }), soon: true };
+  const day = new Intl.DateTimeFormat(currentLocale(), { day: 'numeric', month: 'short', year: 'numeric', timeZone: tz });
+  return { text: day.format(new Date(tok.expires_at)), soon: false };
 }
 
 function NewToken({ open, admin, onClose, onCreated }: { open: boolean; admin: boolean; onClose: () => void; onCreated: (t: ApiTokenCreated) => void }) {
@@ -42,9 +45,9 @@ function NewToken({ open, admin, onClose, onCreated }: { open: boolean; admin: b
   };
   const create = async () => {
     const scopes = kind === 'personal' ? undefined : (['read', ...(write === 'write' ? ['write'] : []), ...(payroll ? ['payroll'] : [])] as ('read' | 'write' | 'payroll')[]);
-    const t = await action.run(() => rd.apiTokens.create({ name: name.trim(), kind, scopes, expires_in_days: Math.min(days, API_TOKEN_MAX_DAYS[kind]) }));
-    if (t) {
-      onCreated(t);
+    const created = await action.run(() => rd.apiTokens.create({ name: name.trim(), kind, scopes, expires_in_days: Math.min(days, API_TOKEN_MAX_DAYS[kind]) }));
+    if (created) {
+      onCreated(created);
       close();
     }
   };
@@ -52,27 +55,29 @@ function NewToken({ open, admin, onClose, onCreated }: { open: boolean; admin: b
     <Dialog
       open={open}
       onClose={close}
-      title="New API token"
-      eyebrow="Developers"
-      description={
-        kind === 'organization'
-          ? 'It acts as you: it sees what you can see, on the endpoints in the API reference. Give it only the access the integration needs.'
-          : 'Read-only, and only your own data: your time, timesheets, time off and insights.'
-      }
+      title={t('cfg.tok.newTitle')}
+      eyebrow={t('cfg.tok.newEyebrow')}
+      description={kind === 'organization' ? t('cfg.tok.orgDescription') : t('cfg.tok.personalDescription')}
       footer={
         <>
-          <Button onClick={close}>Cancel</Button>
+          <Button onClick={close}>{t('common.cancel')}</Button>
           <Button variant="primary" onClick={create} disabled={action.busy || !name.trim()}>
-            {action.busy ? 'Creating…' : 'Create token'}
+            {action.busy ? t('cfg.tok.creating') : t('cfg.tok.create')}
           </Button>
         </>
       }
     >
       <div className={s.form}>
-        <TextField label="Name" placeholder={kind === 'organization' ? 'Payroll sync' : 'My timesheet export'} maxLength={100} value={name} onChange={(e) => setName(e.target.value)} />
+        <TextField
+          label={t('cfg.tok.name')}
+          placeholder={kind === 'organization' ? t('cfg.tok.placeholderOrg') : t('cfg.tok.placeholderPersonal')}
+          maxLength={100}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
         {admin ? (
           <Segmented<ApiTokenKind>
-            legend="Kind"
+            legend={t('cfg.tok.kind')}
             name="token-kind"
             value={kind}
             onChange={(k) => {
@@ -80,27 +85,27 @@ function NewToken({ open, admin, onClose, onCreated }: { open: boolean; admin: b
               setDays((d) => Math.min(d, API_TOKEN_MAX_DAYS[k]));
             }}
             options={[
-              { value: 'organization', label: 'Organization' },
-              { value: 'personal', label: 'Personal' },
+              { value: 'organization', label: t('cfg.tok.organization') },
+              { value: 'personal', label: t('cfg.tok.personal') },
             ]}
           />
         ) : null}
         {kind === 'organization' ? (
           <>
             <Segmented<'read' | 'write'>
-              legend="Access"
+              legend={t('cfg.tok.access')}
               name="token-access"
               value={write}
               onChange={setWrite}
               options={[
-                { value: 'read', label: 'Read' },
-                { value: 'write', label: 'Read and write' },
+                { value: 'read', label: t('cfg.tok.read') },
+                { value: 'write', label: t('cfg.tok.readWrite') },
               ]}
             />
-            <Checkbox label="Payroll" hint="Pay rates and payroll files. Leave off unless the integration runs payroll." checked={payroll} onChange={(e) => setPayroll(e.target.checked)} />
+            <Checkbox label={t('cfg.tok.payroll')} hint={t('cfg.tok.payrollHint')} checked={payroll} onChange={(e) => setPayroll(e.target.checked)} />
           </>
         ) : null}
-        <SelectField label="Expires after" value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
+        <SelectField label={t('cfg.tok.expiresAfter')} value={String(days)} onChange={(e) => setDays(Number(e.target.value))}>
           {LIFETIMES[kind].map((d) => (
             <option key={d} value={d}>
               {lifetime(d)}
@@ -118,14 +123,14 @@ function Reveal({ token, onDone }: { token: ApiTokenCreated; onDone: () => void 
   return (
     <Card tone="ink" className={s.reveal}>
       <div className={s.revealHead}>
-        <h2 className={s.revealTitle}>“{token.name}” is ready — copy the token now</h2>
-        <span className="small">It won&apos;t be shown again. We only keep a hash.</span>
+        <h2 className={s.revealTitle}>{t('cfg.tok.ready', { name: token.name })}</h2>
+        <span className="small">{t('cfg.tok.onceOnly')}</span>
       </div>
       <div className={s.revealRow}>
         <code className={s.secret}>{token.token}</code>
-        <CopyButton text={token.token} label="Copy token" variant="inverse" />
+        <CopyButton text={token.token} label={t('cfg.tok.copy')} variant="inverse" />
         <Button variant="quiet" className={s.onInk} onClick={onDone}>
-          I&apos;ve stored it
+          {t('cfg.tok.stored')}
         </Button>
       </div>
     </Card>
@@ -148,7 +153,7 @@ export function ApiTokens({ mode }: { mode: 'admin' | 'personal' }) {
   const revoke = async () => {
     if (!revoking) return;
     if (await action.run(() => rd.apiTokens.revoke(revoking.id))) {
-      tokens.mutate((prev) => prev?.filter((t) => t.id !== revoking.id));
+      tokens.mutate((prev) => prev?.filter((tok) => tok.id !== revoking.id));
       setRevoking(null);
     }
   };
@@ -156,54 +161,54 @@ export function ApiTokens({ mode }: { mode: 'admin' | 'personal' }) {
     <>
       {created ? <Reveal token={created} onDone={() => setCreated(null)} /> : null}
       <Card
-        title={mode === 'admin' ? 'Tokens' : 'API tokens'}
-        subtitle={mode === 'personal' ? 'Read your own time, timesheets and insights from a script or spreadsheet' : undefined}
+        title={mode === 'admin' ? t('cfg.tok.tokens') : t('cfg.tok.apiTokens')}
+        subtitle={mode === 'personal' ? t('cfg.tok.personalSubtitle') : undefined}
         actions={
           <Button variant="primary" onClick={() => setCreating(true)}>
-            New token →
+            {t('cfg.tok.new')}
           </Button>
         }
       >
-        <Resource {...tokens} label="Loading tokens">
+        <Resource {...tokens} label={t('cfg.tok.loading')}>
           {(all) => {
-            const list = mode === 'admin' ? all : all.filter((t) => t.kind === 'personal' && t.owner_id === me.user.id);
+            const list = mode === 'admin' ? all : all.filter((tok) => tok.kind === 'personal' && tok.owner_id === me.user.id);
             return list.length === 0 ? (
-              <Empty title="No tokens yet">{mode === 'admin' ? 'Create one for each integration, so each can be revoked on its own.' : 'Create one to read your own data with the API.'}</Empty>
+              <Empty title={t('cfg.tok.none')}>{mode === 'admin' ? t('cfg.tok.noneAdmin') : t('cfg.tok.nonePersonal')}</Empty>
             ) : (
-              <TableBox label="API tokens">
+              <TableBox label={t('cfg.tok.apiTokens')}>
                 <table className={tableClass} style={{ minWidth: 600 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Access</th>
-                      <th scope="col">Last used</th>
-                      <th scope="col">Expires</th>
+                      <th scope="col">{t('cfg.tok.name')}</th>
+                      <th scope="col">{t('cfg.tok.colAccess')}</th>
+                      <th scope="col">{t('cfg.tok.colLastUsed')}</th>
+                      <th scope="col">{t('cfg.tok.colExpires')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('cfg.tok.colActions')}</span>
                       </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {list.map((t) => {
-                      const ex = expiry(t, tz, now);
+                    {list.map((tok) => {
+                      const ex = expiry(tok, tz, now);
                       return (
-                        <tr key={t.id}>
+                        <tr key={tok.id}>
                           <th scope="row">
-                            <span className={s.name}>{t.name}</span>
+                            <span className={s.name}>{tok.name}</span>
                             <span className="small muted">
-                              {t.kind === 'organization' ? `Organization · created by ${t.owner_name}` : `Personal · ${t.owner_name}`}
+                              {tok.kind === 'organization' ? t('cfg.tok.orgBy', { name: tok.owner_name }) : t('cfg.tok.personalBy', { name: tok.owner_name })}
                             </span>
                           </th>
                           <td>
                             <span className={s.chips}>
-                              {t.kind === 'personal' ? <Badge>read · own</Badge> : t.scopes.map((sc) => <Badge key={sc}>{sc}</Badge>)}
+                              {tok.kind === 'personal' ? <Badge>{t('cfg.tok.readOwn')}</Badge> : tok.scopes.map((sc) => <Badge key={sc}>{t(`cfg.tok.scope.${sc}`)}</Badge>)}
                             </span>
                           </td>
-                          <td className="small">{t.last_used_at ? formatRelative(t.last_used_at, tz) : 'Never'}</td>
+                          <td className="small">{tok.last_used_at ? formatRelative(tok.last_used_at, tz) : t('time.never')}</td>
                           <td className={ex.soon ? `small ${s.soon}` : 'small'}>{ex.text}</td>
                           <td style={{ textAlign: 'right' }}>
-                            <Button size="sm" variant="quiet" aria-label={`Revoke ${t.name}`} onClick={() => setRevoking(t)}>
-                              Revoke
+                            <Button size="sm" variant="quiet" aria-label={t('cfg.tok.revokeLabel', { name: tok.name })} onClick={() => setRevoking(tok)}>
+                              {t('cfg.tok.revoke')}
                             </Button>
                           </td>
                         </tr>
@@ -220,9 +225,9 @@ export function ApiTokens({ mode }: { mode: 'admin' | 'personal' }) {
         open={creating}
         admin={mode === 'admin'}
         onClose={() => setCreating(false)}
-        onCreated={(t) => {
-          setCreated(t);
-          const { token: _secret, ...dto } = t;
+        onCreated={(c) => {
+          setCreated(c);
+          const { token: _secret, ...dto } = c;
           void _secret;
           tokens.mutate((prev) => [dto, ...(prev ?? [])]);
         }}
@@ -234,13 +239,13 @@ export function ApiTokens({ mode }: { mode: 'admin' | 'personal' }) {
           action.reset();
         }}
         size="sm"
-        title={`Revoke “${revoking?.name ?? ''}”?`}
-        description="Calls with it are refused from now on. The integration needs a new token."
+        title={t('cfg.tok.revokeTitle', { name: revoking?.name ?? '' })}
+        description={t('cfg.tok.revokeBody')}
         footer={
           <>
-            <Button onClick={() => setRevoking(null)}>Cancel</Button>
+            <Button onClick={() => setRevoking(null)}>{t('common.cancel')}</Button>
             <Button variant="danger" onClick={revoke} disabled={action.busy}>
-              {action.busy ? 'Revoking…' : 'Revoke token'}
+              {action.busy ? t('cfg.tok.revoking') : t('cfg.tok.revokeConfirm')}
             </Button>
           </>
         }

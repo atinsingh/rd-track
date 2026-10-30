@@ -1,5 +1,7 @@
 import { useId, type ReactNode } from 'react';
 import { cx } from '@/lib/cx';
+import { t, type MessageKey } from '@/lib/i18n';
+import { en } from '@/lib/messages/en';
 import s from './ui.module.css';
 
 export function PageHeader({
@@ -85,6 +87,9 @@ export function Badge({
   );
 }
 
+/** A banner's small tag ("NOTE", "PRIVATE"…) in the current language; unknown tags as given. */
+const tagText = (tag: string) => (`tag.${tag}` in en ? t(`tag.${tag}` as MessageKey) : tag);
+
 export function Banner({
   tone = 'note',
   title,
@@ -112,7 +117,7 @@ export function Banner({
       )}
     >
       {tone === 'ink' ? <span className={s.dot} aria-hidden="true" /> : null}
-      {tag ? <span className={s.noteTag}>{tag}</span> : null}
+      {tag ? <span className={s.noteTag}>{tagText(tag)}</span> : null}
       <div className={s.bannerBody}>
         {title ? <span className={s.bannerTitle}>{title}</span> : null}
         {children ? <span>{children}</span> : null}

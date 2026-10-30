@@ -4,39 +4,38 @@ import Link from 'next/link';
 import type { TimesheetDTO } from '@rd/contracts';
 import { Banner, Card } from '@/components/ui/Layout';
 import { formatDuration } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import { addDays, formatDateTime, formatDayMonth } from '@/lib/time';
 import { limitsSummary } from '@/lib/timesheets';
 import { ReviewPanel, TimesheetGrid, TimesheetTiles, memberTimesheetHref } from './TimesheetView';
 
-function weekText(periodStart: string): string {
-  return `${formatDayMonth(periodStart)} – ${formatDayMonth(addDays(periodStart, 6))}`;
-}
+const weekOf = (periodStart: string) => ({ from: formatDayMonth(periodStart), to: formatDayMonth(addDays(periodStart, 6)) });
 
 /** One submitted week, reviewed on its own (detail panel of the approvals inbox). */
-export function TimesheetReviewCard({ t, tz, onDone }: { t: TimesheetDTO; tz: string; onDone: (id: string) => void }) {
+export function TimesheetReviewCard({ sheet, tz, onDone }: { sheet: TimesheetDTO; tz: string; onDone: (id: string) => void }) {
   // What the employee submitted is the original; current figures are shown if they moved since.
-  const original = t.submitted_totals ?? t.totals;
+  const original = sheet.submitted_totals ?? sheet.totals;
+  const last = sheet.events[sheet.events.length - 1];
   return (
     <Card
-      title={`${t.user_name} · Week of ${weekText(t.period_start)}`}
-      subtitle={`Submitted ${formatDateTime(t.submitted_at, tz)}`}
-      actions={<Link href={memberTimesheetHref(t.user_id, t.period_start, { name: t.user_name })}>Open week →</Link>}
+      title={t('mgr.tsr.title', { name: sheet.user_name, ...weekOf(sheet.period_start) })}
+      subtitle={t('ts.submittedAt', { when: formatDateTime(sheet.submitted_at, tz) })}
+      actions={<Link href={memberTimesheetHref(sheet.user_id, sheet.period_start, { name: sheet.user_name })}>{t('mgr.tsr.openWeek')}</Link>}
     >
-      {t.changed_since_submit ? (
-        <Banner tag="CHANGED">
-          The records changed after submission: submitted {formatDuration(original.total_seconds)}, now{' '}
-          {formatDuration(t.totals.total_seconds)}. Approving freezes the current figures.
+      {sheet.changed_since_submit ? (
+        <Banner tag={t('mgr.tsr.changedTag')}>
+          {t('mgr.tsr.changed', { submitted: formatDuration(original.total_seconds), now: formatDuration(sheet.totals.total_seconds) })}
         </Banner>
       ) : null}
-      {t.events.length > 0 && t.events[t.events.length - 1]!.action === 'submit' && t.events[t.events.length - 1]!.note ? (
+      {last && last.action === 'submit' && last.note ? (
         <p>
-          <span className="label-mono">Note from {t.user_name}</span>
-          <br />“{t.events[t.events.length - 1]!.note}”
+          <span className="label-mono">{t('mgr.tsr.noteFrom', { name: sheet.user_name })}</span>
+          <br />“{last.note}”
         </p>
       ) : null}
-      <TimesheetTiles totals={original} limitsText={limitsSummary(t.limits)} />
-      <TimesheetGrid totals={original} label={`Submitted timesheet, ${t.user_name}, week of ${weekText(t.period_start)}`} />
-      <ReviewPanel sheet={t} onDone={() => onDone(t.id!)} />
+      <TimesheetTiles totals={original} limitsText={limitsSummary(sheet.limits)} />
+      <TimesheetGrid totals={original} label={t('mgr.tsr.gridLabel', { name: sheet.user_name, ...weekOf(sheet.period_start) })} />
+      <ReviewPanel sheet={sheet} onDone={() => onDone(sheet.id!)} />
     </Card>
   );
 }

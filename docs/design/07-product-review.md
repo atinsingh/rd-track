@@ -61,7 +61,7 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G24 | Auditor | Audit filter by raw UUID; no person filter; no CSV export; auditor lands on My day — **done** | S | P1 |
 | G25 | Integrations | Webhooks cover 4 events — **15 events, done** | S | P1 |
 | G26 | Admin | SSO / SCIM (P1) — **done**; MDM packages and tenant logo (P2) — **done** | L | P1/P2 |
-| G27 | All | Hard-coded English; mixed date and money formats — **done** for formats everywhere and French for everything an employee sees and receives, the desktop app included (slices 10–12); manager, admin and money screens follow | M | P2 |
+| G27 | All | Hard-coded English; mixed date and money formats — **done**: formats everywhere, and French for every screen, email and the desktop app (slices 10–13); only RoundDigital's own operator console stays English | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
 
@@ -334,6 +334,20 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    - *UI*: its own text (buttons, labels, enrolment and settings) comes from a typed
      catalogue (`ui/src/i18n.ts`) keyed off that language. Log lines and the command-line
      agent stay English.
+
+   **13 done 2026-10-30 (G27)**: the rest of the web app in French — manager screens (Team,
+   attendance, a person's day and timesheet, Approvals, Projects, Audit log), the admin home
+   and People and Teams, Money (period close, invoices, rates and budgets, clients, billing,
+   the print pages), organization admin (policies, devices and MDM, work apps, schedules,
+   holidays, time-off policies, work limits, data requests), settings (single sign-on, logo
+   and language, support access, organization data, developers), the pages before signing
+   in (sign-up, reset, invite, email change, client sign-in) and the client portal: about
+   1,900 more catalogue entries, 2,920 in all. Pre-sign-in pages use the hydration-safe
+   hook; label tables (invoice and budget states, inbox tabs, setup checklist, policy
+   fields, banner tags) are read in the current language when shown. "Seat" is « poste »
+   throughout. Left in English: the operator console (RoundDigital staff only), plan and
+   product names, CSV column names the importer reads, generated MDM files, and text the
+   API writes in error details.
 
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on

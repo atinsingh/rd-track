@@ -9,6 +9,7 @@ import { Checkbox, SelectField, TextField } from '@/components/ui/Field';
 import { Badge, Card, PageHeader, TableBox, formActionsClass, formGridClass, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { byName } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { accrualDayLabel, accrualLabel, formatHours, sched } from '@/lib/scheduling';
 import { formatShortDay, todayInTz } from '@/lib/time';
@@ -49,20 +50,20 @@ function PolicyForm({ onCreated }: { onCreated: (p: TimeOffPolicyDTO) => void })
   return (
     <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
       <div className={formGridClass}>
-        <TextField label="Name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} placeholder="Vacation" required />
-        <SelectField label="Kind" value={kind} onChange={(e) => setKind(e.target.value as 'paid' | 'unpaid')}>
-          <option value="paid">Paid (uses a balance)</option>
-          <option value="unpaid">Unpaid (no balance)</option>
+        <TextField label={t('adm.common.name')} value={name} maxLength={200} onChange={(e) => setName(e.target.value)} placeholder={t('adm.to.namePlaceholder')} required />
+        <SelectField label={t('adm.to.kind')} value={kind} onChange={(e) => setKind(e.target.value as 'paid' | 'unpaid')}>
+          <option value="paid">{t('adm.to.kindPaid')}</option>
+          <option value="unpaid">{t('adm.to.kindUnpaid')}</option>
         </SelectField>
-        <SelectField label="Accrual" value={accrual} onChange={(e) => setAccrual(e.target.value as TimeOffAccrual)}>
-          <option value="none">None (set balances by hand)</option>
-          <option value="per_month">Every month</option>
-          <option value="per_year">Every year</option>
+        <SelectField label={t('adm.to.accrual')} value={accrual} onChange={(e) => setAccrual(e.target.value as TimeOffAccrual)}>
+          <option value="none">{t('adm.to.accrualNone')}</option>
+          <option value="per_month">{t('adm.to.everyMonth')}</option>
+          <option value="per_year">{t('adm.to.everyYear')}</option>
         </SelectField>
         {accrual !== 'none' ? (
           <>
-            <TextField label="Hours each time" type="number" min={0} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
-            <SelectField label="Added" value={day} onChange={(e) => setDay(e.target.value as TimeOffAccrualDay)} hint="Each person’s start date is the one on their assignment">
+            <TextField label={t('adm.to.hoursEach')} type="number" min={0} step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
+            <SelectField label={t('adm.to.added')} value={day} onChange={(e) => setDay(e.target.value as TimeOffAccrualDay)} hint={t('adm.to.addedHint')}>
               {TIME_OFF_ACCRUAL_DAYS.map((d) => (
                 <option key={d} value={d}>
                   {accrualDayLabel(accrual, d)[0]!.toUpperCase() + accrualDayLabel(accrual, d).slice(1)}
@@ -71,14 +72,14 @@ function PolicyForm({ onCreated }: { onCreated: (p: TimeOffPolicyDTO) => void })
             </SelectField>
           </>
         ) : null}
-        <TextField label="Maximum balance (hours)" hint="Optional; accrual stops at this" type="number" min={0} step={0.5} value={max} onChange={(e) => setMax(e.target.value)} />
-        <TextField label="Carryover (hours)" hint="Optional; hours above this expire on 1 January" type="number" min={0} step={0.5} value={carry} onChange={(e) => setCarry(e.target.value)} />
+        <TextField label={t('adm.to.max')} hint={t('adm.to.maxHint')} type="number" min={0} step={0.5} value={max} onChange={(e) => setMax(e.target.value)} />
+        <TextField label={t('adm.to.carry')} hint={t('adm.to.carryHint')} type="number" min={0} step={0.5} value={carry} onChange={(e) => setCarry(e.target.value)} />
       </div>
-      <Checkbox label="Allow a negative balance" hint="Requests can go below zero; otherwise they need enough hours." checked={negative} onChange={(e) => setNegative(e.target.checked)} />
+      <Checkbox label={t('adm.to.negative')} hint={t('adm.to.negativeHint')} checked={negative} onChange={(e) => setNegative(e.target.checked)} />
       <ActionError error={action.error} />
       <div className={formActionsClass}>
         <Button type="submit" variant="primary" disabled={!name.trim() || action.busy}>
-          Create policy
+          {t('adm.to.create')}
         </Button>
       </div>
     </form>
@@ -104,26 +105,26 @@ function AssignForm({ policies, users, onAssigned }: { policies: TimeOffPolicyDT
   };
   return (
     <form onSubmit={submit} className={s.inlineForm}>
-      <SelectField label="Policy" value={policyId} onChange={(e) => setPolicyId(e.target.value)} required>
-        <option value="">Choose a policy…</option>
+      <SelectField label={t('sched.policy')} value={policyId} onChange={(e) => setPolicyId(e.target.value)} required>
+        <option value="">{t('adm.to.choosePolicy')}</option>
         {policies.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
           </option>
         ))}
       </SelectField>
-      <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)} required>
-        <option value="">Choose a person…</option>
+      <SelectField label={t('adm.common.person')} value={userId} onChange={(e) => setUserId(e.target.value)} required>
+        <option value="">{t('adm.common.choosePerson')}</option>
         {users.map((u) => (
           <option key={u.id} value={u.id}>
             {u.display_name}
           </option>
         ))}
       </SelectField>
-      <TextField label="From" type="date" value={start} onChange={(e) => setStart(e.target.value)} required />
-      <TextField label="Opening balance (hours)" type="number" step={0.5} value={opening} onChange={(e) => setOpening(e.target.value)} />
+      <TextField label={t('adm.common.from')} type="date" value={start} onChange={(e) => setStart(e.target.value)} required />
+      <TextField label={t('adm.to.opening')} type="number" step={0.5} value={opening} onChange={(e) => setOpening(e.target.value)} />
       <Button type="submit" disabled={!policyId || !userId || action.busy}>
-        Assign
+        {t('adm.to.assign')}
       </Button>
       <ActionError error={action.error} />
     </form>
@@ -154,18 +155,18 @@ function AssignmentRow({ a, onChanged }: { a: TimeOffAssignmentDTO; onChanged: (
         <td>
           <span className="row" style={{ gap: 8 }}>
             <Button size="sm" variant="quiet" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-              Adjust
+              {t('adm.to.adjust')}
             </Button>
             <Button
               size="sm"
               variant="danger"
               disabled={action.busy}
-              aria-label={`Remove ${a.user_name} from ${a.policy_name}`}
+              aria-label={t('adm.to.removeFrom', { name: a.user_name, policy: a.policy_name })}
               onClick={async () => {
                 if (await action.run(() => sched.admin.unassign(a.id))) onChanged();
               }}
             >
-              Remove
+              {t('adm.common.remove')}
             </Button>
           </span>
         </td>
@@ -175,10 +176,10 @@ function AssignmentRow({ a, onChanged }: { a: TimeOffAssignmentDTO; onChanged: (
           <td colSpan={5}>
             {open ? (
               <form onSubmit={adjust} className={s.inlineForm}>
-                <TextField label="Hours (+ or −)" type="number" step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
-                <TextField label="Note (shown to the person)" value={note} minLength={3} maxLength={500} onChange={(e) => setNote(e.target.value)} required />
+                <TextField label={t('adm.to.hoursSigned')} type="number" step={0.25} value={hours} onChange={(e) => setHours(e.target.value)} required />
+                <TextField label={t('adm.to.noteShown')} value={note} minLength={3} maxLength={500} onChange={(e) => setNote(e.target.value)} required />
                 <Button type="submit" disabled={!hours || Number(hours) === 0 || note.trim().length < 3 || action.busy}>
-                  Save adjustment
+                  {t('adm.to.saveAdjustment')}
                 </Button>
               </form>
             ) : null}
@@ -198,8 +199,8 @@ export default function TimeOffPoliciesPage() {
   const users = useApi(enabled ? 'admin:users' : null, (signal) => rd.admin.users(signal));
   const archive = useAction();
 
-  if (!access.isAdmin) return <NoAccess what="Time-off policies are managed by org admins." />;
-  if (!enabled) return <NoAccess what="Time off is part of the Standard and Pro plans. An org admin can change the plan in Billing." />;
+  if (!access.isAdmin) return <NoAccess what={t('adm.to.noAccessAdmin')} />;
+  if (!enabled) return <NoAccess what={t('adm.to.noAccessPlan')} />;
   const people = [...(users.data ?? [])].filter((u) => u.status === 'active').sort(byName);
   const active = (policies.data ?? []).filter((p) => !p.archived);
   const refresh = () => {
@@ -210,33 +211,33 @@ export default function TimeOffPoliciesPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Time off"
-        title="Time-off policies"
-        description="Policies decide how time off accrues. People request time off; their team managers (or an org admin) approve it, and approved hours come off the balance."
+        eyebrow={t('adm.to.eyebrow')}
+        title={t('adm.to.title')}
+        description={t('adm.to.description')}
       />
-      <Card title="New policy">
+      <Card title={t('adm.to.newPolicy')}>
         <PolicyForm onCreated={(p) => policies.mutate((prev) => [...(prev ?? []), p])} />
       </Card>
-      <Card title="Policies">
+      <Card title={t('adm.to.policies')}>
         <ActionError error={archive.error} />
-        <Resource {...policies} label="Loading policies">
+        <Resource {...policies} label={t('adm.to.loadingPolicies')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No policies yet" />
+              <Empty title={t('adm.to.noPolicies')} />
             ) : (
-              <TableBox label="Time-off policies">
+              <TableBox label={t('adm.to.title')}>
                 <table className={tableClass} style={{ minWidth: 640 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Name</th>
-                      <th scope="col">Kind</th>
-                      <th scope="col">Accrual</th>
-                      <th scope="col">Limits</th>
+                      <th scope="col">{t('adm.common.name')}</th>
+                      <th scope="col">{t('adm.to.kind')}</th>
+                      <th scope="col">{t('adm.to.accrual')}</th>
+                      <th scope="col">{t('adm.to.limits')}</th>
                       <th scope="col" className={numClass}>
-                        People
+                        {t('adm.to.people')}
                       </th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -244,15 +245,15 @@ export default function TimeOffPoliciesPage() {
                     {list.map((p) => (
                       <tr key={p.id}>
                         <td>
-                          {p.name} {p.archived ? <Badge>Archived</Badge> : null}
+                          {p.name} {p.archived ? <Badge>{t('adm.to.archived')}</Badge> : null}
                         </td>
-                        <td>{p.kind === 'paid' ? 'Paid' : 'Unpaid'}</td>
+                        <td>{p.kind === 'paid' ? t('adm.to.paid') : t('sched.unpaid')}</td>
                         <td>{accrualLabel(p)}</td>
                         <td className="small secondary">
                           {[
-                            p.max_balance_hours !== null ? `max ${formatHours(p.max_balance_hours)}` : null,
-                            p.carryover_hours !== null ? `carry over ${formatHours(p.carryover_hours)}` : null,
-                            p.allow_negative ? 'may go negative' : null,
+                            p.max_balance_hours !== null ? t('adm.to.maxOf', { hours: formatHours(p.max_balance_hours) }) : null,
+                            p.carryover_hours !== null ? t('adm.to.carryOf', { hours: formatHours(p.carryover_hours) }) : null,
+                            p.allow_negative ? t('adm.to.mayNegative') : null,
                           ]
                             .filter(Boolean)
                             .join(' · ') || '—'}
@@ -267,7 +268,7 @@ export default function TimeOffPoliciesPage() {
                               if (await archive.run(() => sched.admin.updatePolicy(p.id, { archived: !p.archived }))) refresh();
                             }}
                           >
-                            {p.archived ? 'Restore' : 'Archive'}
+                            {p.archived ? t('adm.to.restore') : t('adm.to.archive')}
                           </Button>
                         </td>
                       </tr>
@@ -279,25 +280,25 @@ export default function TimeOffPoliciesPage() {
           }
         </Resource>
       </Card>
-      <Card title="Who is on which policy">
+      <Card title={t('adm.to.who')}>
         {active.length > 0 ? <AssignForm policies={active} users={people} onAssigned={() => assignments.reload()} /> : null}
-        <Resource {...assignments} label="Loading assignments">
+        <Resource {...assignments} label={t('adm.to.loadingAssignments')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="Nobody is on a policy yet" />
+              <Empty title={t('adm.to.nobody')} />
             ) : (
-              <TableBox label="Assignments">
+              <TableBox label={t('adm.to.assignments')}>
                 <table className={tableClass} style={{ minWidth: 640 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Person</th>
-                      <th scope="col">Policy</th>
-                      <th scope="col">From</th>
+                      <th scope="col">{t('adm.common.person')}</th>
+                      <th scope="col">{t('sched.policy')}</th>
+                      <th scope="col">{t('adm.common.from')}</th>
                       <th scope="col" className={numClass}>
-                        Balance
+                        {t('adm.to.balance')}
                       </th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -311,7 +312,7 @@ export default function TimeOffPoliciesPage() {
             )
           }
         </Resource>
-        <p className="small muted">Accruals run automatically each month or year. Every change to a balance is in the person&apos;s balance history and the audit log.</p>
+        <p className="small muted">{t('adm.to.footer')}</p>
       </Card>
     </>
   );

@@ -15,11 +15,12 @@ import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataSta
 import { InlineSelect } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName, durationOrDash, formatDuration, percentOrDash, plural } from '@/lib/format';
+import { byName, durationOrDash, formatDuration, formatPercent, percentOrDash } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { limitsSummary, overtimeText, timesheetsApi } from '@/lib/timesheets';
 import { useAction, useApi } from '@/lib/useApi';
+import { t, tPlural } from '@/lib/i18n';
 import { NoAccess } from '../NoAccess';
 import s from './team.module.css';
 
@@ -34,40 +35,40 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
   const withNotes = [...report.members].sort(byName).filter((m) => m.notes.length > 0);
   const first = mine[0];
   return (
-    <Card title="Needs your attention" as="aside" className={s.attention}>
+    <Card title={t('mgr.team.attention')} as="aside" className={s.attention}>
       {mine.length > 0 ? (
         <Link href="/approvals" className={s.attItem}>
-          <span className={s.attTitle}>{plural(mine.length, 'correction')} to review →</span>
+          <span className={s.attTitle}>{tPlural(mine.length, 'mgr.team.toReview.one', 'mgr.team.toReview.other')}</span>
           {first ? (
             <span className={s.attBody}>
-              {first.user_name} · {first.kind === 'manual_add' ? 'manual time' : first.kind === 'idle_reassign' ? 'idle time moved' : 'edit'} · “{first.reason}”
+              {first.user_name} · {first.kind === 'manual_add' ? t('mgr.kind.manual') : first.kind === 'idle_reassign' ? t('mgr.kind.idle') : t('mgr.kind.edit')} · “{first.reason}”
             </span>
           ) : null}
         </Link>
       ) : (
         <div className={s.attItem}>
-          <span className={s.attTitle}>No corrections waiting</span>
-          <span className={s.attBody}>New requests from your team appear here and in Approvals.</span>
+          <span className={s.attTitle}>{t('mgr.team.noCorrections')}</span>
+          <span className={s.attBody}>{t('mgr.team.noCorrectionsBody')}</span>
         </div>
       )}
       {withNotes.length > 0 ? (
         <div className={`${s.attItem} ${s.attWarn}`}>
-          <span className={s.attTitle}>Data notes for {plural(withNotes.length, 'person', 'people')}</span>
+          <span className={s.attTitle}>{tPlural(withNotes.length, 'mgr.team.notesFor.one', 'mgr.team.notesFor.other')}</span>
           <span className={s.attBody}>
             {withNotes
               .slice(0, 3)
               .map((m) => `${m.display_name}: ${m.notes.join('; ')}`)
               .join(' · ')}
-            . Unmeasured minutes are marked as such, not as idle.
+            {t('mgr.team.unmeasured')}
           </span>
         </div>
       ) : null}
       <div className={s.attItem}>
-        <span className={s.attTitle}>Screenshots</span>
+        <span className={s.attTitle}>{t('day.screenshots')}</span>
         <span className={s.attBody}>
           {report.visibility.screenshots
-            ? 'Policy lets you view screenshots for some members. Every view is recorded and shown to the employee.'
-            : "Screenshots aren't shared with you for this team."}
+            ? t('mgr.team.shotsShared')
+            : t('mgr.team.shotsNotShared')}
         </span>
       </div>
     </Card>
@@ -77,44 +78,44 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
 function MembersTable({ report, week, overtime }: { report: TeamReport; week: string; overtime?: TeamOvertimeReport }) {
   const rows = [...report.members].sort(byName);
   const showActivity = report.visibility.activity;
-  if (rows.length === 0) return <Empty title="No members in this team yet" />;
+  if (rows.length === 0) return <Empty title={t('mgr.team.noMembers')} />;
   return (
-    <TableBox label="Team members">
+    <TableBox label={t('mgr.team.membersLabel')}>
       <table className={tableClass} style={{ minWidth: 680 }}>
-        <caption className="visually-hidden">Team members sorted by name</caption>
+        <caption className="visually-hidden">{t('mgr.team.membersCaption')}</caption>
         <thead>
           <tr>
             <th scope="col" aria-sort="ascending">
-              Name ▴
+              {t('mgr.col.nameSorted')}
             </th>
             <th scope="col" className={numClass}>
-              Tracked
+              {t('mgr.col.tracked')}
             </th>
             {showActivity ? (
               <th scope="col">
                 <span className={s.thActivity}>
-                  Activity <ActivityInfo />
+                  {t('mgr.col.activity')} <ActivityInfo />
                 </span>
               </th>
             ) : null}
             <th scope="col" className={numClass}>
-              Not measured
+              {t('tiles.notMeasured')}
             </th>
             <th scope="col" className={numClass}>
-              Manual
+              {t('session.manual')}
             </th>
             <th scope="col" className={numClass}>
-              Days
+              {t('mgr.col.days')}
             </th>
             {overtime ? (
               <>
                 <th scope="col" className={numClass}>
-                  Over limit
+                  {t('mgr.col.over')}
                 </th>
-                <th scope="col">Timesheet</th>
+                <th scope="col">{t('mgr.col.timesheet')}</th>
               </>
             ) : null}
-            <th scope="col">Data notes</th>
+            <th scope="col">{t('mgr.col.notes')}</th>
           </tr>
         </thead>
         <tbody>
@@ -132,7 +133,7 @@ function MembersTable({ report, week, overtime }: { report: TeamReport; week: st
                     <span className="mono muted">—</span>
                   ) : (
                     <span className={s.act}>
-                      <span className={s.actNum}>{m.activity_percent}%</span>
+                      <span className={s.actNum}>{formatPercent(m.activity_percent)}</span>
                       <span className={s.actTrack} aria-hidden="true">
                         <span className={s.actFill} style={{ width: `${m.activity_percent}%` }} />
                       </span>
@@ -158,58 +159,61 @@ function TeamInsightsCard({ teamId, range, tz, isAdmin }: { teamId: string; rang
   const insights = useApi(`team:insights|${teamId}|${range.from}|${tz}`, (signal) => rd.teams.insights(teamId, range, tz, signal));
   const e = insights.error;
   return (
-    <Card title="Team wellbeing" subtitle="Averages per person · no individual figures">
+    <Card title={t('mgr.ins.title')} subtitle={t('mgr.ins.subtitle')}>
       {e?.code === 'insufficient_group_size' ? (
-        <Empty title="Not shown for small teams">{e.message}</Empty>
+        <Empty title={t('mgr.ins.small')}>{e.message}</Empty>
       ) : e?.status === 402 ? (
-        <Empty title="Team insights are part of Pro">
-          {isAdmin ? <Link href="/admin/billing">Compare plans →</Link> : 'Ask an org admin about upgrading.'}
+        <Empty title={t('mgr.ins.pro')}>
+          {isAdmin ? <Link href="/admin/billing">{t('mgr.comparePlans')}</Link> : t('mgr.ins.askAdmin')}
         </Empty>
       ) : e ? (
         <ErrorState error={e} onRetry={insights.reload} />
       ) : !insights.data ? (
-        <Loading label="Loading team insights" />
+        <Loading label={t('mgr.ins.loading')} />
       ) : (
         <>
           <Stats
             items={[
               {
-                label: 'Tracked vs expected',
+                label: t('ins.vsExpected'),
                 value: percentOrDash(insights.data.utilization.percent),
-                note: `${formatDuration(insights.data.utilization.tracked_seconds)} of ${formatDuration(insights.data.utilization.expected_seconds)} per person`,
+                note: t('mgr.ins.perPerson', {
+                  tracked: formatDuration(insights.data.utilization.tracked_seconds),
+                  expected: formatDuration(insights.data.utilization.expected_seconds),
+                }),
               },
               {
-                label: 'Focus / person',
+                label: t('mgr.ins.focus'),
                 value: formatDuration(insights.data.per_person.focus_seconds),
-                note: `${percentOrDash(insights.data.focus_share_percent)} of tracked`,
+                note: t('mgr.ins.ofTracked', { pct: percentOrDash(insights.data.focus_share_percent) }),
               },
               {
-                label: 'Outside hours / person',
+                label: t('mgr.ins.outside'),
                 value: formatDuration(insights.data.per_person.after_hours_seconds),
-                note: `${insights.data.people_with_after_hours} of ${insights.data.member_count} people`,
+                note: t('mgr.ins.ofPeople', { n: insights.data.people_with_after_hours, total: insights.data.member_count }),
               },
               {
-                label: 'People with a long day',
+                label: t('mgr.ins.longDay'),
                 value: `${insights.data.people_with_long_days} / ${insights.data.member_count}`,
-                note: 'More than 10 hours tracked',
+                note: t('mgr.ins.longDayNote'),
               },
             ]}
           />
           <p className={expectedStyles.counts}>
             <span>
               <span className={expectedStyles.under} aria-hidden="true" />
-              {insights.data.utilization.under} under expected
+              {t('mgr.ins.under', { n: insights.data.utilization.under })}
             </span>
             <span>
               <span className={expectedStyles.about} aria-hidden="true" />
-              {insights.data.utilization.about} about as expected (±{UTILIZATION_BAND_PERCENT}%)
+              {t('mgr.ins.about', { n: insights.data.utilization.about, band: UTILIZATION_BAND_PERCENT })}
             </span>
             <span>
               <span className={expectedStyles.over} aria-hidden="true" />
-              {insights.data.utilization.over} over
+              {t('mgr.ins.over', { n: insights.data.utilization.over })}
             </span>
-            {insights.data.utilization.none ? <span>{insights.data.utilization.none} with nothing expected</span> : null}
-            <span className="muted">Counts only — never who.</span>
+            {insights.data.utilization.none ? <span>{t('mgr.ins.none', { n: insights.data.utilization.none })}</span> : null}
+            <span className="muted">{t('mgr.ins.countsOnly')}</span>
           </p>
         </>
       )}
@@ -260,10 +264,10 @@ export default function TeamPage() {
     (signal) => timesheetsApi.teamOvertime(current!.id, week, addDays(week, 6), signal),
   );
 
-  if (!access.managesTeams) return <NoAccess what="Team reports are for team managers." />;
+  if (!access.managesTeams) return <NoAccess what={t('mgr.team.noAccess')} />;
   if (teams.error) return <ErrorState error={teams.error} onRetry={teams.reload} />;
-  if (!teams.data) return <Loading label="Loading your teams" />;
-  if (!current) return <Empty title="You don't manage any teams yet" />;
+  if (!teams.data) return <Loading label={t('mgr.team.loadingTeams')} />;
+  if (!current) return <Empty title={t('mgr.team.noTeams')} />;
 
   const doExport = async () => {
     setExported(false);
@@ -276,13 +280,13 @@ export default function TeamPage() {
   return (
     <>
       <PageHeader
-        eyebrow={`Team manager · ${plural(current.member_count, 'member')}`}
-        title={`Team · ${current.name}`}
-        description="Time and computer activity for the people you manage — the same numbers they see on their own pages."
+        eyebrow={tPlural(current.member_count, 'mgr.team.eyebrow.one', 'mgr.team.eyebrow.other')}
+        title={t('mgr.team.title', { name: current.name })}
+        description={t('mgr.team.description')}
         actions={
           <>
             {sortedTeams.length > 1 ? (
-              <InlineSelect label="Team" value={current.id} onChange={(e) => setTeamId(e.target.value)}>
+              <InlineSelect label={t('nav.team')} value={current.id} onChange={(e) => setTeamId(e.target.value)}>
                 {sortedTeams.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -290,8 +294,8 @@ export default function TeamPage() {
                 ))}
               </InlineSelect>
             ) : null}
-            <InlineSelect label="Project" value={projectId ?? ''} onChange={(e) => setProjectId(e.target.value || null)}>
-              <option value="">All projects</option>
+            <InlineSelect label={t('mgr.project')} value={projectId ?? ''} onChange={(e) => setProjectId(e.target.value || null)}>
+              <option value="">{t('mgr.allProjects')}</option>
               {projectOptions(report.data, projectId).map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -304,38 +308,37 @@ export default function TeamPage() {
               tz={tz}
               step={7}
               unit="week"
-              label={`${week === startOfWeek(todayInTz(tz)) ? 'This week · ' : ''}${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
+              label={`${week === startOfWeek(todayInTz(tz)) ? t('ts.thisWeekPrefix') : ''}${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
             />
             <Button variant="primary" onClick={doExport} disabled={exportAction.busy}>
-              {exportAction.busy ? 'Exporting…' : 'Export CSV →'}
+              {exportAction.busy ? t('mgr.exporting') : t('mgr.exportCsv')}
             </Button>
           </>
         }
       />
       <ActionError error={exportAction.error} />
       {exported ? (
-        <Banner role="status" title="Export queued" actions={<Link href="/exports">Open exports →</Link>}>
-          The CSV for this week is being prepared. Creating it is recorded in the audit log.
+        <Banner role="status" title={t('mgr.team.exportQueued')} actions={<Link href="/exports">{t('mgr.team.openExports')}</Link>}>
+          {t('mgr.team.exportBody')}
         </Banner>
       ) : null}
       <Banner tag="NOTE">
-        Sorted by name. Computer activity describes device input during measurable time — not performance, and never the
-        only basis for a decision about someone.
+        {t('mgr.team.note')}
       </Banner>
 
       {report.error ? (
         <ErrorState error={report.error} onRetry={report.reload} />
       ) : !report.data ? (
-        <Loading label="Loading the team report" />
+        <Loading label={t('mgr.team.loadingReport')} />
       ) : (
         <>
           <div className="row">
-            <Card title="Members" className={s.members}>
+            <Card title={t('mgr.team.members')} className={s.members}>
               <MembersTable report={report.data} week={week} overtime={overtime.data} />
             </Card>
             <Attention report={report.data} pending={pending.data ?? []} />
           </div>
-          <StackedDailyChart title="Team hours by project, per day" daily={report.data.daily} tz={tz} />
+          <StackedDailyChart title={t('mgr.team.chartTitle')} daily={report.data.daily} tz={tz} />
           <TeamInsightsCard teamId={current.id} range={{ from: range.from, to: range.to }} tz={tz} isAdmin={access.isAdmin} />
         </>
       )}
@@ -347,6 +350,6 @@ export default function TeamPage() {
 function projectOptions(report: TeamReport | null | undefined, selected: string | null): { id: string; name: string }[] {
   const seen = new Map<string, string>();
   for (const d of report?.daily ?? []) for (const p of d.projects) if (p.project_id) seen.set(p.project_id, p.project_name);
-  if (selected && !seen.has(selected)) seen.set(selected, 'Selected project');
+  if (selected && !seen.has(selected)) seen.set(selected, t('mgr.team.selectedProject'));
   return [...seen].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
 }

@@ -9,6 +9,8 @@ import {
   type ScopeType,
   type WorkHours,
 } from '@rd/contracts';
+import { t, type MessageKey } from './i18n';
+import { weekdayShort } from './time';
 
 /**
  * Policy editor model: converts a scope's partial settings document to per-field
@@ -192,14 +194,58 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
   },
 };
 
+/** Group names as written above → their catalogue ids. */
+const GROUP_ID: Record<string, string> = {
+  Screenshots: 'screenshots',
+  'Who can see it': 'viewers',
+  Applications: 'apps',
+  Sessions: 'sessions',
+  Retention: 'retention',
+  Offline: 'offline',
+  Other: 'other',
+};
+
+/** A unit ("days") in the reader's language; symbols ("min", "px") stay. */
+export const unitLabel = (unit: string | undefined): string | undefined =>
+  unit === 'days' ? t('adm.pf.unit.days') : unit;
+
+/**
+ * Labels, help and option names are read in the current language each time (G27); the
+ * English above is the source (the catalogue repeats it word for word).
+ */
+function localized(key: string, m: Omit<FieldMeta, 'key'>): FieldMeta {
+  const known = key in META;
+  const tk = (part: string) => `adm.pf.${key}.${part}` as MessageKey;
+  return {
+    key,
+    kind: m.kind,
+    min: m.min,
+    max: m.max,
+    get unit() {
+      return unitLabel(m.unit);
+    },
+    get group() {
+      return t(`adm.pf.group.${GROUP_ID[m.group] ?? 'other'}` as MessageKey);
+    },
+    get label() {
+      return known ? t(tk('label')) : m.label;
+    },
+    get help() {
+      return known ? t(tk('help')) : m.help;
+    },
+    get options() {
+      return m.options?.map((o) => ({ value: o.value, label: t(`adm.pf.${key}.opt.${o.value}` as MessageKey) }));
+    },
+  };
+}
+
 export const POLICY_FIELDS: FieldMeta[] = POLICY_FIELD_RULES.map((r) => {
   const key = fieldKey(r);
-  const m = META[key] ?? { group: 'Other', label: key, help: '', kind: 'bool' as FieldKind };
-  return { key, ...m };
+  return localized(key, META[key] ?? { group: 'Other', label: key, help: '', kind: 'bool' as FieldKind });
 });
 
 export function fieldMeta(key: string): FieldMeta {
-  return POLICY_FIELDS.find((f) => f.key === key) ?? { key, group: 'Other', label: key, help: '', kind: 'bool' };
+  return POLICY_FIELDS.find((f) => f.key === key) ?? localized(key, { group: 'Other', label: key, help: '', kind: 'bool' });
 }
 
 export interface WorkHoursInput {
@@ -304,12 +350,12 @@ export function partialFromForm(form: PolicyForm): FormConversion {
       case 'number': {
         const raw = input.text.trim();
         if (!/^-?\d+$/.test(raw)) {
-          errors[f.key] = 'Enter a whole number';
+          errors[f.key] = t('adm.pf.err.whole');
           break;
         }
         const n = Number(raw);
         if ((f.min !== undefined && n < f.min) || (f.max !== undefined && n > f.max)) {
-          errors[f.key] = `Must be between ${f.min} and ${f.max}${f.unit ? ` ${f.unit}` : ''}`;
+          errors[f.key] = f.unit ? t('adm.pf.err.betweenUnit', { min: f.min ?? '', max: f.max ?? '', unit: f.unit }) : t('adm.pf.err.between', { min: f.min ?? '', max: f.max ?? '' });
           break;
         }
         put(f.key, n);
@@ -317,7 +363,7 @@ export function partialFromForm(form: PolicyForm): FormConversion {
       }
       case 'enum':
         if (!f.options?.some((o) => o.value === input.text)) {
-          errors[f.key] = 'Choose an option';
+          errors[f.key] = t('adm.pf.err.option');
           break;
         }
         put(f.key, input.text);
@@ -328,15 +374,15 @@ export function partialFromForm(form: PolicyForm): FormConversion {
       case 'work_hours': {
         const wh = input.wh;
         if (wh.days.length === 0) {
-          errors[f.key] = 'Choose at least one day';
+          errors[f.key] = t('adm.pf.err.day');
           break;
         }
         if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(wh.start) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(wh.end)) {
-          errors[f.key] = 'Times must be HH:MM';
+          errors[f.key] = t('adm.pf.err.time');
           break;
         }
         if (!wh.timezone.trim()) {
-          errors[f.key] = 'Choose a time zone';
+          errors[f.key] = t('adm.pf.err.tz');
           break;
         }
         put(f.key, {
@@ -377,32 +423,30 @@ function stableStringify(v: unknown): string {
   return JSON.stringify(v);
 }
 
-const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 function formatDays(days: readonly number[]): string {
   const sorted = [...days].sort((a, b) => a - b);
   const contiguous = sorted.every((d, i) => i === 0 || d === (sorted[i - 1] ?? 0) + 1);
-  if (contiguous && sorted.length > 2) return `${DAY_NAMES[(sorted[0] ?? 1) - 1]}–${DAY_NAMES[(sorted[sorted.length - 1] ?? 1) - 1]}`;
-  return sorted.map((d) => DAY_NAMES[d - 1]).join(', ');
+  if (contiguous && sorted.length > 2) return `${weekdayShort(sorted[0] ?? 1)}–${weekdayShort(sorted[sorted.length - 1] ?? 1)}`;
+  return sorted.map((d) => weekdayShort(d)).join(', ');
 }
 
 /** Human value for a field: "On", "15 min", "Self-service", "Mon–Fri 09:00–17:00 (Europe/London)". */
 export function formatFieldValue(key: string, v: unknown): string {
   const f = fieldMeta(key);
-  if (v === undefined) return 'Not set';
+  if (v === undefined) return t('adm.pf.notSet');
   if (f.kind === 'work_hours') {
-    if (v === null) return 'No limit';
+    if (v === null) return t('adm.pf.noLimit');
     const wh = v as WorkHours;
     return `${formatDays(wh.days)} ${wh.start}–${wh.end} (${wh.timezone})`;
   }
-  if (typeof v === 'boolean') return v ? 'On' : 'Off';
+  if (typeof v === 'boolean') return v ? t('adm.pf.on') : t('adm.pf.off');
   if (typeof v === 'number') {
     if (key === 'idle.threshold_seconds' && v % 60 === 0) return `${v / 60} min`;
     return f.unit ? `${v} ${f.unit}` : String(v);
   }
-  if (Array.isArray(v)) return v.length ? v.join(', ') : 'None';
+  if (Array.isArray(v)) return v.length ? v.join(', ') : t('adm.pf.none');
   if (typeof v === 'string') return f.options?.find((o) => o.value === v)?.label ?? v;
-  if (v === null) return 'None';
+  if (v === null) return t('adm.pf.none');
   return JSON.stringify(v);
 }
 
@@ -410,29 +454,25 @@ export function describeChange(c: CollectionChange): string {
   return `${fieldMeta(c.field).label}: ${formatFieldValue(c.field, c.from).toLowerCase()} → ${formatFieldValue(c.field, c.to).toLowerCase()}`;
 }
 
-const SCOPE_LABEL: Record<string, string> = {
-  plan: 'Your plan',
-  organization: 'Organization',
-  team: 'Team',
-  project: 'Project',
-  device: 'Device',
-};
+/** "Team", "Project"…, in the reader's language. */
+export const scopeLabel = (type: string): string =>
+  ['organization', 'team', 'project', 'device'].includes(type) ? t(`adm.scope.${type}` as MessageKey) : type;
 
 /** "because …" text for the effective value of a field. */
 export function describeSources(
   sources: readonly FieldSource[] | undefined,
   current: { scope_type: ScopeType; scope_id: string },
 ): string {
-  if (!sources || sources.length === 0) return 'Default — no scope sets it';
+  if (!sources || sources.length === 0) return t('adm.pf.src.default');
   const names = sources.map((s) => {
-    if (s.scope_type === current.scope_type && s.scope_id === current.scope_id) return 'this scope';
-    if (s.scope_type === 'plan') return 'your plan';
-    const label = SCOPE_LABEL[s.scope_type] ?? s.scope_type;
-    return s.name ? `${label} ${s.name}` : label.toLowerCase();
+    if (s.scope_type === current.scope_type && s.scope_id === current.scope_id) return t('adm.pf.src.thisScope');
+    if (s.scope_type === 'plan') return t('adm.pf.src.yourPlan');
+    const label = scopeLabel(s.scope_type);
+    return s.name ? t('adm.pf.src.named', { scope: label, name: s.name }) : label.toLowerCase();
   });
   const unique = [...new Set(names)];
-  const text = unique.length > 1 ? `${unique.slice(0, -1).join(', ')} and ${unique[unique.length - 1]}` : unique[0]!;
-  return `Because ${text} ${unique.length > 1 ? 'set' : 'sets'} it`;
+  const text = unique.length > 1 ? t('adm.pf.src.and', { list: unique.slice(0, -1).join(', '), last: unique[unique.length - 1]! }) : unique[0]!;
+  return t(unique.length > 1 ? 'adm.pf.src.because.other' : 'adm.pf.src.because.one', { who: text });
 }
 
 /** Per-field diff between the stored document and the edited one, for the publish review. */

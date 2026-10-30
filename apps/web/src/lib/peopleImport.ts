@@ -1,4 +1,5 @@
 import type { OrgRole, UserImportRow } from '@rd/contracts';
+import { t } from './i18n';
 
 /** RFC 4180 CSV: quoted fields, doubled quotes, commas and newlines inside quotes, CRLF or LF. */
 export function parseCsv(text: string): string[][] {
@@ -71,9 +72,9 @@ export const IMPORT_TEMPLATE = 'email,name,role,timezone,tracks time,team\nana@e
  */
 export function rowsFromCsv(text: string, defaultTz: string): { rows: Record<string, unknown>[]; problem: string | null } {
   const table = parseCsv(text);
-  if (table.length < 2) return { rows: [], problem: 'Add a header line and at least one person.' };
+  if (table.length < 2) return { rows: [], problem: t('mgr.import.needRows') };
   const keys = table[0]!.map((h) => HEADERS[h.trim().toLowerCase()] ?? null);
-  if (!keys.includes('email') || !keys.includes('display_name')) return { rows: [], problem: 'The first line needs an "email" and a "name" column.' };
+  if (!keys.includes('email') || !keys.includes('display_name')) return { rows: [], problem: t('mgr.import.needColumns') };
   const rows = table.slice(1).map((cells) => {
     const r: Record<string, unknown> = { timezone: defaultTz };
     keys.forEach((k, i) => {

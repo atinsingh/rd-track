@@ -1,5 +1,6 @@
 import { PLANS, monthsPerInvoice, type BillingInterval, type PlanId } from '@rd/contracts';
 import { formatPrice } from './format';
+import { t } from './i18n';
 
 /** "$2.50" or "$5" — whole dollars without cents. */
 export const price = (cents: number) => formatPrice(cents);
@@ -7,7 +8,7 @@ export const price = (cents: number) => formatPrice(cents);
 /** How a seat price reads for a term: "$2.50 per user / month, billed annually". */
 export function seatPriceText(cents: number, interval: BillingInterval): string {
   if (cents === 0) return price(0);
-  return interval === 'year' ? `${price(cents)} per user / month, billed annually` : `${price(cents)} per user / month`;
+  return t(interval === 'year' ? 'money.billing.seatYear' : 'money.billing.seatMonth', { price: price(cents) });
 }
 
 /** What one invoice comes to for `seats` seats on a plan and term. */

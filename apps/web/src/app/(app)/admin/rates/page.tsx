@@ -3,7 +3,6 @@
 import { useState, type FormEvent } from 'react';
 import {
   PAYROLL_ADJUSTMENT_KINDS,
-  PAYROLL_ADJUSTMENT_LABELS,
   type BillRateDTO,
   type BudgetKind,
   type BudgetResets,
@@ -22,16 +21,17 @@ import { Banner, Card, PageHeader, formActionsClass, formGridClass } from '@/com
 import { rd } from '@/lib/api';
 import { byName, formatMoney, formatPercent } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { CURRENCIES, adjustmentWhen, centsToInput, formatRate, latestBy, parseHoursInput, parseMoneyInput, parseThresholds } from '@/lib/money';
+import { CURRENCIES, adjustmentWhen, centsToInput, decimalToInput, formatRate, latestBy, parseHoursInput, parseMoneyInput, parseThresholds } from '@/lib/money';
 import { formatDayLabel, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t, tPlural } from '@/lib/i18n';
 import { MoneyGate } from '../MoneyGate';
 import s from '../admin.module.css';
 import m from '../money.module.css';
 
 function CurrencyField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   return (
-    <SelectField label="Currency" value={value} onChange={(e) => onChange(e.target.value)}>
+    <SelectField label={t('money.rates.currency')} value={value} onChange={(e) => onChange(e.target.value)}>
       {CURRENCIES.map((c) => (
         <option key={c} value={c}>
           {c}
@@ -50,14 +50,20 @@ function useRateFields(today: string) {
   const fields = (
     <>
       <TextField
-        label="Hourly rate"
+        label={t('money.rates.hourly')}
         inputMode="decimal"
         value={amount}
         onChange={(e) => setAmount(e.target.value)}
-        error={amount && cents === null ? 'Enter an amount such as 45 or 45.50' : null}
+        error={amount && cents === null ? t('money.rates.hourlyInvalid') : null}
       />
       <CurrencyField value={currency} onChange={setCurrency} />
-      <TextField label="Starts on" type="date" value={from} onChange={(e) => setFrom(e.target.value)} hint="Earlier time keeps its earlier rate" />
+      <TextField
+        label={t('money.rates.startsOn')}
+        type="date"
+        value={from}
+        onChange={(e) => setFrom(e.target.value)}
+        hint={t('money.rates.startsHint')}
+      />
     </>
   );
   return { fields, cents, currency, from, reset: () => setAmount('') };
@@ -81,12 +87,13 @@ function RateHistory<T extends PayRateDTO | BillRateDTO>({
       {rows.map((r) => (
         <li key={r.id}>
           <span>
-            {label(r)} <span className={m.amount}>{formatRate(r.amount_cents, r.currency)}</span> from {formatDayLabel(r.effective_from)}
-            {r.effective_from > today ? ' (scheduled)' : ''}
+            {label(r)} <span className={m.amount}>{formatRate(r.amount_cents, r.currency)}</span>{' '}
+            {t('money.rates.fromDate', { date: formatDayLabel(r.effective_from) })}
+            {r.effective_from > today ? t('money.rates.scheduled') : ''}
           </span>
           {r.effective_from > today ? (
             <Button size="sm" variant="quiet" onClick={() => onDelete(r)} disabled={busy}>
-              Cancel
+              {t('money.rates.cancel')}
             </Button>
           ) : null}
         </li>
@@ -121,14 +128,12 @@ function PayRates({ users, today }: { users: UserDTO[]; today: string }) {
   };
 
   return (
-    <Card title="Pay rates" subtitle="What each person is paid per hour">
-      <Banner tag="PRIVATE">
-        Each person sees only their own pay rate. Viewing this list is recorded in each person&apos;s access log, and every change is audited.
-      </Banner>
+    <Card title={t('money.rates.payTitle')} subtitle={t('money.rates.paySub')}>
+      <Banner tag="PRIVATE">{t('money.rates.payPrivate')}</Banner>
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
-          <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)}>
-            <option value="">Choose a person…</option>
+          <SelectField label={t('money.rates.person')} value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">{t('money.rates.choosePerson')}</option>
             {people.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.display_name}
@@ -139,19 +144,19 @@ function PayRates({ users, today }: { users: UserDTO[]; today: string }) {
         </div>
         <div className={formActionsClass}>
           <Button type="submit" variant="primary" disabled={!userId || f.cents === null || action.busy}>
-            Add pay rate
+            {t('money.rates.addPay')}
           </Button>
         </div>
       </form>
       <ActionError error={action.error} />
       {!shown ? (
         <div>
-          <Button onClick={() => setShown(true)}>Show pay rates</Button>
+          <Button onClick={() => setShown(true)}>{t('money.rates.showPay')}</Button>
         </div>
       ) : (
-        <Resource {...rates} label="Loading pay rates">
+        <Resource {...rates} label={t('money.rates.loadingPay')}>
           {(list) => {
-            if (list.length === 0) return <Empty title="No pay rates yet" />;
+            if (list.length === 0) return <Empty title={t('money.rates.noPay')} />;
             const current = latestBy(list, (r) => r.user_id, today);
             const byUser = new Map<string, PayRateDTO[]>();
             for (const r of list) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), r]);
@@ -167,7 +172,9 @@ function PayRates({ users, today }: { users: UserDTO[]; today: string }) {
                           <summary>
                             <span className={s.summaryName}>{rows[0]!.user_name}</span>
                             <span className={m.amount}>
-                              {cur ? `${formatRate(cur.amount_cents, cur.currency)} since ${formatDayLabel(cur.effective_from)}` : 'Starts later'}
+                              {cur
+                                ? t('money.rates.since', { rate: formatRate(cur.amount_cents, cur.currency), date: formatDayLabel(cur.effective_from) })
+                                : t('money.rates.startsLater')}
                             </span>
                           </summary>
                           <div className={s.detail}>
@@ -237,70 +244,81 @@ function PayAdjustments({ users, today }: { users: UserDTO[]; today: string }) {
   };
 
   return (
-    <Card title="Bonuses and deductions" subtitle="One-off or every pay period, on top of hours × rate">
+    <Card title={t('money.rates.adjTitle')} subtitle={t('money.rates.adjSub')}>
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
-          <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)}>
-            <option value="">Choose a person…</option>
+          <SelectField label={t('money.rates.person')} value={userId} onChange={(e) => setUserId(e.target.value)}>
+            <option value="">{t('money.rates.choosePerson')}</option>
             {people.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.display_name}
               </option>
             ))}
           </SelectField>
-          <SelectField label="Kind" value={kind} onChange={(e) => setKind(e.target.value as PayrollAdjustmentKind)}>
+          <SelectField label={t('money.rates.kind')} value={kind} onChange={(e) => setKind(e.target.value as PayrollAdjustmentKind)}>
             {PAYROLL_ADJUSTMENT_KINDS.map((k) => (
               <option key={k} value={k}>
-                {PAYROLL_ADJUSTMENT_LABELS[k]}
+                {t(`pay.kind.${k}`)}
               </option>
             ))}
           </SelectField>
           <TextField
-            label="Amount"
+            label={t('money.rates.amount')}
             inputMode="decimal"
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
-            error={amount && (cents === null || cents < 1) ? 'Enter an amount such as 500 or 49.99' : null}
+            error={amount && (cents === null || cents < 1) ? t('money.rates.amountInvalid') : null}
           />
           <CurrencyField value={currency} onChange={setCurrency} />
-          <SelectField label="How often" value={recurrence} onChange={(e) => setRecurrence(e.target.value as PayrollAdjustmentDTO['recurrence'])}>
-            <option value="once">Once</option>
-            <option value="every_period">Every pay period</option>
+          <SelectField
+            label={t('money.rates.howOften')}
+            value={recurrence}
+            onChange={(e) => setRecurrence(e.target.value as PayrollAdjustmentDTO['recurrence'])}
+          >
+            <option value="once">{t('money.rates.once')}</option>
+            <option value="every_period">{t('money.rates.every')}</option>
           </SelectField>
           <TextField
-            label={recurrence === 'once' ? 'In the pay period with' : 'From'}
+            label={recurrence === 'once' ? t('money.rates.inPeriodWith') : t('money.rates.fromLabel')}
             type="date"
             value={from}
             onChange={(e) => setFrom(e.target.value)}
           />
           {recurrence === 'every_period' ? (
             <TextField
-              label="Until (optional)"
+              label={t('money.rates.untilOptional')}
               type="date"
               value={to}
               min={from}
               onChange={(e) => setTo(e.target.value)}
-              error={badEnd ? 'The end date is before the start date.' : null}
+              error={badEnd ? t('money.rates.endBefore') : null}
             />
           ) : null}
         </div>
-        <TextArea label="Note" hint="The person sees this, e.g. “Q3 bonus” or “Parking”" rows={2} maxLength={300} value={note} onChange={(e) => setNote(e.target.value)} />
+        <TextArea
+          label={t('money.rates.note')}
+          hint={t('money.rates.noteHint')}
+          rows={2}
+          maxLength={300}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+        />
         <div className={formActionsClass}>
           <Button type="submit" variant="primary" disabled={!ready || action.busy}>
-            Add {PAYROLL_ADJUSTMENT_LABELS[kind].toLowerCase()}
+            {t(`money.rates.add.${kind}`)}
           </Button>
         </div>
       </form>
       <ActionError error={action.error} />
       {!shown ? (
         <div>
-          <Button onClick={() => setShown(true)}>Show bonuses and deductions</Button>
+          <Button onClick={() => setShown(true)}>{t('money.rates.showAdj')}</Button>
         </div>
       ) : (
-        <Resource {...list} label="Loading bonuses and deductions">
+        <Resource {...list} label={t('money.rates.loadingAdj')}>
           {(rows) =>
             rows.length === 0 ? (
-              <Empty title="None yet" />
+              <Empty title={t('money.rates.noneYet')} />
             ) : (
               <ul className={m.history}>
                 {rows.map((a) => {
@@ -308,7 +326,7 @@ function PayAdjustments({ users, today }: { users: UserDTO[]; today: string }) {
                   return (
                     <li key={a.id}>
                       <span>
-                        <strong>{a.user_name}</strong> · {PAYROLL_ADJUSTMENT_LABELS[a.kind]}{' '}
+                        <strong>{a.user_name}</strong> · {t(`pay.kind.${a.kind}`)}{' '}
                         <span className={m.amount}>
                           {a.kind === 'deduction' ? '−' : ''}
                           {formatMoney(a.amount_cents, a.currency)}
@@ -316,16 +334,16 @@ function PayAdjustments({ users, today }: { users: UserDTO[]; today: string }) {
                         · {a.note}
                         <span className="small muted" style={{ display: 'block' }}>
                           {adjustmentWhen(a)}
-                          {ended ? ' · ended' : ''}
+                          {ended ? t('money.rates.ended') : ''}
                         </span>
                       </span>
                       {a.recurrence === 'once' || a.effective_from > today ? (
                         <Button size="sm" variant="quiet" onClick={() => remove(a)} disabled={action.busy}>
-                          Remove
+                          {t('money.rates.remove')}
                         </Button>
                       ) : !a.effective_to || a.effective_to > today ? (
                         <Button size="sm" variant="quiet" onClick={() => end(a)} disabled={action.busy}>
-                          End today
+                          {t('money.rates.endToday')}
                         </Button>
                       ) : null}
                     </li>
@@ -363,11 +381,11 @@ function BillRates({ users, projects, today }: { users: UserDTO[]; projects: Pro
     if (await action.run(() => rd.money.deleteBillRate(r.id))) rates.reload();
   };
   return (
-    <Card title="Bill rates" subtitle="What clients are charged per hour, per project">
+    <Card title={t('money.rates.billTitle')} subtitle={t('money.rates.billSub')}>
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
-          <SelectField label="Project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-            <option value="">Choose a project…</option>
+          <SelectField label={t('money.rates.project')} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+            <option value="">{t('money.rates.chooseProject')}</option>
             {[...projects]
               .sort((a, b) => a.name.localeCompare(b.name))
               .map((p) => (
@@ -376,8 +394,8 @@ function BillRates({ users, projects, today }: { users: UserDTO[]; projects: Pro
                 </option>
               ))}
           </SelectField>
-          <SelectField label="For" value={userId} onChange={(e) => setUserId(e.target.value)} hint="A person's own rate overrides the project default">
-            <option value="">Everyone (project default)</option>
+          <SelectField label={t('money.rates.for')} value={userId} onChange={(e) => setUserId(e.target.value)} hint={t('money.rates.forHint')}>
+            <option value="">{t('money.rates.everyoneDefault')}</option>
             {users
               .filter((u) => u.status === 'active')
               .sort(byName)
@@ -391,14 +409,14 @@ function BillRates({ users, projects, today }: { users: UserDTO[]; projects: Pro
         </div>
         <div className={formActionsClass}>
           <Button type="submit" variant="primary" disabled={!projectId || f.cents === null || action.busy}>
-            Add bill rate
+            {t('money.rates.addBill')}
           </Button>
         </div>
       </form>
       <ActionError error={action.error} />
-      <Resource {...rates} label="Loading bill rates">
+      <Resource {...rates} label={t('money.rates.loadingBill')}>
         {(list) => {
-          if (list.length === 0) return <Empty title="No bill rates yet" />;
+          if (list.length === 0) return <Empty title={t('money.rates.noBill')} />;
           const byProject = new Map<string, BillRateDTO[]>();
           for (const r of list) byProject.set(r.project_id, [...(byProject.get(r.project_id) ?? []), r]);
           return (
@@ -418,15 +436,15 @@ function BillRates({ users, projects, today }: { users: UserDTO[]; projects: Pro
                         <summary>
                           <span className={s.summaryName}>{rows[0]!.project_name}</span>
                           <span className="small muted">
-                            {def ? `Default ${formatRate(def.amount_cents, def.currency)}` : 'No default rate'}
-                            {people ? ` · ${people} personal ${people === 1 ? 'rate' : 'rates'}` : ''}
+                            {def ? t('money.rates.default', { rate: formatRate(def.amount_cents, def.currency) }) : t('money.rates.noDefault')}
+                            {people ? tPlural(people, 'money.rates.personal.one', 'money.rates.personal.other') : ''}
                           </span>
                         </summary>
                         <div className={s.detail}>
                           <RateHistory
                             rows={rows}
                             today={today}
-                            label={(r) => `${r.user_name ?? 'Everyone'}:`}
+                            label={(r) => t('money.rates.who', { name: r.user_name ?? t('money.rates.everyone') })}
                             onDelete={remove}
                             busy={action.busy}
                           />
@@ -449,7 +467,7 @@ function BudgetForm({ projectId, initial, onSaved }: { projectId: string; initia
   const action = useAction();
   const [kind, setKind] = useState<BudgetKind>(initial?.kind ?? 'hours');
   const [limit, setLimit] = useState(
-    initial ? (initial.kind === 'hours' ? String(initial.limit_hours ?? '') : centsToInput(initial.limit_cents ?? 0)) : '',
+    initial ? (initial.kind === 'hours' ? decimalToInput(initial.limit_hours ?? 0, Number.isInteger(initial.limit_hours ?? 0) ? 0 : 2) : centsToInput(initial.limit_cents ?? 0)) : '',
   );
   const [currency, setCurrency] = useState(initial?.currency ?? 'USD');
   const [thresholds, setThresholds] = useState((initial?.alert_thresholds ?? [80, 100]).join(', '));
@@ -478,45 +496,40 @@ function BudgetForm({ projectId, initial, onSaved }: { projectId: string; initia
   return (
     <form onSubmit={submit} className={m.stack}>
       <div className={formGridClass}>
-        <SelectField label="Budget in" value={kind} onChange={(e) => setKind(e.target.value as BudgetKind)}>
-          <option value="hours">Hours</option>
-          <option value="amount">Amount (at bill rates)</option>
+        <SelectField label={t('money.rates.budgetIn')} value={kind} onChange={(e) => setKind(e.target.value as BudgetKind)}>
+          <option value="hours">{t('money.rates.hoursOpt')}</option>
+          <option value="amount">{t('money.rates.amountOpt')}</option>
         </SelectField>
         <TextField
-          label={kind === 'hours' ? 'Limit (hours)' : 'Limit (amount)'}
+          label={kind === 'hours' ? t('money.rates.limitHours') : t('money.rates.limitAmount')}
           inputMode="decimal"
           value={limit}
           onChange={(e) => setLimit(e.target.value)}
-          error={limit && (limitValue === null || limitValue <= 0) ? 'Enter a positive number' : null}
+          error={limit && (limitValue === null || limitValue <= 0) ? t('money.rates.positive') : null}
         />
         {kind === 'amount' ? <CurrencyField value={currency} onChange={setCurrency} /> : null}
-        <SelectField label="Resets" value={resets} onChange={(e) => setResets(e.target.value as BudgetResets)}>
-          <option value="never">Never (whole project)</option>
-          <option value="monthly">Every month</option>
+        <SelectField label={t('money.rates.resets')} value={resets} onChange={(e) => setResets(e.target.value as BudgetResets)}>
+          <option value="never">{t('money.rates.never')}</option>
+          <option value="monthly">{t('money.rates.monthly')}</option>
         </SelectField>
         <TextField
-          label="Alert at (%)"
+          label={t('money.rates.alertAt')}
           value={thresholds}
           onChange={(e) => setThresholds(e.target.value)}
-          hint="Org admins and project managers are notified once per threshold"
-          error={parsedThresholds === null ? 'Whole percentages separated by commas, e.g. 80, 100' : null}
+          hint={t('money.rates.alertHint')}
+          error={parsedThresholds === null ? t('money.rates.alertInvalid') : null}
         />
       </div>
-      <Checkbox
-        label="Stop at budget"
-        checked={stop}
-        onChange={(e) => setStop(e.target.checked)}
-        hint="At 100%, nobody can start a new session on this project. Sessions already running are never stopped."
-      />
+      <Checkbox label={t('money.rates.stop')} checked={stop} onChange={(e) => setStop(e.target.checked)} hint={t('money.rates.stopHint')} />
       <ActionError error={action.error} />
       <div className={formActionsClass}>
         {initial ? (
           <Button variant="quiet" onClick={remove} disabled={action.busy}>
-            Remove budget
+            {t('money.rates.removeBudget')}
           </Button>
         ) : null}
         <Button type="submit" variant="primary" disabled={!valid || action.busy}>
-          {initial ? 'Save budget' : 'Set budget'}
+          {initial ? t('money.rates.saveBudget') : t('money.rates.setBudget')}
         </Button>
       </div>
     </form>
@@ -529,11 +542,11 @@ function Budgets({ projects }: { projects: ProjectDTO[] }) {
   const withBudget = new Set((budgets.data ?? []).map((b) => b.project_id));
   const without = projects.filter((p) => !withBudget.has(p.id) && p.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
   return (
-    <Card title="Project budgets" subtitle="Hours or amount; usage includes agent-tracked and approved manual time">
-      <Resource {...budgets} label="Loading budgets">
+    <Card title={t('money.rates.budgetsTitle')} subtitle={t('money.rates.budgetsSub')}>
+      <Resource {...budgets} label={t('money.rates.loadingBudgets')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No budgets yet" />
+            <Empty title={t('money.rates.noBudgets')} />
           ) : (
             <ul className={s.list}>
               {list.map((b) => (
@@ -541,7 +554,7 @@ function Budgets({ projects }: { projects: ProjectDTO[] }) {
                   <details>
                     <summary>
                       <span className={s.summaryName}>{b.project_name}</span>
-                      <span className="small muted">{formatPercent(b.used_percent, 1)} used</span>
+                      <span className="small muted">{t('money.rates.used', { pct: formatPercent(b.used_percent, 1) })}</span>
                     </summary>
                     <div className={s.detail}>
                       <BudgetMeter budget={b} />
@@ -555,8 +568,8 @@ function Budgets({ projects }: { projects: ProjectDTO[] }) {
         }
       </Resource>
       <div className={m.stack}>
-        <SelectField label="Set a budget for" value={newFor} onChange={(e) => setNewFor(e.target.value)}>
-          <option value="">Choose a project…</option>
+        <SelectField label={t('money.rates.setFor')} value={newFor} onChange={(e) => setNewFor(e.target.value)}>
+          <option value="">{t('money.rates.chooseProject')}</option>
           {without.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
@@ -586,16 +599,23 @@ function RatesContent() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Money"
-        title="Rates and budgets"
-        description="Rates are effective-dated: a change starts on a date and earlier time keeps its earlier rate. Each session uses the rate in effect on the day it started."
+        eyebrow={t('money.rates.eyebrow')}
+        title={t('money.rates.title')}
+        description={t('money.rates.description')}
       />
       <PayRates users={users.data ?? []} today={today} />
       <PayAdjustments users={users.data ?? []} today={today} />
       <BillRates users={users.data ?? []} projects={projects.data ?? []} today={today} />
       <Budgets projects={projects.data ?? []} />
-      <Banner tag="PAYROLL" actions={<ButtonLink href="/money" size="sm">Open period close</ButtonLink>}>
-        Payroll export is on Period close, next to this period&apos;s approved hours.
+      <Banner
+        tag="PAYROLL"
+        actions={
+          <ButtonLink href="/money" size="sm">
+            {t('money.rates.openClose')}
+          </ButtonLink>
+        }
+      >
+        {t('money.rates.payrollNote')}
       </Banner>
     </>
   );
@@ -603,7 +623,7 @@ function RatesContent() {
 
 export default function RatesPage() {
   return (
-    <MoneyGate title="Rates and budgets">
+    <MoneyGate title={t('money.rates.title')}>
       <RatesContent />
     </MoneyGate>
   );

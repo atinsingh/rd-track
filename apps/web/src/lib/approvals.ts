@@ -1,5 +1,7 @@
-import { EXPENSE_CATEGORY_LABELS, type ApprovalType, type CorrectionDTO, type DeletionRequestDTO, type ExpenseDTO, type TimeOffRequestDTO, type TimesheetDTO } from '@rd/contracts';
+import { type ApprovalType, type CorrectionDTO, type DeletionRequestDTO, type ExpenseDTO, type TimeOffRequestDTO, type TimesheetDTO } from '@rd/contracts';
+import { expenseCategoryLabel } from './expenses';
 import { formatDuration, formatMoney } from './format';
+import { t, type MessageKey } from './i18n';
 import { dateSpanLabel, formatHours } from './scheduling';
 import { addDays, dateInTz, formatDayMonth, formatShortDay, formatTime } from './time';
 
@@ -18,62 +20,57 @@ export interface InboxItem {
   flag: string | null;
 }
 
-export const INBOX_TABS = [
-  { key: 'all', label: 'All' },
-  { key: 'timesheets', label: 'Timesheets' },
-  { key: 'time', label: 'Time and corrections' },
-  { key: 'timeoff', label: 'Time off' },
-  { key: 'expenses', label: 'Expenses' },
-  { key: 'privacy', label: 'Deletion requests' },
-] as const;
+export const INBOX_TABS = [{ key: 'all' }, { key: 'timesheets' }, { key: 'time' }, { key: 'timeoff' }, { key: 'expenses' }, { key: 'privacy' }] as const;
 export type InboxTab = (typeof INBOX_TABS)[number]['key'];
 
-const KIND_LABEL: Record<CorrectionDTO['kind'], string> = { edit: 'Correction', manual_add: 'Manual time', idle_reassign: 'Idle time moved' };
+/** A tab's name in the current language. */
+export const inboxTabLabel = (tab: InboxTab): string => t(`mgr.tab.${tab}` as MessageKey);
+
+const KIND_KEY: Record<CorrectionDTO['kind'], MessageKey> = { edit: 'mgr.kindLabel.edit', manual_add: 'mgr.kindLabel.manual', idle_reassign: 'mgr.kindLabel.idle' };
 
 function correctionItem(c: CorrectionDTO, tz: string): InboxItem {
   const v = c.requested;
   const s = Date.parse(v.started_at);
   const e = Date.parse(v.ended_at);
   const when = `${formatShortDay(dateInTz(s, tz))} ${formatTime(s, tz)}–${formatTime(e, tz)}`;
-  const target = v.project_id ? (c.project_names?.[v.project_id] ?? 'a project') : 'no project';
-  const what =
-    c.kind === 'manual_add' ? `Add ${when} · ${target}` : c.kind === 'idle_reassign' ? `Away ${when} → ${target}` : `Change to ${when} · ${target}`;
+  const target = v.project_id ? (c.project_names?.[v.project_id] ?? t('mgr.item.aProject')) : t('mgr.item.noProject');
+  const what = t(c.kind === 'manual_add' ? 'mgr.item.add' : c.kind === 'idle_reassign' ? 'mgr.item.away' : 'mgr.item.change', { when, target });
   return {
-    type: 'correction', id: c.id, group: 'time', who: c.user_name, what, kindLabel: KIND_LABEL[c.kind],
+    type: 'correction', id: c.id, group: 'time', who: c.user_name, what, kindLabel: t(KIND_KEY[c.kind]),
     amount: formatDuration((e - s) / 1000), submittedAt: c.created_at, flag: null,
   };
 }
 
-function timesheetItem(t: TimesheetDTO): InboxItem {
-  const totals = t.submitted_totals ?? t.totals;
+function timesheetItem(sheet: TimesheetDTO): InboxItem {
+  const totals = sheet.submitted_totals ?? sheet.totals;
   return {
-    type: 'timesheet', id: t.id!, group: 'timesheets', who: t.user_name,
-    what: `Week of ${formatDayMonth(t.period_start)} – ${formatDayMonth(addDays(t.period_start, 6))}`,
-    kindLabel: 'Timesheet', amount: formatDuration(totals.total_seconds), submittedAt: t.submitted_at ?? '',
-    flag: t.changed_since_submit ? 'Changed after submitting' : null,
+    type: 'timesheet', id: sheet.id!, group: 'timesheets', who: sheet.user_name,
+    what: t('mgr.item.week', { from: formatDayMonth(sheet.period_start), to: formatDayMonth(addDays(sheet.period_start, 6)) }),
+    kindLabel: t('mgr.item.timesheet'), amount: formatDuration(totals.total_seconds), submittedAt: sheet.submitted_at ?? '',
+    flag: sheet.changed_since_submit ? t('mgr.item.changed') : null,
   };
 }
 
 function timeOffItem(r: TimeOffRequestDTO): InboxItem {
   return {
     type: 'time_off', id: r.id, group: 'timeoff', who: r.user_name,
-    what: `${r.policy_name} · ${dateSpanLabel(r.start_date, r.end_date)}${r.partial_hours !== null ? ' (part of a day)' : ''}`,
-    kindLabel: 'Time off', amount: formatHours(r.hours), submittedAt: r.created_at, flag: null,
+    what: `${r.policy_name} · ${dateSpanLabel(r.start_date, r.end_date)}${r.partial_hours !== null ? t('mgr.item.partDay') : ''}`,
+    kindLabel: t('mgr.item.timeOff'), amount: formatHours(r.hours), submittedAt: r.created_at, flag: null,
   };
 }
 
 function expenseItem(e: ExpenseDTO): InboxItem {
   return {
     type: 'expense', id: e.id, group: 'expenses', who: e.user_name,
-    what: `${EXPENSE_CATEGORY_LABELS[e.category]} · ${e.note}${e.billable && e.client_name ? ` · bill ${e.client_name}` : ''}`,
-    kindLabel: 'Expense', amount: formatMoney(e.amount_cents, e.currency), submittedAt: e.created_at, flag: e.has_receipt ? null : 'No receipt',
+    what: `${expenseCategoryLabel(e.category)} · ${e.note}${e.billable && e.client_name ? t('mgr.item.bill', { client: e.client_name }) : ''}`,
+    kindLabel: t('mgr.item.expense'), amount: formatMoney(e.amount_cents, e.currency), submittedAt: e.created_at, flag: e.has_receipt ? null : t('mgr.item.noReceipt'),
   };
 }
 
 function deletionItem(d: DeletionRequestDTO): InboxItem {
   return {
     type: 'deletion_request', id: d.id, group: 'privacy', who: d.requester_name,
-    what: 'Delete a screenshot of themselves', kindLabel: 'Deletion request', amount: '1 screenshot', submittedAt: d.created_at, flag: null,
+    what: t('mgr.item.deleteShot'), kindLabel: t('mgr.item.deletion'), amount: t('mgr.item.oneShot'), submittedAt: d.created_at, flag: null,
   };
 }
 
@@ -105,8 +102,8 @@ export const itemKey = (i: Pick<InboxItem, 'type' | 'id'>) => `${i.type}:${i.id}
 export function batchSummary(
   r: { approved: number; rejected: number; failed: number; results: { ok: boolean; message?: string }[] },
 ): string {
-  const done = r.approved ? `${r.approved} approved` : `${r.rejected} sent back`;
+  const done = r.approved ? t('mgr.batch.approved', { n: r.approved }) : t('mgr.batch.sentBack', { n: r.rejected });
   if (!r.failed) return done;
-  const reasons = [...new Set(r.results.filter((x) => !x.ok).map((x) => (x.message ?? 'not allowed').replace(/\.$/, '').toLowerCase()))];
-  return `${done} · ${r.failed} couldn't be: ${reasons.join('; ')}`;
+  const reasons = [...new Set(r.results.filter((x) => !x.ok).map((x) => (x.message ?? t('mgr.batch.notAllowed')).replace(/\.$/, '').toLowerCase()))];
+  return t('mgr.batch.failed', { done, n: r.failed, reasons: reasons.join('; ') });
 }

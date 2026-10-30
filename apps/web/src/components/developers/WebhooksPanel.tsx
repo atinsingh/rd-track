@@ -9,28 +9,13 @@ import { Dialog } from '@/components/ui/Dialog';
 import { Checkbox, TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { formatRelative } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import s from '@/app/(app)/admin/admin.module.css';
 
-const EVENT_LABELS: Record<WebhookEventType, string> = {
-  'session.started': 'Session started',
-  'session.stopped': 'Session stopped',
-  'time_correction.submitted': 'Time correction submitted',
-  'time_correction.approved': 'Time correction approved',
-  'time_correction.rejected': 'Time correction sent back',
-  'timesheet.submitted': 'Timesheet submitted',
-  'timesheet.approved': 'Timesheet approved',
-  'timesheet.rejected': 'Timesheet sent back',
-  'time_off.requested': 'Time off requested',
-  'time_off.approved': 'Time off approved',
-  'time_off.rejected': 'Time off declined',
-  'user.invited': 'Person invited',
-  'user.deactivated': 'Person deactivated',
-  'device.revoked': 'Computer removed',
-  'export.ready': 'Export ready',
-};
+const eventLabel = (e: WebhookEventType) => t(`cfg.hook.ev.${e}`);
 
 function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: () => void }) {
   const [url, setUrl] = useState('https://');
@@ -58,45 +43,41 @@ function CreateDialog({ open, onClose, onCreated }: { open: boolean; onClose: ()
       open={open}
       onClose={close}
       size="sm"
-      eyebrow="Webhook"
-      title={created ? 'Signing secret' : 'New webhook'}
-      description={
-        created
-          ? 'Use this secret to verify the x-rd-signature header. It is shown only once.'
-          : 'We POST a small JSON payload — ids and times only — to this address when the selected events happen.'
-      }
+      eyebrow={t('cfg.hook.eyebrow')}
+      title={created ? t('cfg.hook.secretTitle') : t('cfg.hook.newTitle')}
+      description={created ? t('cfg.hook.secretBody') : t('cfg.hook.newBody')}
       footer={
         created ? (
           <>
-            <CopyButton text={created.signing_secret ?? ''} label="Copy secret" />
+            <CopyButton text={created.signing_secret ?? ''} label={t('cfg.hook.copySecret')} />
             <Button variant="primary" onClick={close}>
-              Done
+              {t('cfg.hook.done')}
             </Button>
           </>
         ) : (
           <>
             <Button variant="quiet" onClick={close}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button variant="primary" onClick={create} disabled={action.busy || events.length === 0 || !url.startsWith('https://')}>
-              {action.busy ? 'Creating…' : 'Create webhook'}
+              {action.busy ? t('cfg.tok.creating') : t('cfg.hook.create')}
             </Button>
           </>
         )
       }
     >
       {created ? (
-        <div className={s.secret} aria-label="Signing secret">
+        <div className={s.secret} aria-label={t('cfg.hook.secretTitle')}>
           {created.signing_secret}
         </div>
       ) : (
         <>
-          <TextField label="Endpoint URL" type="url" value={url} onChange={(e) => setUrl(e.target.value)} hint="https only, on a public address." />
-          <TextField label="Description (optional)" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200} />
+          <TextField label={t('cfg.hook.url')} type="url" value={url} onChange={(e) => setUrl(e.target.value)} hint={t('cfg.hook.urlHint')} />
+          <TextField label={t('cfg.hook.description')} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={200} />
           <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend className="small">Events</legend>
+            <legend className="small">{t('cfg.hook.events')}</legend>
             {WEBHOOK_EVENTS.map((e) => (
-              <Checkbox key={e} label={EVENT_LABELS[e]} checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} />
+              <Checkbox key={e} label={eventLabel(e)} checked={events.includes(e)} onChange={(ev) => toggle(e, ev.target.checked)} />
             ))}
           </fieldset>
           <ActionError error={action.error} />
@@ -110,22 +91,22 @@ function Deliveries({ id }: { id: string }) {
   const { timezone: tz } = useMe();
   const d = useApi(`admin:webhook-deliveries|${id}`, (signal) => rd.admin.webhookDeliveries(id, signal));
   return (
-    <Resource {...d} label="Loading deliveries">
+    <Resource {...d} label={t('cfg.hook.loadingDeliveries')}>
       {(list) =>
         list.length === 0 ? (
-          <p className="small muted">No deliveries yet.</p>
+          <p className="small muted">{t('cfg.hook.noDeliveries')}</p>
         ) : (
-          <TableBox label="Recent deliveries">
+          <TableBox label={t('cfg.hook.recent')}>
             <table className={tableClass} style={{ minWidth: 600 }}>
               <thead>
                 <tr>
-                  <th scope="col">Event</th>
-                  <th scope="col">Status</th>
+                  <th scope="col">{t('cfg.hook.colEvent')}</th>
+                  <th scope="col">{t('cfg.hook.colStatus')}</th>
                   <th scope="col" className={numClass}>
-                    Attempts
+                    {t('cfg.hook.colAttempts')}
                   </th>
-                  <th scope="col">Last response</th>
-                  <th scope="col">Created</th>
+                  <th scope="col">{t('cfg.hook.colResponse')}</th>
+                  <th scope="col">{t('cfg.hook.colCreated')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,7 +114,7 @@ function Deliveries({ id }: { id: string }) {
                   <tr key={x.id}>
                     <td className="mono small">{x.event_type}</td>
                     <td>
-                      <Badge tone={x.status === 'delivered' ? 'solid' : x.status === 'failed' ? 'warn' : 'outline'}>{x.status}</Badge>
+                      <Badge tone={x.status === 'delivered' ? 'solid' : x.status === 'failed' ? 'warn' : 'outline'}>{t(`cfg.hook.status.${x.status}`)}</Badge>
                     </td>
                     <td className={numClass}>{x.attempts}</td>
                     <td className="small">{x.last_status_code ?? x.last_error ?? '—'}</td>
@@ -166,30 +147,29 @@ export function WebhooksPanel() {
 
   return (
     <>
-      <Banner tag="NOTE">
-        Payloads carry ids and timestamps only — never screenshots, app names or activity detail. Each request is signed with{' '}
-        <span className="mono">x-rd-signature: t=…,v1=HMAC-SHA256(secret, &quot;t.body&quot;)</span> and retried with backoff for up to
-        about a day.
+      <Banner tag={t('cfg.hook.noteTag')}>
+        {t('cfg.hook.noteBefore')} <span className="mono">x-rd-signature: t=…,v1=HMAC-SHA256(secret, &quot;t.body&quot;)</span>{' '}
+        {t('cfg.hook.noteAfter')}
       </Banner>
       {tested ? (
-        <Banner role="status" title="Test event queued">
-          Open the deliveries below to see the response.
+        <Banner role="status" title={t('cfg.hook.testQueued')}>
+          {t('cfg.hook.testBody')}
         </Banner>
       ) : null}
       <ActionError error={action.error} />
       <Card
-        title="Endpoints"
-        subtitle="Signed HTTPS callbacks when sessions start or stop, corrections are approved and exports are ready"
+        title={t('cfg.hook.endpoints')}
+        subtitle={t('cfg.hook.endpointsSubtitle')}
         actions={
           <Button variant="primary" onClick={() => setCreating(true)}>
-            New webhook →
+            {t('cfg.hook.new')}
           </Button>
         }
       >
-        <Resource {...hooks} label="Loading webhooks">
+        <Resource {...hooks} label={t('cfg.hook.loading')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No webhooks yet">Create one to send events to another system.</Empty>
+              <Empty title={t('cfg.hook.none')}>{t('cfg.hook.noneBody')}</Empty>
             ) : (
               <div className={s.list}>
                 {list.map((h) => (
@@ -209,17 +189,17 @@ export function WebhooksPanel() {
                       </span>
                       <span className={s.chips}>
                         {h.events.map((e) => (
-                          <Badge key={e}>{EVENT_LABELS[e]}</Badge>
+                          <Badge key={e}>{eventLabel(e)}</Badge>
                         ))}
                       </span>
                     </summary>
                     <div className={s.detail}>
                       <div className={s.inlineForm}>
                         <Button size="sm" onClick={() => test(h.id)} disabled={action.busy}>
-                          Send test event
+                          {t('cfg.hook.test')}
                         </Button>
                         <Button size="sm" variant="danger" onClick={() => remove(h.id)} disabled={action.busy}>
-                          Delete
+                          {t('cfg.hook.delete')}
                         </Button>
                       </div>
                       {open === h.id ? <Deliveries key={tested ?? 'x'} id={h.id} /> : null}

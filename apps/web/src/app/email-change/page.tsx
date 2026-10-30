@@ -5,6 +5,7 @@ import { Suspense, useState } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ActionError } from '@/components/ui/DataState';
 import { rd } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { useAction } from '@/lib/useApi';
 import { AuthFrame } from '../login/AuthFrame';
 import s from '../login/login.module.css';
@@ -13,27 +14,28 @@ import s from '../login/login.module.css';
 function Confirm() {
   const token = useSearchParams().get('token') ?? '';
   const action = useAction();
+  const t = useT();
   const [done, setDone] = useState(false);
   if (done) {
     return (
       <div className={s.form} role="status">
-        <span className="eyebrow">Track · Email changed</span>
-        <h1 style={{ fontSize: 28 }}>Your email is changed</h1>
-        <p>Sign in with this address from now on. We let your old address know.</p>
+        <span className="eyebrow">{t('pub.emailChange.doneEyebrow')}</span>
+        <h1 style={{ fontSize: 28 }}>{t('pub.emailChange.doneTitle')}</h1>
+        <p>{t('pub.emailChange.doneBody')}</p>
         <a className={s.primaryLink} href="/login">
-          Sign in →
+          {t('login.submit')}
         </a>
       </div>
     );
   }
   return (
     <div className={s.form}>
-      <span className="eyebrow">Track · Confirm email</span>
-      <h1 style={{ fontSize: 28 }}>Use this address to sign in?</h1>
-      <p className="secondary">Confirming replaces the email on your RoundDigital Track account.</p>
+      <span className="eyebrow">{t('pub.verify.eyebrow')}</span>
+      <h1 style={{ fontSize: 28 }}>{t('pub.emailChange.title')}</h1>
+      <p className="secondary">{t('pub.emailChange.body')}</p>
       <ActionError error={action.error} />
       <Button variant="primary" disabled={!token || action.busy} onClick={async () => setDone(Boolean(await action.run(() => rd.auth.confirmEmailChange(token))))}>
-        {action.busy ? 'Confirming…' : 'Confirm new email →'}
+        {action.busy ? t('pub.emailChange.confirming') : t('pub.emailChange.confirm')}
       </Button>
     </div>
   );

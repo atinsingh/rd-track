@@ -12,10 +12,11 @@ import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridCl
 import { rd } from '@/lib/api';
 import { formatDuration, formatMoney, formatNumber } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { centsToInput, decimalToInput, formatPercentBp, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
+import { centsToInput, decimalToInput, formatPercentBp, invoiceStateLabel, parseHoursInput, parseMoneyInput, parsePercentBp } from '@/lib/money';
 import { formatDateTime, formatDayLabel, todayInTz } from '@/lib/time';
-import { INVOICE_STATE_LABEL, invoiceState } from '@/lib/workspaces';
+import { invoiceState } from '@/lib/workspaces';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { MoneyGate } from '../../MoneyGate';
 import m from '../../money.module.css';
 
@@ -42,15 +43,15 @@ const toDraft = (inv: InvoiceDTO): DraftLine[] =>
   }));
 
 function Totals({ subtotal, taxBp, currency }: { subtotal: number; taxBp: number; currency: string }) {
-  const t = invoiceTotals([subtotal], taxBp);
+  const sums = invoiceTotals([subtotal], taxBp);
   return (
     <dl className={m.totals}>
-      <dt>Subtotal</dt>
-      <dd>{formatMoney(t.subtotal_cents, currency)}</dd>
-      <dt>Tax ({formatPercentBp(taxBp)})</dt>
-      <dd>{formatMoney(t.tax_cents, currency)}</dd>
-      <dt className={m.totalRow}>Total</dt>
-      <dd className={m.totalRow}>{formatMoney(t.total_cents, currency)}</dd>
+      <dt>{t('money.inv.subtotal')}</dt>
+      <dd>{formatMoney(sums.subtotal_cents, currency)}</dd>
+      <dt>{t('money.inv.tax', { rate: formatPercentBp(taxBp) })}</dt>
+      <dd>{formatMoney(sums.tax_cents, currency)}</dd>
+      <dt className={m.totalRow}>{t('money.inv.total')}</dt>
+      <dd className={m.totalRow}>{formatMoney(sums.total_cents, currency)}</dd>
     </dl>
   );
 }
@@ -87,22 +88,22 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
 
   return (
     <form onSubmit={submit} className={m.stack}>
-      <TableBox label="Invoice lines">
+      <TableBox label={t('money.inv.lineTable')}>
         <table className={tableClass} style={{ minWidth: 640 }}>
           <thead>
             <tr>
-              <th scope="col">Description</th>
+              <th scope="col">{t('money.inv.description2')}</th>
               <th scope="col" className={numClass}>
-                Hours
+                {t('money.inv.hours')}
               </th>
               <th scope="col" className={numClass}>
-                Rate ({inv.currency}/h)
+                {t('money.inv.rateIn', { currency: inv.currency })}
               </th>
               <th scope="col" className={numClass}>
-                Amount
+                {t('money.inv.amount')}
               </th>
               <th scope="col">
-                <span className="visually-hidden">Remove</span>
+                <span className="visually-hidden">{t('money.inv.remove')}</span>
               </th>
             </tr>
           </thead>
@@ -114,7 +115,7 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
                   <td>
                     <input
                       className={m.cellInput}
-                      aria-label={`Line ${i + 1} description`}
+                      aria-label={t('money.inv.lineDescription', { n: i + 1 })}
                       value={l.description}
                       maxLength={500}
                       onChange={(e) => edit(i, { description: e.target.value })}
@@ -123,7 +124,7 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
                   <td style={{ width: 110 }}>
                     <input
                       className={`${m.cellInput} ${m.cellNum}`}
-                      aria-label={`Line ${i + 1} hours`}
+                      aria-label={t('money.inv.lineHours', { n: i + 1 })}
                       inputMode="decimal"
                       value={l.hours}
                       aria-invalid={p.hours === null || undefined}
@@ -133,7 +134,7 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
                   <td style={{ width: 130 }}>
                     <input
                       className={`${m.cellInput} ${m.cellNum}`}
-                      aria-label={`Line ${i + 1} rate`}
+                      aria-label={t('money.inv.lineRate', { n: i + 1 })}
                       inputMode="decimal"
                       value={l.rate}
                       aria-invalid={p.rate === null || undefined}
@@ -145,13 +146,13 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
                     <Button
                       size="sm"
                       variant="quiet"
-                      aria-label={`Remove line ${i + 1}`}
+                      aria-label={t('money.inv.removeLine', { n: i + 1 })}
                       onClick={() => {
                         setLines((prev) => prev.filter((_, j) => j !== i));
                         setDirty(true);
                       }}
                     >
-                      Remove
+                      {t('money.inv.remove')}
                     </Button>
                   </td>
                 </tr>
@@ -164,19 +165,19 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
         <Button
           size="sm"
           onClick={() => {
-            setLines((prev) => [...prev, { key: `new-${Date.now()}`, project_id: null, user_id: null, description: '', hours: '1.00', rate: '0.00' }]);
+            setLines((prev) => [...prev, { key: `new-${Date.now()}`, project_id: null, user_id: null, description: '', hours: decimalToInput(1, 2), rate: centsToInput(0) }]);
             setDirty(true);
           }}
         >
-          + Add line
+          {t('money.inv.addLine')}
         </Button>
       </div>
       <Totals subtotal={subtotal} taxBp={inv.tax_rate_bp} currency={inv.currency} />
       <ActionError error={save.error} />
       <div className={formActionsClass}>
-        {dirty ? <span className="small muted">Unsaved changes</span> : null}
+        {dirty ? <span className="small muted">{t('money.inv.unsaved')}</span> : null}
         <Button type="submit" variant="primary" disabled={!dirty || !valid || save.busy}>
-          Save lines
+          {t('money.inv.saveLines')}
         </Button>
       </div>
     </form>
@@ -184,7 +185,7 @@ function LinesEditor({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDT
 }
 
 function DraftDetails({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceDTO) => void }) {
-  const [tax, setTax] = useState((inv.tax_rate_bp / 100).toString());
+  const [tax, setTax] = useState(decimalToInput(inv.tax_rate_bp / 100, inv.tax_rate_bp % 100 === 0 ? 0 : 2));
   const [due, setDue] = useState(inv.due_date ?? '');
   const [notes, setNotes] = useState(inv.notes ?? '');
   const save = useAction();
@@ -196,23 +197,23 @@ function DraftDetails({ inv, onSaved }: { inv: InvoiceDTO; onSaved: (i: InvoiceD
     if (r) onSaved(r);
   };
   return (
-    <Card title="Terms">
+    <Card title={t('money.inv.terms')}>
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
           <TextField
-            label="Tax rate (%)"
+            label={t('money.inv.taxRate')}
             inputMode="decimal"
             value={tax}
             onChange={(e) => setTax(e.target.value)}
-            error={taxBp === null ? 'Enter a percentage between 0 and 100' : null}
+            error={taxBp === null ? t('money.inv.taxInvalid') : null}
           />
-          <TextField label="Due date (optional)" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+          <TextField label={t('money.inv.dueOptional')} type="date" value={due} onChange={(e) => setDue(e.target.value)} />
         </div>
-        <TextArea label="Notes on the invoice (optional)" rows={3} maxLength={4000} value={notes} onChange={(e) => setNotes(e.target.value)} />
+        <TextArea label={t('money.inv.notesOptional')} rows={3} maxLength={4000} value={notes} onChange={(e) => setNotes(e.target.value)} />
         <ActionError error={save.error} />
         <div className={formActionsClass}>
           <Button type="submit" disabled={taxBp === null || save.busy}>
-            Save terms
+            {t('money.inv.saveTerms')}
           </Button>
         </div>
       </form>
@@ -236,7 +237,7 @@ function InvoiceContent({ id }: { id: string }) {
   const [notice, setNotice] = useState<string | null>(null);
 
   if (res.error) return <ErrorState error={res.error} onRetry={res.reload} />;
-  if (!res.data) return <Loading label="Loading the invoice" />;
+  if (!res.data) return <Loading label={t('money.inv.loadingOne')} />;
   const inv = res.data;
   const replace = (next: InvoiceDTO) => res.mutate(() => next);
   const close = () => {
@@ -275,7 +276,7 @@ function InvoiceContent({ id }: { id: string }) {
     if (r) {
       replace(r);
       setDialog(null);
-      setNotice(`Sent to ${r.sent_to}`);
+      setNotice(t('money.inv.sentTo', { email: r.sent_to ?? '' }));
     }
   };
   const state = invoiceState(inv, today);
@@ -288,36 +289,41 @@ function InvoiceContent({ id }: { id: string }) {
       <PageHeader
         eyebrow={
           <>
-            <Link href="/admin/invoices">Invoices</Link> · {INVOICE_STATE_LABEL[state]}
+            <Link href="/admin/invoices">{t('money.inv.title')}</Link> · {invoiceStateLabel(state)}
           </>
         }
-        title={inv.number ?? 'Draft invoice'}
-        description={`${inv.client.name} · ${formatDayLabel(inv.period_from)} – ${formatDayLabel(inv.period_to)} (${inv.timezone})`}
+        title={inv.number ?? t('money.inv.draftTitle')}
+        description={t('money.inv.headDescription', {
+          client: inv.client.name,
+          from: formatDayLabel(inv.period_from),
+          to: formatDayLabel(inv.period_to),
+          tz: inv.timezone,
+        })}
         actions={
           <>
             <a className={buttonClass('secondary')} href={rd.money.invoiceCsvUrl(inv.id)} download>
-              Download CSV
+              {t('money.inv.downloadCsv')}
             </a>
             <ButtonLink href={`/print/invoices/${inv.id}`} target="_blank" rel="noopener">
-              Printable invoice
+              {t('money.inv.printable')}
             </ButtonLink>
             {inv.status === 'draft' ? (
               <>
                 <Button variant="quiet" onClick={() => setDialog('delete')}>
-                  Delete draft
+                  {t('money.inv.deleteDraft')}
                 </Button>
                 <Button variant="primary" onClick={() => setDialog('issue')} disabled={inv.lines.length === 0}>
-                  Issue invoice
+                  {t('money.inv.issue')}
                 </Button>
               </>
             ) : null}
             {inv.status === 'issued' ? (
               <>
-                <Button onClick={() => setDialog('void')}>Void invoice</Button>
-                <Button onClick={() => setDialog('send')}>{inv.sent_at ? 'Send again…' : 'Send to client…'}</Button>
+                <Button onClick={() => setDialog('void')}>{t('money.inv.void')}</Button>
+                <Button onClick={() => setDialog('send')}>{inv.sent_at ? t('money.inv.sendAgain') : t('money.inv.send')}</Button>
                 {inv.paid_on ? null : (
                   <Button variant="primary" onClick={() => setDialog('paid')}>
-                    Mark paid
+                    {t('money.inv.markPaid')}
                   </Button>
                 )}
               </>
@@ -326,49 +332,50 @@ function InvoiceContent({ id }: { id: string }) {
         }
       />
       {inv.status === 'draft' && inv.unrated_seconds > 0 ? (
-        <Banner tone="warn" title="Some time has no bill rate">
-          {formatDuration(inv.unrated_seconds)} on this client&apos;s projects in this period has no bill rate in {inv.currency}, so it isn&apos;t on this
-          draft. Add a bill rate in <Link href="/admin/rates">Rates and budgets</Link> and build a new draft, or add a line by hand.
+        <Banner tone="warn" title={t('money.inv.noRateTitle')}>
+          {t('money.inv.noRateBody', { duration: formatDuration(inv.unrated_seconds), currency: inv.currency })}{' '}
+          <Link href="/admin/rates">{t('money.inv.ratesLink')}</Link> {t('money.inv.noRateTail')}
         </Banner>
       ) : null}
-      {notice ? <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>} /> : null}
+      {notice ? <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>{t('common.dismiss')}</Button>} /> : null}
       {state === 'overdue' ? (
-        <Banner tone="warn" title="Overdue">
-          It was due {formatDayLabel(inv.due_date!)} and isn&apos;t marked paid.
-          {inv.sent_at ? ` Last sent ${formatDateTime(inv.sent_at, tz)} to ${inv.sent_to}.` : ' It hasn’t been sent from Track.'}
+        <Banner tone="warn" title={t('money.inv.overdueTitle')}>
+          {t('money.inv.overdueBody', { date: formatDayLabel(inv.due_date!) })}
+          {inv.sent_at ? t('money.inv.lastSent', { when: formatDateTime(inv.sent_at, tz), email: inv.sent_to ?? '' }) : t('money.inv.notSent')}
         </Banner>
       ) : null}
       {inv.status === 'void' ? (
-        <Banner title="This invoice is void">
-          Voided {formatDateTime(inv.voided_at, tz)}
-          {inv.void_reason ? ` — ${inv.void_reason}` : ''}. Its number is not reused.
+        <Banner title={t('money.inv.voidTitle')}>
+          {t('money.inv.voided', { when: formatDateTime(inv.voided_at, tz) })}
+          {inv.void_reason ? ` — ${inv.void_reason}` : ''}
+          {t('money.inv.voidTail')}
         </Banner>
       ) : null}
       {inv.status === 'draft' ? (
         <Banner tag="NOTE">
           {/* TODO(timesheets): switch this wording to "approved time" once timesheets land. */}
-          Built from all recorded time on {inv.client.name}&apos;s projects (agent-tracked and approved manual time). Issuing locks the invoice.
+          {t('money.inv.builtFrom', { client: inv.client.name })}
         </Banner>
       ) : null}
 
-      <Card title="Lines" subtitle={inv.group_by === 'project_person' ? 'Per project and person' : 'Per project'}>
+      <Card title={t('money.inv.linesCard')} subtitle={inv.group_by === 'project_person' ? t('money.inv.perProjectPersonSub') : t('money.inv.perProjectSub')}>
         {inv.status === 'draft' ? (
           <LinesEditor key={inv.id + inv.subtotal_cents} inv={inv} onSaved={replace} />
         ) : (
           <>
-            <TableBox label="Invoice lines">
+            <TableBox label={t('money.inv.lineTable')}>
               <table className={tableClass} style={{ minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Description</th>
+                    <th scope="col">{t('money.inv.description2')}</th>
                     <th scope="col" className={numClass}>
-                      Hours
+                      {t('money.inv.hours')}
                     </th>
                     <th scope="col" className={numClass}>
-                      Rate
+                      {t('money.inv.rate')}
                     </th>
                     <th scope="col" className={numClass}>
-                      Amount
+                      {t('money.inv.amount')}
                     </th>
                   </tr>
                 </thead>
@@ -392,27 +399,25 @@ function InvoiceContent({ id }: { id: string }) {
       {inv.status === 'draft' ? (
         <DraftDetails key={`${inv.id}|${inv.tax_rate_bp}`} inv={inv} onSaved={replace} />
       ) : (
-        <Card title="Terms">
+        <Card title={t('money.inv.terms')}>
           <div className={m.row}>
             <span>
-              Issued <strong>{formatDateTime(inv.issued_at, tz)}</strong>
+              {t('money.inv.issued')} <strong>{formatDateTime(inv.issued_at, tz)}</strong>
             </span>
-            <span>Due {inv.due_date ? formatDayLabel(inv.due_date) : '—'}</span>
-            <Badge tone={state === 'overdue' ? 'warn' : state === 'paid' ? 'solid' : 'outline'}>{INVOICE_STATE_LABEL[state]}</Badge>
+            <span>{t('money.inv.due', { date: inv.due_date ? formatDayLabel(inv.due_date) : '—' })}</span>
+            <Badge tone={state === 'overdue' ? 'warn' : state === 'paid' ? 'solid' : 'outline'}>{invoiceStateLabel(state)}</Badge>
           </div>
           {inv.sent_at ? (
-            <p className="small secondary">
-              Sent {formatDateTime(inv.sent_at, tz)} to {inv.sent_to}
-            </p>
+            <p className="small secondary">{t('money.inv.sentLine', { when: formatDateTime(inv.sent_at, tz), email: inv.sent_to ?? '' })}</p>
           ) : null}
           {inv.paid_on ? (
             <div className={m.row}>
               <span>
-                Paid <strong>{formatDayLabel(inv.paid_on)}</strong>
+                {t('money.inv.paid')} <strong>{formatDayLabel(inv.paid_on)}</strong>
                 {inv.payment_note ? ` · ${inv.payment_note}` : ''}
               </span>
               <Button size="sm" variant="quiet" onClick={markUnpaid} disabled={action.busy}>
-                Undo payment
+                {t('money.inv.undoPaid')}
               </Button>
             </div>
           ) : null}
@@ -423,90 +428,96 @@ function InvoiceContent({ id }: { id: string }) {
       <Dialog
         open={dialog === 'issue'}
         onClose={close}
-        title="Issue this invoice?"
-        description="It gets the next invoice number and is locked: lines, tax and terms can no longer change. To correct an issued invoice, void it and build a new one."
+        title={t('money.inv.issueTitle')}
+        description={t('money.inv.issueBody')}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={issue} disabled={action.busy}>
-              Issue invoice
+              {t('money.inv.issue')}
             </Button>
           </>
         }
       >
-        <TextField label="Due date" type="date" value={dueDate || inv.due_date || ''} onChange={(e) => setDueDate(e.target.value)} />
+        <TextField label={t('money.inv.dueDate')} type="date" value={dueDate || inv.due_date || ''} onChange={(e) => setDueDate(e.target.value)} />
         <ActionError error={action.error} />
       </Dialog>
       <Dialog
         open={dialog === 'void'}
         onClose={close}
-        title={`Void ${inv.number}?`}
-        description="The invoice stays on record as void and its number is not reused."
+        title={t('money.inv.voidQ', { number: inv.number ?? '' })}
+        description={t('money.inv.voidBody')}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="danger" onClick={voidIt} disabled={action.busy}>
-              Void invoice
+              {t('money.inv.void')}
             </Button>
           </>
         }
       >
-        <TextField label="Reason (optional)" value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
+        <TextField label={t('money.inv.reasonOptional')} value={reason} maxLength={1000} onChange={(e) => setReason(e.target.value)} />
         <ActionError error={action.error} />
       </Dialog>
       <Dialog
         open={dialog === 'paid'}
         onClose={close}
-        title={`Mark ${inv.number} paid?`}
-        description="Records when the money arrived. What was billed doesn't change, and you can undo it."
+        title={t('money.inv.paidQ', { number: inv.number ?? '' })}
+        description={t('money.inv.paidBody')}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={markPaid} disabled={action.busy || !paidOn}>
-              Mark paid
+              {t('money.inv.markPaid')}
             </Button>
           </>
         }
       >
-        <TextField label="Paid on" type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} required />
-        <TextField label="Note (optional)" hint="A payment reference, for example" value={payNote} maxLength={500} onChange={(e) => setPayNote(e.target.value)} />
+        <TextField label={t('money.inv.paidOn')} type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} required />
+        <TextField
+          label={t('money.inv.noteOptional')}
+          hint={t('money.inv.noteHint')}
+          value={payNote}
+          maxLength={500}
+          onChange={(e) => setPayNote(e.target.value)}
+        />
         <ActionError error={action.error} />
       </Dialog>
       <Dialog
         open={dialog === 'send'}
         onClose={close}
-        title={`Email ${inv.number} to ${inv.client.name}?`}
-        description="The email carries the invoice itself: lines, totals and due date. Replies come to you."
+        title={t('money.inv.emailQ', { number: inv.number ?? '', client: inv.client.name })}
+        description={t('money.inv.emailBody')}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="primary" onClick={send} disabled={action.busy || (!inv.client.contact_email && !sendTo.trim())}>
-              {action.busy ? 'Sending…' : 'Send invoice'}
+              {action.busy ? t('money.inv.sending') : t('money.inv.sendInvoice')}
             </Button>
           </>
         }
       >
         <TextField
-          label="To"
+          label={t('money.inv.to')}
           type="email"
           placeholder={inv.client.contact_email ?? 'billing@client.com'}
-          hint={inv.client.contact_email ? `Leave empty to send to ${inv.client.contact_email}` : 'This client has no billing email yet'}
+          hint={inv.client.contact_email ? t('money.inv.leaveEmpty', { email: inv.client.contact_email }) : t('money.inv.noBillingEmail')}
           value={sendTo}
           onChange={(e) => setSendTo(e.target.value)}
         />
-        <TextArea label="Message (optional)" rows={3} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} />
+        <TextArea label={t('money.inv.messageOptional')} rows={3} maxLength={2000} value={message} onChange={(e) => setMessage(e.target.value)} />
         <ActionError error={action.error} />
       </Dialog>
       <Dialog
         open={dialog === 'delete'}
         onClose={close}
-        title="Delete this draft?"
-        description="Drafts have no number yet, so nothing is skipped."
+        title={t('money.inv.deleteQ')}
+        description={t('money.inv.deleteBody')}
         footer={
           <>
-            <Button onClick={close}>Cancel</Button>
+            <Button onClick={close}>{t('common.cancel')}</Button>
             <Button variant="danger" onClick={remove} disabled={action.busy}>
-              Delete draft
+              {t('money.inv.deleteDraft')}
             </Button>
           </>
         }
@@ -520,7 +531,7 @@ function InvoiceContent({ id }: { id: string }) {
 export default function InvoicePage() {
   const params = useParams<{ id: string }>();
   return (
-    <MoneyGate title="Invoices">
+    <MoneyGate title={t('money.inv.title')}>
       <InvoiceContent id={decodeURIComponent(params.id ?? '')} />
     </MoneyGate>
   );

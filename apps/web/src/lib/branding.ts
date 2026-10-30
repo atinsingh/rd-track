@@ -1,9 +1,10 @@
 import { LOGO_CONTENT_TYPES, LOGO_MAX_BYTES, type DeploymentFile } from '@rd/contracts';
+import { t } from './i18n';
 
 /** Why a logo file can't be used, or null (G26). */
 export function logoProblem(file: { type: string; size: number }): string | null {
-  if (!(LOGO_CONTENT_TYPES as readonly string[]).includes(file.type)) return 'Use a PNG, JPEG or WebP image.';
-  if (file.size > LOGO_MAX_BYTES) return 'That image is over 512 KB.';
+  if (!(LOGO_CONTENT_TYPES as readonly string[]).includes(file.type)) return t('cfg.brand.wrongType');
+  if (file.size > LOGO_MAX_BYTES) return t('cfg.brand.tooBig');
   return null;
 }
 

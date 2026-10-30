@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 import { OrgLogo } from '@/components/OrgLogo';
 import { ErrorState, Loading } from '@/components/ui/DataState';
+import { t } from '@/lib/i18n';
 import { clientPortal } from '@/lib/portal';
 import { announceLocale, resolveLocale, setLocale } from '@/lib/locale';
 import { useApi } from '@/lib/useApi';
@@ -33,7 +34,7 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
         <ErrorState error={me.error} onRetry={me.reload} />
       </main>
     );
-  if (!me.data || signedOut) return <Loading label="Opening your projects" />;
+  if (!me.data || signedOut) return <Loading label={t('pub.portal.opening')} />;
   const signOut = async () => {
     try {
       await clientPortal.logout();
@@ -47,20 +48,20 @@ export default function PortalLayout({ children }: { children: ReactNode }) {
         <header className={s.bar}>
           <Link href="/client" className={s.brand}>
             <Image src="/brand/rd-logo-reversed.png" alt="RoundDigital" width={112} height={24} />
-            <span className={s.tag}>Client portal</span>
+            <span className={s.tag}>{t('pub.portal.tag')}</span>
           </Link>
           <OrgLogo url={me.data.organization.logo_url} name={me.data.organization.name} />
           <span className={s.who}>
             {me.data.contact.display_name} · {me.data.client.name}
             <button type="button" className={s.signOut} onClick={() => void signOut()}>
-              Sign out
+              {t('pub.portal.signOut')}
             </button>
           </span>
         </header>
         <main id="main" className={s.main}>
           {children}
           <p className={s.rule}>
-            Read-only, shared by {me.data.organization.name}. Nobody&apos;s computer activity, apps or screenshots are shown here.
+            {t('pub.portal.rule', { org: me.data.organization.name })}
           </p>
         </main>
       </div>

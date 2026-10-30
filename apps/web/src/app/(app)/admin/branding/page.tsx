@@ -52,7 +52,7 @@ export default function BrandingPage() {
   const action = useAction();
   const [problem, setProblem] = useState<string | null>(null);
   const [inputKey, setInputKey] = useState(0);
-  if (!access.isAdmin) return <NoAccess what="The logo is set by org admins." />;
+  if (!access.isAdmin) return <NoAccess what={t('cfg.brand.noAccess')} />;
 
   const upload = async (file: File | null) => {
     setProblem(null);
@@ -65,7 +65,7 @@ export default function BrandingPage() {
     const r = await action.run(async () => {
       const up = await rd.admin.logoUpload(file.type, file.size);
       const put = await fetch(up.url, { method: 'PUT', headers: up.headers, body: file }).catch(() => null);
-      if (!put?.ok) throw new Error('The image didn’t upload. Try again.');
+      if (!put?.ok) throw new Error(t('cfg.brand.uploadFailed'));
       return rd.admin.setLogo(up.upload_id);
     });
     setInputKey((k) => k + 1);
@@ -85,12 +85,12 @@ export default function BrandingPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Settings"
+        eyebrow={t('cfg.brand.eyebrow')}
         title={t('nav.branding')}
-        description={`${me.organization.name}'s own logo, shown beside the RoundDigital Track mark in the menu, in the client portal and on invoices.`}
+        description={t('cfg.brand.description', { org: me.organization.name })}
       />
-      <Card title="Your logo">
-        <Resource {...branding} label="Loading the logo">
+      <Card title={t('cfg.brand.yourLogo')}>
+        <Resource {...branding} label={t('cfg.brand.loading')}>
           {(b) => (
             <div className="stack" style={{ gap: 14 }}>
               {b.logo_url ? (
@@ -101,9 +101,9 @@ export default function BrandingPage() {
                   <OrgLogo url={b.logo_url} name={me.organization.name} plain />
                 </div>
               ) : (
-                <p className="secondary">No logo yet. Only the RoundDigital Track mark is shown.</p>
+                <p className="secondary">{t('cfg.brand.none')}</p>
               )}
-              {b.logo_updated_at ? <p className="small muted">Last changed {formatDateTime(b.logo_updated_at, tz)}</p> : null}
+              {b.logo_updated_at ? <p className="small muted">{t('cfg.brand.lastChanged', { when: formatDateTime(b.logo_updated_at, tz) })}</p> : null}
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                 <input
                   key={inputKey}
@@ -120,15 +120,15 @@ export default function BrandingPage() {
                   disabled={action.busy}
                   onClick={() => (document.getElementById('logo-file') as HTMLInputElement | null)?.click()}
                 >
-                  {action.busy ? 'Uploading…' : b.logo_url ? 'Replace the logo' : 'Upload a logo'}
+                  {action.busy ? t('cfg.brand.uploading') : b.logo_url ? t('cfg.brand.replace') : t('cfg.brand.upload')}
                 </Button>
                 {b.logo_url ? (
                   <Button onClick={() => void remove()} disabled={action.busy}>
-                    Remove
+                    {t('cfg.brand.remove')}
                   </Button>
                 ) : null}
               </div>
-              <p className="small muted">PNG, JPEG or WebP, up to 512 KB. A wide logo with a transparent background works best; it sits on a white chip in the menu.</p>
+              <p className="small muted">{t('cfg.brand.hint')}</p>
               {problem ? (
                 <p className="small" role="alert">
                   {problem}

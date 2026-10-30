@@ -1,51 +1,23 @@
 import type { InvoiceSummaryDTO, SetupStep, SetupStepKey } from '@rd/contracts';
 import { formatDuration } from './format';
+import { t, type MessageKey } from './i18n';
 
-/** What each setup step asks for (G16). Done-ness comes from the server, computed from the data. */
-export const SETUP_COPY: Record<SetupStepKey, { title: string; body: string; href: string; action: string }> = {
-  turn_on_mfa: {
-    title: 'Turn on two-factor sign-in',
-    body: 'Your account can change what Track collects, so it needs more than a password.',
-    href: '/me/settings',
-    action: 'Open settings',
-  },
-  review_policy: {
-    title: 'Decide what Track collects',
-    body: 'Idle time, app names and screenshots are each a choice. Employees see exactly what you pick before anything is collected.',
-    href: '/admin/policies',
-    action: 'Open policies',
-  },
-  invite_people: {
-    title: 'Invite your people',
-    body: 'Each person gets an email to choose their own password. You never see it.',
-    href: '/admin/users',
-    action: 'Invite people',
-  },
-  create_team: {
-    title: 'Create a team and pick its manager',
-    body: "Managers review their team's time and requests. Without one, everything comes to you.",
-    href: '/admin/teams',
-    action: 'Open teams',
-  },
-  connect_computer: {
-    title: 'Connect a computer',
-    body: 'Each person installs the Track agent and signs it in with their own enrolment code.',
-    href: '/admin/devices',
-    action: 'Open devices',
-  },
-  timesheet_deadline: {
-    title: 'Set a timesheet deadline',
-    body: 'Optional. Reminds people the day before their week is due, and tells reviewers who is late.',
-    href: '/admin/work-limits',
-    action: 'Set a deadline',
-  },
-  choose_plan: {
-    title: 'Choose a plan',
-    body: 'Your trial includes every feature. Pick monthly or annual before it ends to keep tracking.',
-    href: '/admin/billing',
-    action: 'See plans',
-  },
+/** Where each setup step is done (G16). Done-ness comes from the server, computed from the data. */
+const SETUP_HREF: Record<SetupStepKey, string> = {
+  turn_on_mfa: '/me/settings',
+  review_policy: '/admin/policies',
+  invite_people: '/admin/users',
+  create_team: '/admin/teams',
+  connect_computer: '/admin/devices',
+  timesheet_deadline: '/admin/work-limits',
+  choose_plan: '/admin/billing',
 };
+
+/** What a setup step asks for, in the reader's language. */
+export function setupCopy(key: SetupStepKey): { title: string; body: string; href: string; action: string } {
+  const k = (part: string) => t(`mgr.setup.${key}.${part}` as MessageKey);
+  return { title: k('title'), body: k('body'), href: SETUP_HREF[key], action: k('action') };
+}
 
 /** Required steps done out of required steps; optional ones never hold the checklist open. */
 export function setupProgress(steps: readonly SetupStep[]): { done: number; total: number; complete: boolean } {
@@ -57,8 +29,8 @@ export function setupProgress(steps: readonly SetupStep[]): { done: number; tota
 /** "2h 10m more than last week", "35m less than last week", "Same as last week". */
 export function weekDelta(current: number, previous: number): string {
   const d = current - previous;
-  if (Math.abs(d) < 60) return 'Same as last week so far';
-  return `${formatDuration(Math.abs(d))} ${d > 0 ? 'more' : 'less'} than all of last week`;
+  if (Math.abs(d) < 60) return t('mgr.delta.same');
+  return t(d > 0 ? 'mgr.delta.more' : 'mgr.delta.less', { d: formatDuration(Math.abs(d)) });
 }
 
 export type InvoiceState = 'draft' | 'unpaid' | 'overdue' | 'paid' | 'void';

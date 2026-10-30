@@ -9,6 +9,7 @@ import { TextField } from '@/components/ui/Field';
 import { Badge, Banner, Card, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { DEPLOYMENT_FILE_PATHS, deploymentJson, macosScript, windowsScript } from '@/lib/branding';
+import { t } from '@/lib/i18n';
 import { formatDateTime } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 
@@ -26,10 +27,10 @@ function NewKey({ k, onDone }: { k: DeploymentKeyCreated; onDone: () => void }) 
   return (
     <Banner
       tone="ink"
-      title={`“${k.name}” is ready. Download the files now: the key isn't shown again.`}
+      title={t('adm.mdm.ready', { name: k.name })}
       actions={
         <Button size="sm" variant="quiet" onClick={onDone}>
-          I&apos;ve saved them
+          {t('adm.mdm.saved')}
         </Button>
       }
     >
@@ -42,12 +43,12 @@ function NewKey({ k, onDone }: { k: DeploymentKeyCreated; onDone: () => void }) 
             deployment.json
           </Button>
           <Button size="sm" onClick={() => download('rdtrack-deploy-macos.sh', macosScript(k.server_url, k.key))}>
-            macOS script
+            {t('adm.mdm.macScript')}
           </Button>
           <Button size="sm" onClick={() => download('Install-RDTrack.ps1', windowsScript(k.server_url, k.key))}>
-            Windows script
+            {t('adm.mdm.winScript')}
           </Button>
-          <CopyButton text={k.key} label="Copy the key" />
+          <CopyButton text={k.key} label={t('adm.mdm.copyKey')} />
         </span>
       </span>
     </Banner>
@@ -76,35 +77,33 @@ export function MdmDeployment({ tz }: { tz: string }) {
     if (await action.run(() => rd.admin.revokeDeploymentKey(k.id))) keys.reload();
   };
   return (
-    <Card title="Deploy with MDM" subtitle="Jamf, Kandji, Intune or Group Policy">
+    <Card title={t('adm.mdm.title')} subtitle={t('adm.mdm.subtitle')}>
       <p className="small secondary">
-        Install the app with your MDM, plus a deployment file with a key from here: <span className="mono">{DEPLOYMENT_FILE_PATHS.macos}</span> on
-        macOS, <span className="mono">{DEPLOYMENT_FILE_PATHS.windows}</span> on Windows. On first launch people enter their work email and get a
-        one-time code by email, so nobody hands out codes and the key alone never connects a computer. Nothing is recorded until they start a
-        session.
+        {t('adm.mdm.intro1')} <span className="mono">{DEPLOYMENT_FILE_PATHS.macos}</span> {t('adm.mdm.onMac')}{' '}
+        <span className="mono">{DEPLOYMENT_FILE_PATHS.windows}</span> {t('adm.mdm.onWin')}
       </p>
       {created ? <NewKey k={created} onDone={() => setCreated(null)} /> : null}
       <form onSubmit={create} style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-        <TextField label="Key name" placeholder="e.g. Intune, Jamf" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
+        <TextField label={t('adm.mdm.keyName')} placeholder={t('adm.mdm.keyPlaceholder')} value={name} maxLength={100} onChange={(e) => setName(e.target.value)} />
         <Button type="submit" disabled={!name.trim() || action.busy}>
-          Create a deployment key
+          {t('adm.mdm.create')}
         </Button>
       </form>
       <ActionError error={action.error} />
-      <Resource {...keys} label="Loading deployment keys">
+      <Resource {...keys} label={t('adm.mdm.loading')}>
         {(list) =>
           list.length === 0 ? (
-            <Empty title="No deployment keys yet" />
+            <Empty title={t('adm.mdm.none')} />
           ) : (
-            <TableBox label="Deployment keys">
+            <TableBox label={t('adm.mdm.keys')}>
               <table className={tableClass} style={{ minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Name</th>
-                    <th scope="col">Key</th>
-                    <th scope="col">Last used</th>
+                    <th scope="col">{t('adm.mdm.colName')}</th>
+                    <th scope="col">{t('adm.mdm.colKey')}</th>
+                    <th scope="col">{t('adm.mdm.colUsed')}</th>
                     <th scope="col">
-                      <span className="visually-hidden">Actions</span>
+                      <span className="visually-hidden">{t('adm.common.actions')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -112,18 +111,18 @@ export function MdmDeployment({ tz }: { tz: string }) {
                   {list.map((k) => (
                     <tr key={k.id}>
                       <td>
-                        {k.name} {k.revoked_at ? <Badge>Revoked</Badge> : null}
+                        {k.name} {k.revoked_at ? <Badge>{t('adm.common.revoked')}</Badge> : null}
                         <span className="small muted" style={{ display: 'block' }}>
                           {k.created_by_name ? `${k.created_by_name} · ` : ''}
                           {formatDateTime(k.created_at, tz)}
                         </span>
                       </td>
                       <td className="mono small">…{k.hint}</td>
-                      <td className="small">{k.last_used_at ? formatDateTime(k.last_used_at, tz) : 'Never'}</td>
+                      <td className="small">{k.last_used_at ? formatDateTime(k.last_used_at, tz) : t('adm.mdm.never')}</td>
                       <td style={{ textAlign: 'right' }}>
                         {k.revoked_at ? null : (
                           <Button size="sm" variant="quiet" onClick={() => void revoke(k)} disabled={action.busy}>
-                            Revoke
+                            {t('adm.common.revoke')}
                           </Button>
                         )}
                       </td>
