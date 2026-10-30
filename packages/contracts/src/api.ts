@@ -282,6 +282,9 @@ export interface MemberReportRow {
   paused_seconds: number;
   manual_seconds: number;
   days_active: number;
+  /** Minutes the agent measured without the OS permission it needs (shown in each reader's language). */
+  permission_missing_minutes: number;
+  /** The same notes in English, for API and CSV readers. */
   notes: string[];
 }
 export interface DailyProjectRow {

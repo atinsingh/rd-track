@@ -32,7 +32,8 @@
   flex: 1 1 280px;
 }
 .members {
-  flex: 3 1 640px;
+  /* Wide enough for every column (French labels included); the panel beside it moves below first. */
+  flex: 3 1 820px;
 }
 .attItem {
   display: flex;
@@ -69,4 +70,12 @@ a.attItem:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+/* Long column labels (French) wrap instead of pushing the table past its card; names stay on one line. */
+.membersTable thead th {
+  white-space: normal;
+}
+.membersTable td:first-child {
+  white-space: nowrap;
 }

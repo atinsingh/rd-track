@@ -2815,6 +2815,9 @@ export const fr: Record<MessageKey, string> = {
   'shots.blurred': 'Floutée',
   'shots.blurredHint': 'Floutée sur l’ordinateur avant l’envoi',
 
+  'mgr.team.noPermission.one': '{n} min sans l’autorisation du système',
+  'mgr.team.noPermission.other': '{n} min sans l’autorisation du système',
+
   'ins.eyebrow': 'Employé · Analyses',
   'ins.title': 'Analyses',
   'ins.description': 'Temps de concentration, heures de travail et pauses, calculés à partir de votre propre activité. Les analyses individuelles ne sont visibles que par vous.',

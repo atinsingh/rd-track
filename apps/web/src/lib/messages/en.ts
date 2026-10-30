@@ -2813,6 +2813,9 @@ export const en = {
   'shots.blurred': 'Blurred',
   'shots.blurredHint': 'Blurred on the computer before upload',
 
+  'mgr.team.noPermission.one': '{n} min without the OS permission',
+  'mgr.team.noPermission.other': '{n} min without the OS permission',
+
   'ins.eyebrow': 'Employee · Insights',
   'ins.title': 'Insights',
   'ins.description': 'Focus time, working hours and breaks, worked out from your own activity. Per-person insights are visible to you only.',

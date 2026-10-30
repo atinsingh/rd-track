@@ -235,6 +235,7 @@ export async function teamReport(
       paused_seconds: Math.round(pausedBy.get(m.user_id) ?? 0),
       manual_seconds: manual.find((x) => x.user_id === m.user_id)?.seconds ?? 0,
       days_active: a?.days ?? 0,
+      permission_missing_minutes: a?.missing ?? 0,
       notes,
     });
   }

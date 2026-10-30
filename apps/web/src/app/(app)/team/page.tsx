@@ -24,6 +24,13 @@ import { t, tPlural } from '@/lib/i18n';
 import { NoAccess } from '../NoAccess';
 import s from './team.module.css';
 
+/** A member's data notes in the reader's language. */
+function notesOf(m: MemberReportRow): string[] {
+  return m.permission_missing_minutes > 0
+    ? [tPlural(m.permission_missing_minutes, 'mgr.team.noPermission.one', 'mgr.team.noPermission.other')]
+    : [];
+}
+
 function memberHref(m: MemberReportRow, teamId: string, week: string): string {
   const q = new URLSearchParams({ team: teamId, name: m.display_name, date: week });
   return `/team/${encodeURIComponent(m.user_id)}?${q.toString()}`;
@@ -32,7 +39,7 @@ function memberHref(m: MemberReportRow, teamId: string, week: string): string {
 function Attention({ report, pending }: { report: TeamReport; pending: CorrectionDTO[] }) {
   const ids = new Set(report.members.map((m) => m.user_id));
   const mine = pending.filter((c) => ids.has(c.user_id));
-  const withNotes = [...report.members].sort(byName).filter((m) => m.notes.length > 0);
+  const withNotes = [...report.members].sort(byName).filter((m) => notesOf(m).length > 0);
   const first = mine[0];
   return (
     <Card title={t('mgr.team.attention')} as="aside" className={s.attention}>
@@ -57,7 +64,7 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
           <span className={s.attBody}>
             {withNotes
               .slice(0, 3)
-              .map((m) => `${m.display_name}: ${m.notes.join('; ')}`)
+              .map((m) => `${m.display_name}: ${notesOf(m).join('; ')}`)
               .join(' · ')}
             {t('mgr.team.unmeasured')}
           </span>
@@ -81,7 +88,7 @@ function MembersTable({ report, week, overtime }: { report: TeamReport; week: st
   if (rows.length === 0) return <Empty title={t('mgr.team.noMembers')} />;
   return (
     <TableBox label={t('mgr.team.membersLabel')}>
-      <table className={tableClass} style={{ minWidth: 680 }}>
+      <table className={`${tableClass} ${s.membersTable}`} style={{ minWidth: 640 }}>
         <caption className="visually-hidden">{t('mgr.team.membersCaption')}</caption>
         <thead>
           <tr>
@@ -145,7 +152,7 @@ function MembersTable({ report, week, overtime }: { report: TeamReport; week: st
               <td className={numClass}>{durationOrDash(m.manual_seconds)}</td>
               <td className={numClass}>{m.days_active}</td>
               {overtime ? <OvertimeCells row={overtime.members.find((o) => o.user_id === m.user_id)} member={m} teamId={report.team.id} week={week} /> : null}
-              <td className="small secondary">{m.notes.length ? m.notes.join('; ') : '—'}</td>
+              <td className="small secondary">{notesOf(m).join('; ') || '—'}</td>
             </tr>
           ))}
         </tbody>

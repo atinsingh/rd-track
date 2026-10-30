@@ -35,19 +35,19 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 
 | ID | Persona | Gap | Effort | Pri |
 |---|---|---|---|---|
-| G1 | Operator | Tenant creation returns the tenant admin's password to the operator | S | P0 |
+| G1 | Operator | Tenant creation returns the tenant admin's password to the operator — **done**: the first admin is invited; no password is ever shown (slice 2) | S | P0 |
 | G2 | Operator | Support grants: no request, approval, expiry or tenant-side audit — **done** | M | P0 |
-| G3 | All | No forgot / reset password | S | P0 |
-| G4 | Admin | No invite flow; admins hand over a one-time password, never forced to change | M | P0 |
-| G5 | Admin | Mandatory admin MFA with no recovery codes and no admin reset | S | P0 |
-| G6 | Admin | No trial-ending / payment-failed / grace / inactive emails | S | P0 |
-| G7 | All | No notification bell or unread count; pages promise notifications that never come | M | P0 |
-| G8 | Emp / Mgr | No notification for corrections, timesheet submitted, deletion decided, device revoked or permission denied | S each | P0 |
+| G3 | All | No forgot / reset password — **done** (slice 2) | S | P0 |
+| G4 | Admin | No invite flow; admins hand over a one-time password, never forced to change — **done**: single-use invite links, 7 days (slice 2) | M | P0 |
+| G5 | Admin | Mandatory admin MFA with no recovery codes and no admin reset — **done**: recovery codes, and another admin can reset MFA (slice 2) | S | P0 |
+| G6 | Admin | No trial-ending / payment-failed / grace / inactive emails — **done** (slice 1) | S | P0 |
+| G7 | All | No notification bell or unread count; pages promise notifications that never come — **done**: bell, unread count, preferences (slice 1) | M | P0 |
+| G8 | Emp / Mgr | No notification for corrections, timesheet submitted, deletion decided, device revoked or permission denied — **done** (slices 1 and 3) | S each | P0 |
 | G9 | Admin | Corrections from people with no manager never reached admins in the inbox — **fixed** | S | P0 |
 | G10 | Admin / Emp | No agent download in the web app; unsigned installers; updater placeholder; no autostart — **done**: download, updates from the enrolled server with an admin policy, open at login; signing runs as soon as the certificates are added | M | P0 |
-| G11 | Buyer | No terms / DPA acceptance at signup | S | P0 |
+| G11 | Buyer | No terms / DPA acceptance at signup — **done**: recorded with version, time and who (slice 1) | S | P0 |
 | G12 | Admin | Enrolment codes admin-only, one per person; no deep link; no self-enrolment — **done** | M | P1 |
-| G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) | M | P1 |
+| G13 | Emp | No account settings page (name, time zone, password, email, notification preferences, MFA opt-in) — **done** (slices 1 and 2) | M | P1 |
 | G14 | Admin | People page can't edit role / name / time zone, reactivate, search or import CSV — **done** | S/M | P1 |
 | G15 | Admin | Teams, projects and tasks can't be renamed or archived; project members can't be removed — **done** | S | P1 |
 | G16 | Admin | No setup checklist after signup — **done** | M | P1 |
@@ -64,6 +64,19 @@ P0 blocks selling or using the product, P1 is expected by buyers, P2 is nice to 
 | G27 | All | Hard-coded English; mixed date and money formats — **done**: formats everywhere, and French for every screen, email and the desktop app (slices 10–13); only RoundDigital's own operator console stays English | M | P2 |
 | G28 | Admin | Deletion requests outside the unified inbox — **done** | S | P2 |
 | G29 | Eng | `notify.policy_expansion` job kind with no producer or handler — **gone**: policy changes notify through the notify service | S | P2 |
+
+**All 29 gaps are closed** (checked against the code 2026-10-30). Still with RoundDigital,
+outside the code: the Apple and Windows code-signing certificates (G10), store listings for
+the browser extension, and a native-speaker review of the French before a Quebec launch.
+One product decision is open: whether an org admin who signs in through single sign-on
+should also be asked for Track's own authenticator code (today the provider's sign-in
+counts as MFA).
+
+A final pass in French found the Team page's members table wider than its card (labels
+now wrap, and the side panel moves below it first) and one English note the server built
+as a sentence ("… min without OS permission"): reports now carry
+`permission_missing_minutes` and each screen words it in the reader's language, while
+`notes` stays English for API and CSV readers.
 
 ## 3. The engine (build once, every role uses it)
 
