@@ -105,7 +105,7 @@ impl Default for IdleSettings {
 pub struct AppsSettings {
     /// `apps.capture_app_name` (default `true`). `false` disables app usage entirely.
     pub capture_app_name: bool,
-    /// `apps.capture_domains` (default `false`). This agent never collects domains.
+    /// `apps.capture_domains` (default `false`): domains from the browser extension (Pro).
     pub capture_domains: bool,
     /// `apps.capture_window_titles` (reserved; never implemented by this agent).
     pub capture_window_titles: bool,
@@ -137,6 +137,9 @@ pub struct ScreenshotSettings {
     pub excluded_apps: Vec<String>,
     /// `screenshots.employee_deletion` (default `self_service`).
     pub employee_deletion: EmployeeDeletion,
+    /// `screenshots.blur` (default `false`): blur every screenshot on this computer,
+    /// before it is encoded, so no text in it can be read.
+    pub blur: bool,
 }
 
 impl Default for ScreenshotSettings {
@@ -148,6 +151,7 @@ impl Default for ScreenshotSettings {
             max_width_px: 1280,
             excluded_apps: Vec::new(),
             employee_deletion: EmployeeDeletion::SelfService,
+            blur: false,
         }
     }
 }

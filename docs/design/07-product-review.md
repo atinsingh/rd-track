@@ -360,6 +360,14 @@ Stage 4 F4/F3 (agent notices) finishes first. Then:
    domains and no browser has it, and the session notice says what is shared. The demo's
    Client B project records domains. Tested end to end in CI with a real Chromium.
 
+   **15 done 2026-10-30 (SCR-12: screenshot blur)**: a policy can blur screenshots
+   (`screenshots.blur`, any scope asking for it wins; turning it off is an expansion people
+   are told about). The agent blurs each frame after downscaling and before encoding, so a
+   readable image never leaves the computer; the server records the decision at the upload
+   intent, tells the agent, and deletes any upload the agent doesn't confirm as blurred
+   (older agents). Screenshots show "Blurred"; What's collected, the session notice and the
+   policy editor say so, in English and French.
+
 The remaining Stage 4 features (F5 API tokens, F6 expected hours, F7 expenses, F8 payroll
 adjustments, F9 polish) slot in after slice 3, since expenses and tokens both depend on
 work items and notifications.

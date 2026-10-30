@@ -20,7 +20,7 @@ people more closely. Declined items are listed so sales can explain the choice.
 | Time tracking (desktop, offline, idle) | ✓ | ✓ (agent, offline outbox, idle) | — |
 | Activity levels, app usage | ✓ | ✓ (minute aggregates, app names) | — |
 | URLs | Full URLs | Domains only, opt-in | Keep stricter |
-| Screenshots | ✓ (incl. blur) | ✓ policy-governed, off by default | Blur/redaction later (SCR-12) |
+| Screenshots | ✓ (incl. blur) | ✓ policy-governed, off by default; blur on the computer before upload (SCR-12, done) | Redaction of chosen areas later |
 | Manual time with reason | ✓ | ✓ with approval | — |
 | **Timesheets & approvals** (weekly submit → approve, locked for payroll) | Grow+ | ✗ | **Adopt — Stage 3** |
 | **Daily/weekly limits, overtime** | ✓ | ✗ | **Adopt — Stage 3** (limits warn and stop tracking with notice) |

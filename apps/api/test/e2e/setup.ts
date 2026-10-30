@@ -43,7 +43,8 @@ await pool.query(
     policy!.id,
     orgId,
     {
-      screenshots: { enabled: true, interval_minutes: 10, max_width_px: 640 },
+      // Blurred (SCR-12): the agent must blur before upload, or the server discards it.
+      screenshots: { enabled: true, interval_minutes: 10, max_width_px: 640, blur: true },
       idle: { threshold_seconds: 60 },
       // scripts/e2e-browser.sh: the project records website domains (Pro).
       ...(process.env.E2E_DOMAINS === '1' ? { apps: { capture_domains: true } } : {}),

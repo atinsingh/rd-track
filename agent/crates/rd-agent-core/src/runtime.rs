@@ -1457,6 +1457,7 @@ impl Agent {
                     session_id,
                     max_width: s.max_width_px,
                     primary_monitor_only: s.primary_monitor_only,
+                    blur: s.blur,
                     gate: self.gates.gate(),
                 });
                 true

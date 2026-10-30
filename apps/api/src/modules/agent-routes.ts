@@ -136,6 +136,9 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
     if (r.status === 'discarded') {
       throw new AppError(403, 'session_not_active', 'The capture time is outside the active session; the image was discarded');
     }
+    if (r.status === 'not_blurred') {
+      throw new AppError(403, 'blur_required', 'The policy blurs screenshots and this one was not blurred; it was discarded. Update the app.');
+    }
     return r;
   });
 }

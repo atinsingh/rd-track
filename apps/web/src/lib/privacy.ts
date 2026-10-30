@@ -39,6 +39,7 @@ export function describeCollectionLocalized(p: PolicySettings): CollectionItem[]
         ? t('collect.shots.detail', {
             minutes: sh.interval_minutes,
             monitors: sh.primary_monitor_only ? t('collect.shots.primary') : t('collect.shots.all'),
+            blurred: sh.blur ? t('collect.shots.blurred') : '',
             width: sh.max_width_px,
             excluded: sh.excluded_apps.length ? t('collect.shots.excluded') : '',
             days: p.retention.screenshot_days,

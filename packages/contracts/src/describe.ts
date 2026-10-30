@@ -50,7 +50,7 @@ export function describeCollection(p: PolicySettings): CollectionItem[] {
       detail: p.screenshots.enabled
         ? `About one every ${p.screenshots.interval_minutes} minutes, ${
             p.screenshots.primary_monitor_only ? 'primary monitor' : 'all monitors'
-          }, reduced to ${p.screenshots.max_width_px} px wide, kept ${p.screenshots.excluded_apps.length ? 'except when excluded apps are in front, ' : ''}${p.retention.screenshot_days} days`
+          }, ${p.screenshots.blur ? 'blurred so no text can be read, ' : ''}reduced to ${p.screenshots.max_width_px} px wide, kept ${p.screenshots.excluded_apps.length ? 'except when excluded apps are in front, ' : ''}${p.retention.screenshot_days} days`
         : 'Off for you',
     },
   ];

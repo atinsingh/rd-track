@@ -1477,6 +1477,8 @@ export const fr: Record<MessageKey, string> = {
   'adm.pf.screenshots.excluded_apps.help': 'Un nom d’application par ligne; les listes de toutes les portées sont combinées',
   'adm.pf.screenshots.employee_deletion.label': 'Demandes de suppression des employés',
   'adm.pf.screenshots.employee_deletion.help': 'Le libre-service l’emporte sur l’examen',
+  'adm.pf.screenshots.blur.label': 'Flouter les captures d’écran',
+  'adm.pf.screenshots.blur.help': 'Floutées sur l’ordinateur avant l’envoi, pour qu’aucun texte ne soit lisible; toute portée peut l’exiger',
   'adm.pf.viewers.manager_can_view_activity.label': 'Les gestionnaires voient l’activité informatique',
   'adm.pf.viewers.manager_can_view_activity.help': 'Les gestionnaires d’équipe voient les résumés d’activité de leurs membres',
   'adm.pf.viewers.manager_can_view_apps.label': 'Les gestionnaires voient les noms d’applications',
@@ -2007,7 +2009,8 @@ export const fr: Record<MessageKey, string> = {
   'collect.titles.text': 'Les titres de fenêtres et les URL complètes',
   'collect.titles.detail': 'Recueillis',
   'collect.shots.text': 'Captures d’écran',
-  'collect.shots.detail': 'Environ une toutes les {minutes} minutes, {monitors}, réduites à {width} px de large, conservées {excluded}{days} jours',
+  'collect.shots.detail': 'Environ une toutes les {minutes} minutes, {monitors}, {blurred}réduites à {width} px de large, conservées {excluded}{days} jours',
+  'collect.shots.blurred': 'floutées pour qu’aucun texte ne soit lisible, ',
   'collect.shots.primary': 'écran principal',
   'collect.shots.all': 'tous les écrans',
   'collect.shots.excluded': 'sauf quand une application exclue est au premier plan, ',
@@ -2808,6 +2811,9 @@ export const fr: Record<MessageKey, string> = {
   'adm.dev.ext.firefox': 'Firefox : ID du module',
   'adm.dev.ext.count': '{n} des {total} ordinateurs connectés ont l’extension.',
   'adm.dev.ext.store': 'Fiche',
+
+  'shots.blurred': 'Floutée',
+  'shots.blurredHint': 'Floutée sur l’ordinateur avant l’envoi',
 
   'ins.eyebrow': 'Employé · Analyses',
   'ins.title': 'Analyses',

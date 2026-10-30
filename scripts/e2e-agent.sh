@@ -36,7 +36,7 @@ SESSIONS=$(q "SELECT count(*) FROM work_sessions WHERE user_id = '$USER_ID' AND 
 BUCKETS=$(q "SELECT count(*) FROM activity_buckets WHERE user_id = '$USER_ID'")
 TRACKED=$(q "SELECT COALESCE(sum(active_seconds + idle_seconds), 0) FROM activity_buckets WHERE user_id = '$USER_ID'")
 APPS=$(q "SELECT count(*) FROM app_usage WHERE user_id = '$USER_ID'")
-SHOTS=$(q "SELECT count(*) FROM screenshots WHERE user_id = '$USER_ID' AND status = 'stored'")
+SHOTS=$(q "SELECT count(*) FROM screenshots WHERE user_id = '$USER_ID' AND status = 'stored' AND blurred")
 REJECTED=$(q "SELECT count(*) FROM ingest_events WHERE status = 'rejected'")
 PENDING=$(q "SELECT count(*) FROM ingest_events WHERE status = 'pending'")
 echo "sessions=$SESSIONS buckets=$BUCKETS tracked_seconds=$TRACKED app_usage=$APPS screenshots=$SHOTS rejected=$REJECTED pending=$PENDING"
@@ -46,7 +46,7 @@ fail=0
 [ "$BUCKETS" -ge $((DURATION / 60 - 1)) ] || { echo "expected at least $((DURATION / 60 - 1)) buckets"; fail=1; }
 [ "$TRACKED" -le "$DURATION" ] || { echo "tracked time exceeds wall-clock run time"; fail=1; }
 [ "$APPS" -ge 1 ] || { echo "expected app usage"; fail=1; }
-[ "$SHOTS" -ge 1 ] || { echo "expected a stored screenshot"; fail=1; }
+[ "$SHOTS" -ge 1 ] || { echo "expected a stored, blurred screenshot"; fail=1; }
 [ "$REJECTED" -eq 0 ] || { echo "events were rejected:"; q "SELECT event_type, reason FROM ingest_events WHERE status = 'rejected'"; fail=1; }
 [ "$PENDING" -eq 0 ] || { echo "events still pending"; fail=1; }
 if [ $fail -ne 0 ]; then echo "--- api.log"; tail -40 "$DATA_DIR/api.log"; echo "--- worker.log"; tail -20 "$DATA_DIR/worker.log"; exit 1; fi

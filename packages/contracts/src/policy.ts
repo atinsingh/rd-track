@@ -47,6 +47,8 @@ export const policySettingsSchema = z.strictObject({
     max_width_px: z.number().int().min(640).max(1920),
     excluded_apps: z.array(z.string().min(1).max(200)).max(200),
     employee_deletion: z.enum(['self_service', 'review']),
+    /** Blurred on the computer before upload, so no text can be read (SCR-12). */
+    blur: z.boolean(),
   }),
   viewers: z.strictObject({
     manager_can_view_activity: z.boolean(),
@@ -90,6 +92,7 @@ export const DEFAULT_POLICY: PolicySettings = {
     max_width_px: 1280,
     excluded_apps: [],
     employee_deletion: 'self_service',
+    blur: false,
   },
   viewers: {
     manager_can_view_activity: true,
@@ -128,6 +131,8 @@ export const POLICY_FIELD_RULES: readonly FieldRule[] = [
   { path: ['screenshots', 'max_width_px'], strategy: 'min' },
   { path: ['screenshots', 'excluded_apps'], strategy: 'union' },
   { path: ['screenshots', 'employee_deletion'], strategy: 'specific', prefer: ['self_service', 'review'] },
+  // Blurring is the more private choice: any scope asking for it wins.
+  { path: ['screenshots', 'blur'], strategy: 'any_true' },
   { path: ['viewers', 'manager_can_view_activity'], strategy: 'restrictive_bool' },
   { path: ['viewers', 'manager_can_view_apps'], strategy: 'restrictive_bool' },
   { path: ['viewers', 'manager_can_view_screenshots'], strategy: 'restrictive_bool' },
@@ -312,6 +317,7 @@ export function collectionExpansions(prev: PolicySettings, next: PolicySettings)
       add('screenshots.primary_monitor_only', p.primary_monitor_only, n.primary_monitor_only);
     const removed = p.excluded_apps.filter((a) => !n.excluded_apps.includes(a));
     if (removed.length > 0) add('screenshots.excluded_apps', p.excluded_apps, n.excluded_apps);
+    if (p.enabled && p.blur && !n.blur) add('screenshots.blur', p.blur, n.blur);
     if (p.employee_deletion === 'self_service' && n.employee_deletion === 'review')
       add('screenshots.employee_deletion', p.employee_deletion, n.employee_deletion);
     if (p.enabled && next.retention.screenshot_days > prev.retention.screenshot_days)

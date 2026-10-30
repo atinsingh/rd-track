@@ -58,6 +58,7 @@ pub fn describe_collection_in(p: &PolicySettings, lang: Lang) -> Vec<CollectionI
                         m.collect_shots_all
                     },
                 ),
+                ("blurred", if s.blur { m.collect_shots_blurred } else { "" }),
                 ("width", &s.max_width_px.to_string()),
                 (
                     "excluded",
@@ -186,6 +187,12 @@ mod tests {
             d.detail,
             "About one every 15 minutes, primary monitor, reduced to 1280 px wide, kept 30 days"
         );
+        p.screenshots.blur = true;
+        assert_eq!(
+            describe_collection(&p)[5].detail,
+            "About one every 15 minutes, primary monitor, blurred so no text can be read, reduced to 1280 px wide, kept 30 days"
+        );
+        p.screenshots.blur = false;
         p.screenshots.primary_monitor_only = false;
         p.screenshots.excluded_apps = vec!["com.example.bank".into()];
         p.apps.capture_app_name = false;

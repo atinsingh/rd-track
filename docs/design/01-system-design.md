@@ -334,6 +334,7 @@ declared strategy:
 | `screenshots.max_width_px` (640–1920) | `1280` | minimum |
 | `screenshots.excluded_apps` | `[]` | union |
 | `screenshots.employee_deletion` | `"self_service"` | `"self_service"` wins over `"review"` |
+| `screenshots.blur` | `false` | any `true` wins (blurring is the more private choice); turning it off is a collection expansion |
 | `viewers.manager_can_view_activity` | `true` | restrictive boolean |
 | `viewers.manager_can_view_apps` | `true` | restrictive boolean |
 | `viewers.manager_can_view_screenshots` | `false` | restrictive boolean |
@@ -392,6 +393,12 @@ Agent                              API                               Object stor
   offline** — there is no upload intent to authorize them; this removes the hardest
   privacy edge case from the outbox.
 * Excluded apps: if the foreground app is on `excluded_apps` at capture time, skip.
+* Blur (`SCR-12`): with `screenshots.blur` the agent blurs the frame after downscaling and
+  before encoding (cells of about 1/80 of the width, at least 16 px, blended back to full
+  size), so a sharp image never leaves the computer. The upload intent carries `blur`
+  from the resolved policy and the row records it; `complete` must report
+  `blurred: true` or the object is deleted (`deletion_reason = not_blurred`,
+  `403 blur_required`), so an older agent can't store a sharp image.
 * Bytes never pass through the API process, logs, or analytics (`SCR-11`).
 * Employee deletion (`SCR-09/10`): with `employee_deletion = self_service` and no legal
   hold, the request is approved automatically and the worker deletes the object and

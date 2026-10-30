@@ -412,6 +412,10 @@ pub struct UploadIntentResponse {
     /// URL expiry.
     #[serde(default, with = "crate::ts::option")]
     pub expires_at: Option<DateTime<Utc>>,
+    /// The policy blurs this screenshot (the server's word; the agent also blurs when its
+    /// own policy says so).
+    #[serde(default)]
+    pub blur: bool,
 }
 
 /// `POST /v1/screenshots/complete` request.
@@ -430,6 +434,8 @@ pub struct CompleteRequest {
     pub width: u32,
     /// Image height.
     pub height: u32,
+    /// The image was blurred before it was encoded.
+    pub blurred: bool,
 }
 
 /// `POST /v1/screenshots/complete` response.
@@ -1083,6 +1089,7 @@ mod tests {
             upload_url: "http://minio/bucket/key?sig=1".into(),
             upload_headers: [("x-amz-meta-a".to_string(), "1".to_string())].into(),
             expires_at: None,
+            blur: false,
         };
         api.upload_object(&intent, ImageContentType::Jpeg, vec![1, 2, 3])
             .unwrap();

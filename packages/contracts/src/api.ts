@@ -169,6 +169,8 @@ export interface ScreenshotDTO {
   deletion_request_status: 'pending' | 'approved' | 'rejected' | null;
   /** App in front at capture time, when app names are collected. */
   app_name: string | null;
+  /** Blurred on the computer before upload (SCR-12). */
+  blurred: boolean;
 }
 export interface ViewUrlResponse {
   url: string;
@@ -184,6 +186,8 @@ export interface UploadIntentResponse {
   upload_url: string;
   upload_headers: Record<string, string>;
   expires_at: string;
+  /** The policy blurs this screenshot: the agent must blur it before encoding. */
+  blur: boolean;
 }
 export const screenshotCompleteRequest = z.strictObject({
   screenshot_id: uuid,
@@ -192,6 +196,8 @@ export const screenshotCompleteRequest = z.strictObject({
   bytes: z.number().int().min(1).max(10 * 1024 * 1024),
   width: z.number().int().min(1).max(8000),
   height: z.number().int().min(1).max(8000),
+  /** The agent blurred the image before encoding (SCR-12). Older agents leave it out. */
+  blurred: z.boolean().optional(),
 });
 
 export const deletionRequestCreate = z.strictObject({

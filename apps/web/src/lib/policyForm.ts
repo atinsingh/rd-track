@@ -78,6 +78,12 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
       { value: 'review', label: 'Admin review' },
     ],
   },
+  'screenshots.blur': {
+    group: 'Screenshots',
+    label: 'Blur screenshots',
+    help: 'Blurred on the computer before upload, so no text can be read; any scope can require it',
+    kind: 'bool',
+  },
   'viewers.manager_can_view_activity': {
     group: 'Who can see it',
     label: 'Managers can view computer activity',

@@ -206,6 +206,10 @@ slot within the first second when the project policy enables screenshots).
 * Payload structs are closed (`deny_unknown_fields`, no free-form maps). `domain` is set
   only as described in *Website domains*; `apps.capture_app_name = false` disables app
   usage entirely; `apps.capture_window_titles` is ignored.
+* Screenshots are blurred on the computer, before encoding, when the policy has
+  `screenshots.blur` (or the upload intent says so): `screenshot::blur` averages cells of
+  about 1/80 of the width (at least 16 px) and blends them back to full size, so text
+  can't be read but windows and colours can be told apart.
 * Screenshots: only when the signed policy for the session's project enables them, only
   in `Active`, inside work hours, with no excluded app in front, and only after the server
   issued an upload intent — so never offline. Bytes go straight to the presigned URL (no

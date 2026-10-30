@@ -111,6 +111,12 @@ export function ScreenshotStrip({
                   <span>
                     <span className="mono">{time}</span>
                     {shot.app_name ? ` · ${shot.app_name}` : ''}
+                    {shot.blurred ? (
+                      <>
+                        {' · '}
+                        <span title={t('shots.blurredHint')}>{t('shots.blurred')}</span>
+                      </>
+                    ) : null}
                     {deletion ? ` · ${deletion}` : status ? ` · ${status}` : ''}
                   </span>
                   {isSelf && viewable && !shot.deletion_request_status ? (
@@ -132,7 +138,11 @@ export function ScreenshotStrip({
           setUrl(null);
         }}
         size="lg"
-        title={viewing ? t('shots.titleAt', { when: formatDateTime(viewing.captured_at, tz) }) : t('shots.title')}
+        title={
+          viewing
+            ? `${t('shots.titleAt', { when: formatDateTime(viewing.captured_at, tz) })}${viewing.blurred ? ` · ${t('shots.blurred')}` : ''}`
+            : t('shots.title')
+        }
         description={
           isSelf
             ? t('shots.keptUntil', { when: viewing ? formatDateTime(viewing.retention_after, tz) : '—' })

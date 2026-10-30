@@ -1475,6 +1475,8 @@ export const en = {
   'adm.pf.screenshots.excluded_apps.help': 'One app name per line; lists from all scopes are combined',
   'adm.pf.screenshots.employee_deletion.label': 'Employee deletion requests',
   'adm.pf.screenshots.employee_deletion.help': 'Self-service wins over review',
+  'adm.pf.screenshots.blur.label': 'Blur screenshots',
+  'adm.pf.screenshots.blur.help': 'Blurred on the computer before upload, so no text can be read; any scope can require it',
   'adm.pf.viewers.manager_can_view_activity.label': 'Managers can view computer activity',
   'adm.pf.viewers.manager_can_view_activity.help': 'Team managers see activity summaries for their members',
   'adm.pf.viewers.manager_can_view_apps.label': 'Managers can view app names',
@@ -2005,7 +2007,8 @@ export const en = {
   'collect.titles.text': 'Window titles and full URLs',
   'collect.titles.detail': 'Collected',
   'collect.shots.text': 'Screenshots',
-  'collect.shots.detail': 'About one every {minutes} minutes, {monitors}, reduced to {width} px wide, kept {excluded}{days} days',
+  'collect.shots.detail': 'About one every {minutes} minutes, {monitors}, {blurred}reduced to {width} px wide, kept {excluded}{days} days',
+  'collect.shots.blurred': 'blurred so no text can be read, ',
   'collect.shots.primary': 'primary monitor',
   'collect.shots.all': 'all monitors',
   'collect.shots.excluded': 'except when excluded apps are in front, ',
@@ -2806,6 +2809,9 @@ export const en = {
   'adm.dev.ext.firefox': 'Firefox: add-on ID',
   'adm.dev.ext.count': '{n} of {total} connected computers have the extension.',
   'adm.dev.ext.store': 'Listing',
+
+  'shots.blurred': 'Blurred',
+  'shots.blurredHint': 'Blurred on the computer before upload',
 
   'ins.eyebrow': 'Employee · Insights',
   'ins.title': 'Insights',
