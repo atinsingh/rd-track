@@ -10,15 +10,11 @@ import { rd, toApiError, type ApiError } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { addDays, dayRange, formatDateTime, startOfMonth, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
+import { formatNumber } from '@/lib/format';
 
-const KIND_LABEL: Record<ExportDTO['kind'], string> = { sessions: 'Sessions', activity_daily: 'Daily activity summary' };
-const STATUS_LABEL: Record<ExportDTO['status'], string> = {
-  queued: 'Queued',
-  running: 'Preparing',
-  ready: 'Ready',
-  failed: 'Failed',
-  expired: 'Expired',
-};
+const kindLabel = (k: ExportDTO['kind']): string => t(`xp.kind.${k}`);
+const statusLabel = (st: ExportDTO['status']): string => t(`exports.status.${st}`);
 
 function Download({ e }: { e: ExportDTO }) {
   const [error, setError] = useState<ApiError | null>(null);
@@ -26,7 +22,7 @@ function Download({ e }: { e: ExportDTO }) {
   if (e.download_url)
     return (
       <a href={e.download_url} download rel="noopener">
-        Download CSV
+        {t('xp.downloadCsv')}
       </a>
     );
   const fetchLink = async () => {
@@ -40,7 +36,7 @@ function Download({ e }: { e: ExportDTO }) {
   return (
     <>
       <Button size="sm" variant="quiet" onClick={fetchLink}>
-        Get download link
+        {t('xp.getLink')}
       </Button>
       <ActionError error={error} />
     </>
@@ -62,8 +58,8 @@ export default function ExportsPage() {
 
   useEffect(() => {
     if (!inFlight) return;
-    const t = window.setInterval(reload, 3000);
-    return () => window.clearInterval(t);
+    const timer = window.setInterval(reload, 3000);
+    return () => window.clearInterval(timer);
   }, [inFlight, reload]);
 
   const submit = async (e: FormEvent) => {
@@ -79,65 +75,65 @@ export default function ExportsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Exports · CSV"
-        title="Exports"
-        description="Download your records as CSV. Files are prepared in the background and expire after 24 hours. Every export is recorded in the audit log."
+        eyebrow={t('xp.eyebrow')}
+        title={t('xp.title')}
+        description={t('xp.description')}
       />
-      <Card title="New export">
+      <Card title={t('xp.new')}>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div className={formGridClass}>
-            <SelectField label="What" value={kind} onChange={(e) => setKind(e.target.value as ExportDTO['kind'])}>
-              <option value="sessions">Sessions (one row per session)</option>
-              <option value="activity_daily">Daily activity summary</option>
+            <SelectField label={t('xp.what')} value={kind} onChange={(e) => setKind(e.target.value as ExportDTO['kind'])}>
+              <option value="sessions">{t('xp.sessionsOption')}</option>
+              <option value="activity_daily">{t('xp.kind.activity_daily')}</option>
             </SelectField>
-            <SelectField label="Whose data" value={scope} onChange={(e) => setScope(e.target.value)}>
-              <option value="me">Just me</option>
-              {(teams.data ?? []).map((t) => (
-                <option key={t.id} value={`team:${t.id}`}>
-                  Team {t.name}
+            <SelectField label={t('xp.whose')} value={scope} onChange={(e) => setScope(e.target.value)}>
+              <option value="me">{t('xp.justMe')}</option>
+              {(teams.data ?? []).map((team) => (
+                <option key={team.id} value={`team:${team.id}`}>
+                  {t('xp.team', { name: team.name })}
                 </option>
               ))}
             </SelectField>
-            <TextField label="From" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+            <TextField label={t('xp.from')} type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
             <TextField
-              label="To"
+              label={t('xp.to')}
               type="date"
               value={to}
               min={from}
               max={today}
               onChange={(e) => setTo(e.target.value)}
-              error={from > to ? 'The end date is before the start date.' : null}
-              hint={`Whole days in ${tz}`}
+              error={from > to ? t('xp.endBeforeStart') : null}
+              hint={t('xp.wholeDays', { tz })}
             />
           </div>
           <ActionError error={create.error} />
           <div className={formActionsClass}>
             <Button type="submit" variant="primary" disabled={create.busy || from > to}>
-              {create.busy ? 'Queuing…' : 'Create export →'}
+              {create.busy ? t('xp.queuing') : t('xp.create')}
             </Button>
           </div>
         </form>
       </Card>
-      <Card title="Your exports" subtitle={inFlight ? 'Refreshing every few seconds while files are prepared' : undefined}>
-        <Resource {...exportsRes} label="Loading exports">
+      <Card title={t('xp.yours')} subtitle={inFlight ? t('xp.refreshing') : undefined}>
+        <Resource {...exportsRes} label={t('exports.loading')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No exports yet" />
+              <Empty title={t('exports.none')} />
             ) : (
-              <TableBox label="Your exports">
+              <TableBox label={t('xp.yours')}>
                 <table className={tableClass} style={{ minWidth: 640 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Created</th>
-                      <th scope="col">What</th>
-                      <th scope="col">Range</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('xp.col.created')}</th>
+                      <th scope="col">{t('xp.col.what')}</th>
+                      <th scope="col">{t('xp.col.range')}</th>
+                      <th scope="col">{t('xp.col.status')}</th>
                       <th scope="col" className={numClass}>
-                        Rows
+                        {t('xp.col.rows')}
                       </th>
-                      <th scope="col">Expires</th>
+                      <th scope="col">{t('xp.col.expires')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Download</span>
+                        <span className="visually-hidden">{t('xp.col.download')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -147,15 +143,15 @@ export default function ExportsPage() {
                       .map((e) => (
                         <tr key={e.id}>
                           <td className="mono small">{formatDateTime(e.created_at, tz)}</td>
-                          <td>{KIND_LABEL[e.kind]}</td>
+                          <td>{kindLabel(e.kind)}</td>
                           <td className="mono small">
                             {e.from.slice(0, 10)} – {e.to.slice(0, 10)}
-                            {e.user_count > 1 ? ` · ${e.user_count} people` : ''}
+                            {e.user_count > 1 ? t('xp.people', { n: e.user_count }) : ''}
                           </td>
                           <td>
-                            <Badge tone={e.status === 'ready' ? 'solid' : e.status === 'failed' ? 'warn' : 'outline'}>{STATUS_LABEL[e.status]}</Badge>
+                            <Badge tone={e.status === 'ready' ? 'solid' : e.status === 'failed' ? 'warn' : 'outline'}>{statusLabel(e.status)}</Badge>
                           </td>
-                          <td className={numClass}>{e.row_count ?? '—'}</td>
+                          <td className={numClass}>{e.row_count === null || e.row_count === undefined ? '—' : formatNumber(e.row_count, 0)}</td>
                           <td className="mono small">{formatDateTime(e.expires_at, tz)}</td>
                           <td style={{ textAlign: 'right' }}>
                             <Download e={e} />

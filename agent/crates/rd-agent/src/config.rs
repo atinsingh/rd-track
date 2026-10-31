@@ -12,6 +12,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use rd_agent_core::identity::DeviceIdentity;
+use serde::Deserialize;
 
 /// Resolves the data directory: `--data-dir`, then `RD_AGENT_DATA_DIR`, then the
 /// platform default.
@@ -161,5 +162,87 @@ mod tests {
         save_identity(&p.identity(), &id).unwrap();
         assert_eq!(load_identity(&p.identity()).unwrap(), Some(id));
         assert_eq!(data_dir(Some("/x".into())), PathBuf::from("/x"));
+    }
+}
+
+/// The deployment file IT puts on managed computers (G26): which organization this
+/// computer belongs to. It only lets the person ask for a code by email; it never
+/// connects the computer on its own.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct Deployment {
+    /// The organization's Track address.
+    pub server: String,
+    /// The organization's deployment key (`rddk_…`).
+    pub deployment_key: String,
+}
+
+/// Where the deployment file lives: `RD_TRACK_DEPLOYMENT_FILE`, else the system-wide
+/// folder IT tools write to.
+pub fn deployment_file() -> PathBuf {
+    if let Some(p) = std::env::var_os("RD_TRACK_DEPLOYMENT_FILE") {
+        return PathBuf::from(p);
+    }
+    if cfg!(target_os = "windows") {
+        let base = std::env::var_os("ProgramData")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"));
+        base.join("RoundDigital Track").join("deployment.json")
+    } else if cfg!(target_os = "macos") {
+        PathBuf::from("/Library/Application Support/RoundDigital Track/deployment.json")
+    } else {
+        PathBuf::from("/etc/rd-track/deployment.json")
+    }
+}
+
+/// Reads the deployment file, if there is a valid one.
+pub fn load_deployment(path: &Path) -> Option<Deployment> {
+    parse_deployment(&fs::read_to_string(path).ok()?)
+}
+
+/// A deployment file with an https server (or http on this computer) and a key.
+pub fn parse_deployment(raw: &str) -> Option<Deployment> {
+    // Windows PowerShell writes UTF-8 files with a byte-order mark.
+    let mut d: Deployment = serde_json::from_str(raw.trim_start_matches('\u{feff}')).ok()?;
+    d.server = d.server.trim().trim_end_matches('/').to_owned();
+    d.deployment_key = d.deployment_key.trim().to_owned();
+    let server_ok = d.server.starts_with("https://")
+        || d.server.starts_with("http://localhost")
+        || d.server.starts_with("http://127.0.0.1");
+    let key_ok = d.deployment_key.starts_with("rddk_")
+        && (20..=200).contains(&d.deployment_key.len())
+        && d.deployment_key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-');
+    (server_ok && key_ok && d.server.len() <= 2000).then_some(d)
+}
+
+#[cfg(test)]
+mod deployment_tests {
+    use super::*;
+
+    #[test]
+    fn reads_a_deployment_file() {
+        let d = parse_deployment(
+            r#"{ "server": "https://track.acme.com/", "deployment_key": "rddk_abcdefghijklmnopqrstuvwx" }"#,
+        )
+        .unwrap();
+        assert_eq!(d.server, "https://track.acme.com");
+        assert_eq!(d.deployment_key, "rddk_abcdefghijklmnopqrstuvwx");
+        let with_bom = "\u{feff}{ \"server\": \"https://track.acme.com\", \"deployment_key\": \"rddk_abcdefghijklmnopqrstuvwx\" }";
+        assert!(parse_deployment(with_bom).is_some());
+    }
+
+    #[test]
+    fn refuses_insecure_servers_and_bad_keys() {
+        let bad = [
+            r#"{ "server": "http://track.acme.com", "deployment_key": "rddk_abcdefghijklmnopqrstuvwx" }"#,
+            r#"{ "server": "https://track.acme.com", "deployment_key": "rdt_org_abcdefghijklmnopqrstu" }"#,
+            r#"{ "server": "https://track.acme.com", "deployment_key": "rddk_short" }"#,
+            r#"{ "server": "https://track.acme.com" }"#,
+            "not json",
+        ];
+        for raw in bad {
+            assert!(parse_deployment(raw).is_none(), "{raw}");
+        }
     }
 }

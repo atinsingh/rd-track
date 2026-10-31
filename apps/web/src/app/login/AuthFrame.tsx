@@ -1,24 +1,32 @@
+'use client';
+
 import Image from 'next/image';
 import type { ReactNode } from 'react';
-import { NEVER_COLLECTED } from '@rd/contracts';
+import { useT } from '@/lib/i18n';
 import s from './login.module.css';
 
-export function AuthFrame({ children }: { children: ReactNode }) {
+/** `about` replaces the left panel's words, for sign-ins that aren't for the people being tracked (the client portal). */
+export function AuthFrame({ children, about }: { children: ReactNode; about?: ReactNode }) {
+  const t = useT();
   return (
     <div className={s.page}>
-      <aside className={s.aside} aria-label="About RoundDigital Track">
+      <aside className={s.aside} aria-label={t('auth.about')}>
         <Image src="/brand/rd-logo-reversed.png" alt="RoundDigital" width={112} height={24} className={s.reversed} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          <h2>Time and computer activity, out in the open.</h2>
-          <ul>
-            <li>Nothing is collected outside a work session you start.</li>
-            <li>You see everything your manager can see about you.</li>
-            <li>Screenshots are off unless a published policy turns them on.</li>
-          </ul>
-        </div>
-        <p className={s.fine} style={{ color: 'var(--ink-muted)' }}>
-          Never recorded: {NEVER_COLLECTED}
-        </p>
+        {about ?? (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+              <h2>{t('auth.headline')}</h2>
+              <ul>
+                <li>{t('auth.point1')}</li>
+                <li>{t('auth.point2')}</li>
+                <li>{t('auth.point3')}</li>
+              </ul>
+            </div>
+            <p className={s.fine} style={{ color: 'var(--ink-muted)' }}>
+              {t('auth.neverRecorded', { list: t('auth.neverList') })}
+            </p>
+          </>
+        )}
       </aside>
       <main className={s.panel}>
         <div className={s.card}>
@@ -31,6 +39,6 @@ export function AuthFrame({ children }: { children: ReactNode }) {
 }
 
 export function safeNext(next: string | null | undefined): string {
-  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/me';
+  if (!next || !next.startsWith('/') || next.startsWith('//') || next.startsWith('/login')) return '/';
   return next;
 }

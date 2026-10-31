@@ -2,6 +2,8 @@
 // everything comes from the Rust side through `invoke` (allow-listed commands) and
 // the `view` event. All server-provided strings are set with textContent.
 
+import { browserLang, setLang, t, type Key, type Lang } from "./i18n.js";
+
 interface TauriGlobal {
   core: { invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> };
   event: { listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<() => void> };
@@ -13,9 +15,49 @@ declare global {
 }
 
 interface BannerAction { label: string; command: string; arg: string | null }
-interface Banner { id: string; kind: "info" | "warn"; text: string; action: BannerAction | null; dismissible: boolean }
+interface Banner {
+  id: string;
+  kind: "info" | "warn";
+  text: string;
+  detail: string | null;
+  action: BannerAction | null;
+  dismissible: boolean;
+}
 interface Task { id: string; name: string }
 interface Project { id: string; name: string; tasks: Task[] }
+interface IdleView {
+  id: string;
+  title: string;
+  times: string;
+  project: string;
+  keep_label: string;
+  discard_label: string;
+  reassign_label: string;
+  targets: Project[];
+}
+type IdleDecision = "keep" | "discard" | "reassign";
+type ReminderChoice = "start" | "not_today" | "stop" | "keep";
+interface ReminderButton { label: string; choice: ReminderChoice }
+interface ReminderView {
+  id: string;
+  kind: "start" | "stop" | "still_tracking";
+  title: string;
+  detail: string;
+  primary: ReminderButton;
+  secondary: ReminderButton;
+}
+interface RemindersView {
+  enabled: boolean;
+  start: boolean;
+  stop: boolean;
+  still_tracking: boolean;
+  my_start: string;
+  my_end: string;
+  my_days: number[];
+  schedule_note: string | null;
+  today: string;
+}
+type RemindersInput = Omit<RemindersView, "schedule_note" | "today">;
 interface AppView {
   phase: "enroll" | "starting" | "running" | "stopping" | "revoked" | "error";
   error: string | null;
@@ -27,15 +69,30 @@ interface AppView {
   camera: string | null;
   today: string;
   activity: string | null;
+  limit_today: string | null;
+  limit_week: string | null;
   sync: string;
   banners: Banner[];
+  idle: IdleView | null;
+  reminder: ReminderView | null;
+  reminders: RemindersView;
   can_start: boolean;
   require_project: boolean;
   projects: Project[];
   projects_supported: boolean | null;
   server_url: string | null;
+  enroll_prefill: { server_url: string; code: string } | null;
+  deployment: { server_url: string } | null;
+  /** Signing in: waiting for the person to confirm in the browser. */
+  sign_in: { user_code: string; approve_url: string; expires_at: string } | null;
+  /** Why the last sign-in ended without connecting. */
+  sign_in_error: string | null;
+  /** The Track address this build connects to unless told otherwise. */
+  default_server_url: string | null;
   simulated: boolean;
   version: string;
+  /** The person's language; every string above is already in it (G27). */
+  lang: Lang;
 }
 interface Item { key: string; collected: boolean; text: string; detail: string }
 interface SessionNotice {
@@ -60,7 +117,42 @@ let selectedTask = "";
 let busy = false;
 let error: string | null = null;
 let projectsRequested = false;
+// The "Reminders" settings section is open, and its last save error.
+let settingsOpen = false;
+// "Open when I sign in" (G10): read when the settings open; null until then.
+let openAtLogin: boolean | null = null;
+let settingsError: string | null = null;
+// Shown under the start button when "Start tracking" needs a project first.
+let startHint: string | null = null;
 const enrollForm = { server: "", code: "", name: "" };
+// The enrolment link last applied to the form, so typing over it isn't undone on the next view.
+let appliedLink = "";
+let fromLink = false;
+// IT deployed this computer (G26): sign in, or connect with a work email and an emailed code.
+const managed = { step: "signin" as "signin" | "email" | "code", email: "", useAdminCode: false };
+// Signing in is the main way to connect; the code form is the alternative.
+const signIn = { server: "", editing: false, useCode: false };
+
+/** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
+function linkParts(text: string): { server: string; code: string } | null {
+  const t = text.trim();
+  if (!t.startsWith("rdtrack://")) return null;
+  try {
+    const u = new URL(t);
+    const server = u.searchParams.get("server") ?? "";
+    const code = u.searchParams.get("code") ?? "";
+    return u.hostname === "enroll" && server && code ? { server: server.replace(/\/$/, ""), code } : null;
+  } catch {
+    return null;
+  }
+}
+// The person's pending choice on the idle-return panel (reset for each new prompt).
+const idleChoice: { id: string; decision: IdleDecision; project: string; task: string } = {
+  id: "",
+  decision: "keep",
+  project: "",
+  task: "",
+};
 
 // ----- tiny DOM helper ------------------------------------------------------------------
 
@@ -113,7 +205,7 @@ async function run(fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn();
   } catch (e) {
-    error = typeof e === "string" ? e : e instanceof Error ? e.message : "Something went wrong";
+    error = typeof e === "string" ? e : e instanceof Error ? e.message : t("error.generic");
   } finally {
     busy = false;
     render();
@@ -142,14 +234,56 @@ function loadProjects(): void {
 
 const opt = (s: string): string | null => (s === "" ? null : s);
 
-function onStart(): void {
-  void run(async () => {
-    const data = await invoke<SessionNotice>("prepare_session", {
-      projectId: opt(selectedProject),
-      taskId: opt(selectedTask),
-    });
-    notice = { data, review: false };
+async function prepareStart(): Promise<void> {
+  const data = await invoke<SessionNotice>("prepare_session", {
+    projectId: opt(selectedProject),
+    taskId: opt(selectedTask),
   });
+  notice = { data, review: false };
+}
+
+function onStart(): void {
+  startHint = null;
+  void run(prepareStart);
+}
+
+// A reminder's buttons. "Start tracking" continues into the same flow as the Start
+// button (project picker, then the session-start notice).
+function onReminder(r: ReminderView, choice: ReminderChoice): void {
+  void run(async () => {
+    view = await invoke<AppView>("resolve_reminder", { id: r.id, choice });
+    if (choice !== "start") return;
+    if (!view.can_start) return;
+    if (view.require_project && !selectedProject) {
+      startHint = t("pick.startHint");
+      return;
+    }
+    await prepareStart();
+  });
+}
+
+function saveReminders(change: Partial<RemindersInput>): void {
+  if (!view) return;
+  const r = view.reminders;
+  const settings: RemindersInput = {
+    enabled: r.enabled,
+    start: r.start,
+    stop: r.stop,
+    still_tracking: r.still_tracking,
+    my_start: r.my_start,
+    my_end: r.my_end,
+    my_days: r.my_days,
+    ...change,
+  };
+  settingsError = null;
+  invoke<AppView>("set_reminder_settings", { settings })
+    .then((v) => {
+      view = v;
+    })
+    .catch((e) => {
+      settingsError = String(e);
+    })
+    .finally(render);
 }
 
 function onConfirmStart(): void {
@@ -171,6 +305,8 @@ function onBannerAction(b: Banner): void {
       await invoke(a.command, { name: a.arg });
     } else if (a.command === "install_update") {
       await invoke("install_update");
+    } else if (a.command === "dismiss_banner") {
+      await invoke("dismiss_banner", { id: a.arg });
     }
     await refresh();
   });
@@ -183,7 +319,8 @@ function banners(v: AppView): Node[] {
     h(
       "div",
       { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" },
-      h("span", {}, b.text),
+      b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text),
+      b.detail && h("span", { class: "banner-detail" }, b.detail),
       (b.action || b.dismissible) &&
         h(
           "div",
@@ -193,7 +330,7 @@ function banners(v: AppView): Node[] {
               class: "x",
               type: "button",
               onclick: () => void run(() => invoke("dismiss_banner", { id: b.id })),
-            }, "DISMISS"),
+            }, t("banner.dismiss")),
           b.action &&
             h("button", { class: "act", type: "button", onclick: () => onBannerAction(b) }, b.action.label),
         ),
@@ -212,7 +349,7 @@ function header(v: AppView): HTMLElement {
       h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }),
       h("span", { class: "status" }, h("span", { class: dotClass, "aria-hidden": "true" }), v.label),
     ),
-    v.elapsed && h("span", { class: "elapsed", "aria-label": "Elapsed" }, v.elapsed),
+    v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed),
   );
 }
 
@@ -231,7 +368,7 @@ function projectPickers(v: AppView): Node[] {
         render();
       },
     },
-    h("option", { value: "" }, v.require_project ? "Choose a project…" : "No project"),
+    h("option", { value: "" }, v.require_project ? t("pick.chooseProject") : t("pick.noProject")),
     ...v.projects.map((p) => h("option", { value: p.id }, p.name)),
   );
   // A recovered session's project may not be in the list (yet): still show it.
@@ -246,17 +383,17 @@ function projectPickers(v: AppView): Node[] {
         selectedTask = (e.target as HTMLSelectElement).value;
       },
     },
-    h("option", { value: "" }, tasks.length ? "No task" : "—"),
-    ...tasks.map((t) => h("option", { value: t.id }, t.name)),
+    h("option", { value: "" }, tasks.length ? t("pick.noTask") : "—"),
+    ...tasks.map((task) => h("option", { value: task.id }, task.name)),
   );
-  if (taskValue && !tasks.some((t) => t.id === taskValue)) taskSelect.append(h("option", { value: taskValue }, taskValue));
+  if (taskValue && !tasks.some((task) => task.id === taskValue)) taskSelect.append(h("option", { value: taskValue }, taskValue));
   taskSelect.value = taskValue;
   const out: Node[] = [
-    h("label", { class: "field" }, "Project", projectSelect),
-    h("label", { class: "field" }, "Task", taskSelect),
+    h("label", { class: "field" }, t("pick.project"), projectSelect),
+    h("label", { class: "field" }, t("pick.task"), taskSelect),
   ];
   if (v.projects_supported === false) {
-    out.push(h("p", { class: "hint" }, "Your server does not list projects for this app yet. Sessions start without a project."));
+    out.push(h("p", { class: "hint" }, t("pick.unsupported")));
   }
   return out;
 }
@@ -267,7 +404,7 @@ function sessionButtons(v: AppView): HTMLElement {
     return h(
       "div",
       { class: "actions one" },
-      h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, "Start session"),
+      h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")),
     );
   }
   const paused = v.tray === "paused";
@@ -282,50 +419,302 @@ function sessionButtons(v: AppView): HTMLElement {
         disabled: busy,
         onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
       },
-      paused ? "Resume" : "Pause",
+      paused ? t("session.resume") : t("session.pause"),
     ),
     h(
       "button",
       { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },
-      "Stop",
+      t("session.stop"),
+    ),
+  );
+}
+
+// A start / stop / "still tracking?" reminder: title, one line, two buttons.
+function reminderCard(r: ReminderView): HTMLElement {
+  return h(
+    "div",
+    { class: "banner info reminder", role: "status" },
+    h("strong", { class: "banner-title" }, r.title),
+    h("span", { class: "banner-detail" }, r.detail),
+    h(
+      "div",
+      { class: "row" },
+      h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label),
+      h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label),
+    ),
+  );
+}
+
+const WEEKDAYS: [number, Key][] = [[1, "day.mon"], [2, "day.tue"], [3, "day.wed"], [4, "day.thu"], [5, "day.fri"], [6, "day.sat"], [7, "day.sun"]];
+
+// "Reminders": employee-controlled, kept on this computer only.
+function remindersSection(v: AppView): HTMLElement {
+  const r = v.reminders;
+  const toggle = (label: string, checked: boolean, disabled: boolean, change: (on: boolean) => Partial<RemindersInput>): HTMLElement =>
+    h(
+      "label",
+      { class: `toggle${disabled ? " disabled" : ""}` },
+      h("input", {
+        type: "checkbox",
+        checked,
+        disabled,
+        onchange: (e: Event) => saveReminders(change((e.target as HTMLInputElement).checked)),
+      }),
+      h("span", {}, label),
+    );
+  const off = !r.enabled;
+  const hours: Node[] = r.schedule_note
+    ? [h("p", { class: "hint" }, r.schedule_note)]
+    : [
+        h(
+          "div",
+          { class: "hours" },
+          h("label", { class: "field" }, t("settings.start"), h("input", { type: "time", value: r.my_start, disabled: off, onchange: (e: Event) => saveReminders({ my_start: (e.target as HTMLInputElement).value }) })),
+          h("label", { class: "field" }, t("settings.end"), h("input", { type: "time", value: r.my_end, disabled: off, onchange: (e: Event) => saveReminders({ my_end: (e.target as HTMLInputElement).value }) })),
+        ),
+        h(
+          "fieldset",
+          { class: "days" },
+          h("legend", { class: "sr-only" }, t("settings.workdays")),
+          ...WEEKDAYS.map(([d, name]) =>
+            h(
+              "label",
+              { class: `day${r.my_days.includes(d) ? " on" : ""}` },
+              h("input", {
+                type: "checkbox",
+                checked: r.my_days.includes(d),
+                disabled: off,
+                onchange: (e: Event) => {
+                  const on = (e.target as HTMLInputElement).checked;
+                  saveReminders({ my_days: on ? [...r.my_days, d] : r.my_days.filter((x) => x !== d) });
+                },
+              }),
+              h("span", {}, t(name)),
+            ),
+          ),
+        ),
+      ];
+  return h(
+    "section",
+    { class: "settings", "aria-label": t("settings.label") },
+    h("span", { class: "eyebrow", id: "reminders-h" }, t("settings.reminders")),
+    toggle(t("settings.remindersToggle"), r.enabled, false, (on) => ({ enabled: on })),
+    toggle(t("settings.whenStart"), r.start, off, (on) => ({ start: on })),
+    toggle(t("settings.whenEnd"), r.stop, off, (on) => ({ stop: on })),
+    toggle(t("settings.everyHour"), r.still_tracking, off, (on) => ({ still_tracking: on })),
+    h("span", { class: "label" }, t("settings.myHours")),
+    ...hours,
+    h("p", { class: "hint" }, t("settings.localOnly", { today: r.today })),
+    h("span", { class: "eyebrow" }, t("settings.thisComputer")),
+    h(
+      "label",
+      { class: `toggle${openAtLogin === null ? " disabled" : ""}` },
+      h("input", {
+        type: "checkbox",
+        checked: openAtLogin === true,
+        disabled: openAtLogin === null,
+        onchange: (e: Event) => {
+          const enabled = (e.target as HTMLInputElement).checked;
+          settingsError = null;
+          invoke<boolean>("set_open_at_login", { enabled })
+            .then((on) => {
+              openAtLogin = on;
+            })
+            .catch((err: unknown) => {
+              settingsError = String(err);
+            })
+            .finally(render);
+        },
+      }),
+      h("span", {}, t("settings.openAtLogin")),
+    ),
+    h("p", { class: "hint" }, t("settings.openAtLoginHint")),
+    settingsError && h("p", { class: "error", role: "alert" }, settingsError),
+  );
+}
+
+function onResolveIdle(iv: IdleView): void {
+  const move = idleChoice.decision === "reassign";
+  void run(async () => {
+    view = await invoke<AppView>("resolve_idle", {
+      id: iv.id,
+      decision: idleChoice.decision,
+      projectId: move ? opt(idleChoice.project) : null,
+      taskId: move ? opt(idleChoice.task) : null,
+    });
+  });
+}
+
+// "Welcome back": what should happen to the idle run the person just came back from.
+// Only they can answer; tracking carries on whatever they pick.
+function idleView(v: AppView, iv: IdleView): HTMLElement {
+  if (idleChoice.id !== iv.id) {
+    Object.assign(idleChoice, { id: iv.id, decision: "keep", project: "", task: "" });
+    error = null;
+  }
+  const canMove = iv.targets.length > 0;
+  const choice = (value: IdleDecision, text: string, enabled = true): HTMLElement => {
+    const on = idleChoice.decision === value;
+    return h(
+      "label",
+      { class: `choice${on ? " on" : ""}${enabled ? "" : " disabled"}` },
+      h("input", {
+        type: "radio",
+        name: "idle-choice",
+        value,
+        checked: on,
+        disabled: busy || !enabled,
+        onchange: () => {
+          idleChoice.decision = value;
+          error = null;
+          render();
+        },
+      }),
+      h("span", {}, text),
+    );
+  };
+  const move = idleChoice.decision === "reassign";
+  const target = iv.targets.find((p) => p.id === idleChoice.project);
+  const tasks = target?.tasks ?? [];
+  const picker: Node[] = [];
+  if (move) {
+    const projectSelect = h(
+      "select",
+      {
+        disabled: busy,
+        onchange: (e: Event) => {
+          idleChoice.project = (e.target as HTMLSelectElement).value;
+          idleChoice.task = "";
+          render();
+        },
+      },
+      h("option", { value: "" }, t("pick.chooseProject")),
+      ...iv.targets.map((p) => h("option", { value: p.id }, p.name)),
+    );
+    projectSelect.value = idleChoice.project;
+    picker.push(h("label", { class: "field" }, t("pick.project"), projectSelect));
+    if (tasks.length > 0) {
+      const taskSelect = h(
+        "select",
+        {
+          disabled: busy,
+          onchange: (e: Event) => {
+            idleChoice.task = (e.target as HTMLSelectElement).value;
+          },
+        },
+        h("option", { value: "" }, t("pick.noTask")),
+        ...tasks.map((task) => h("option", { value: task.id }, task.name)),
+      );
+      taskSelect.value = idleChoice.task;
+      picker.push(h("label", { class: "field" }, t("pick.task"), taskSelect));
+    }
+    picker.push(h("p", { class: "hint" }, t("idle.correction")));
+  }
+  const primary =
+    idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;
+  return h(
+    "section",
+    { class: "popover", "aria-labelledby": "idle-h" },
+    header(v),
+    h(
+      "div",
+      { class: "idle-panel" },
+      h("span", { class: "eyebrow" }, t("idle.welcome")),
+      h("h1", { class: "title", id: "idle-h" }, iv.title),
+      h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project),
+      h(
+        "fieldset",
+        { class: "choices" },
+        h("legend", { class: "sr-only" }, t("idle.question")),
+        choice("keep", t("idle.keep")),
+        choice("discard", t("idle.discard")),
+        choice("reassign", t("idle.move"), canMove),
+      ),
+      !canMove && h("p", { class: "hint" }, t("idle.noTarget")),
+      ...picker,
+      error && h("p", { class: "error", role: "alert" }, error),
+      h(
+        "div",
+        { class: "actions one" },
+        h(
+          "button",
+          { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) },
+          primary,
+        ),
+      ),
+      h("p", { class: "idle-foot" }, t("idle.foot")),
     ),
   );
 }
 
 function mainView(v: AppView): HTMLElement {
   loadProjects();
+  if (v.idle) return idleView(v, v.idle);
   return h(
     "section",
     { class: "popover", "aria-label": "RoundDigital Track" },
     header(v),
+    v.reminder && reminderCard(v.reminder),
     ...banners(v),
     v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera),
     ...projectPickers(v),
     sessionButtons(v),
+    v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint),
     error && h("p", { class: "error", role: "alert" }, error),
     h(
       "div",
       { class: "today" },
-      h("span", { class: "label" }, "Today"),
+      h("span", { class: "label" }, t("main.today")),
       h(
         "span",
         { class: "value" },
         h("span", { class: "mono" }, v.today),
-        v.activity ? " · activity " : "",
+        v.activity ? t("main.activity") : "",
         v.activity ? h("span", { class: "mono" }, v.activity) : "",
       ),
     ),
+    (v.limit_today || v.limit_week) &&
+      h(
+        "div",
+        { class: "limits" },
+        h("span", { class: "label" }, t("main.workLimit")),
+        h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l): l is string => !!l).map((l) => h("span", { class: "mono" }, l))),
+      ),
     h(
       "div",
       { class: "foot" },
       h("span", {}, v.sync),
-      h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, "My dashboard →"),
+      h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, t("main.dashboard")),
     ),
+    settingsOpen && remindersSection(v),
     h(
       "div",
       { class: "small-links" },
       h("span", { class: "hint" }, `v${v.version}`),
-      h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit"),
+      h(
+        "button",
+        {
+          class: "link",
+          type: "button",
+          "aria-expanded": String(settingsOpen),
+          onclick: () => {
+            settingsOpen = !settingsOpen;
+            settingsError = null;
+            if (settingsOpen)
+              invoke<boolean>("get_open_at_login")
+                .then((on) => {
+                  openAtLogin = on;
+                })
+                .catch(() => {
+                  openAtLogin = null;
+                })
+                .finally(render);
+            render();
+          },
+        },
+        settingsOpen ? t("settings.close") : t("settings.open"),
+      ),
+      h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit")),
     ),
   );
 }
@@ -335,9 +724,9 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
   return h(
     "section",
     { class: "notice", "aria-labelledby": "notice-h" },
-    h("span", { class: "eyebrow" }, review ? "What changed" : "Before you start"),
-    h("h2", { id: "notice-h" }, review ? "This session now collects" : n.title),
-    h("p", { class: "lead" }, "While this session runs, RoundDigital Track records:"),
+    h("span", { class: "eyebrow" }, review ? t("notice.whatChanged") : t("notice.beforeStart")),
+    h("h2", { id: "notice-h" }, review ? t("notice.nowCollects") : n.title),
+    h("p", { class: "lead" }, t("notice.lead")),
     h(
       "ul",
       {},
@@ -351,9 +740,9 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
       h(
         "details",
         {},
-        h("summary", {}, "Not collected"),
+        h("summary", {}, t("notice.notCollected")),
         h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))),
-        h("p", {}, `Never: ${n.never}`),
+        h("p", {}, t("notice.never", { list: n.never })),
       ),
     error && h("p", { class: "warnline", role: "alert" }, error),
     h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)),
@@ -367,15 +756,328 @@ function noticeButtons(review: boolean): HTMLElement[] {
     render();
   };
   if (review) {
-    return [h("button", { class: "btn-action", type: "button", onclick: close }, "OK")];
+    return [h("button", { class: "btn-action", type: "button", onclick: close }, t("notice.ok"))];
   }
   return [
-    h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, "Choose another project"),
-    h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, "Start session →"),
+    h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
+    h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, t("notice.start")),
   ];
 }
 
+function managedEnrollView(v: AppView, server: string): HTMLElement {
+  const field = (label: string, value: string, set: (s: string) => void, attrs: Record<string, unknown>): HTMLElement =>
+    h(
+      "label",
+      { class: "field" },
+      label,
+      h("input", { value, disabled: busy, oninput: (e: Event) => set((e.target as HTMLInputElement).value), ...attrs }),
+    );
+  const askForCode = (e: Event): void => {
+    e.preventDefault();
+    void run(async () => {
+      await invoke("request_email_code", { email: managed.email.trim() });
+      managed.step = "code";
+    });
+  };
+  const connect = (e: Event): void => {
+    e.preventDefault();
+    void run(async () => {
+      view = await invoke<AppView>("enroll", { serverUrl: server, code: enrollForm.code, deviceName: opt(enrollForm.name.trim()) });
+      enrollForm.code = "";
+    });
+  };
+  const go = (step: typeof managed.step): void => {
+    managed.step = step;
+    error = null;
+    render();
+  };
+  if (managed.step === "signin")
+    return signInView(v, server, false, h("button", { class: "link", type: "button", onclick: () => go("email") }, t("signin.otherWays")));
+  const other = h(
+    "div",
+    { class: "small-links" },
+    managed.step === "code"
+      ? h("button", { class: "link", type: "button", onclick: () => go("email") }, t("managed.again"))
+      : h("button", { class: "link", type: "button", onclick: () => go("signin") }, t("signin.instead")),
+    h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, t("managed.adminCode")),
+  );
+  const head = [
+    h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+    h("span", { class: "eyebrow" }, t("enroll.setUp")),
+  ];
+  if (managed.step === "email")
+    return h(
+      "form",
+      { class: "popover", onsubmit: askForCode },
+      ...head,
+      h("h1", { class: "title" }, t("managed.title")),
+      h("p", { class: "muted" }, t("managed.intro", { server })),
+      v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
+      field(t("managed.email"), managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }),
+      error && h("p", { class: "error", role: "alert" }, error),
+      h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("managed.sending") : t("managed.send"))),
+      other,
+    );
+  return h(
+    "form",
+    { class: "popover", onsubmit: connect },
+    ...head,
+    h("h1", { class: "title" }, t("managed.checkTitle")),
+    h("p", { class: "muted" }, t("managed.checkIntro", { email: managed.email })),
+    field(t("managed.code"), enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }),
+    field(t("enroll.deviceName"), enrollForm.name, (s) => (enrollForm.name = s), { placeholder: t("enroll.deviceNamePlaceholder") }),
+    error && h("p", { class: "error", role: "alert" }, error),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
+    other,
+  );
+}
+
+/** "track.example.com" for the server line; the address itself when it isn't a URL. */
+function hostOf(server: string): string {
+  try {
+    return new URL(server).host || server;
+  } catch {
+    return server;
+  }
+}
+
+// ----- signing in to connect ---------------------------------------------------------
+
+/** A 24px stroke icon from path data (Lucide-style, drawn here; no icon font). */
+function icon(paths: string[], size = 18, cls = ""): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs: Record<string, string> = { width: String(size), height: String(size), viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" };
+  if (cls) attrs.class = cls;
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+const ICONS = {
+  external: ["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"],
+  lock: ["M7 11V7a5 5 0 0 1 10 0v4", "M5 11h14v10H5z"],
+  laptop: ["M4 5h16v10H4z", "M2 19h20"],
+  browser: ["M3 4h18v16H3z", "M3 9h18", "M7 6.5h.01", "M10 6.5h.01"],
+  check: ["M20 6 9 17l-5-5"],
+  alert: ["M12 8v5", "M12 16.5h.01", "M10.3 3.9 1.8 18.5A2 2 0 0 0 3.5 21.5h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"],
+};
+
+/** Signing in moves through three steps; the bar shows where the person is. */
+function stepsBar(at: 1 | 2 | 3): HTMLElement {
+  return h(
+    "div",
+    { class: "steps-bar", role: "img", "aria-label": t("signin.stepOf", { n: String(at) }) },
+    ...[1, 2, 3].map((n) => h("span", { class: n < at ? "done" : n === at ? "on" : "" })),
+  );
+}
+
+function brandHead(): HTMLElement {
+  return h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }));
+}
+
+function alertLine(text: string): HTMLElement {
+  return h("p", { class: "alert", role: "alert" }, icon(ICONS.alert, 16), h("span", {}, text));
+}
+
+/** "9:41" left until `expiresAt`, or null once it has passed. */
+function timeLeft(expiresAt: string): string | null {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+// The countdown ticks on its own: the view only arrives when something changes.
+setInterval(() => {
+  const el = document.getElementById("signin-left");
+  const at = el?.dataset.expires;
+  if (el && at) el.textContent = t("signin.expiresIn", { left: timeLeft(at) ?? "0:00" });
+}, 1000);
+// "Browser didn't open?" shows the address to open by hand.
+let showLink = false;
+// A sign-in was waiting; when the app then starts, say "You're connected" once.
+let wasSigningIn = false;
+let justConnected = false;
+
+/** Waiting for the person to confirm in the browser: the code to compare, and a way out. */
+function signInWaitingView(s: NonNullable<AppView["sign_in"]>): HTMLElement {
+  const [a, b] = s.user_code.split("-");
+  const tiles = (part: string | undefined): HTMLElement[] => [...(part ?? "")].map((c) => h("span", { class: "tile" }, c));
+  return h(
+    "section",
+    { class: "popover signin" },
+    brandHead(),
+    stepsBar(2),
+    h("span", { class: "eyebrow" }, t("signin.step2")),
+    h("h1", { class: "title" }, t("signin.waitTitle")),
+    h(
+      "div",
+      { class: "link-visual", "aria-hidden": "true" },
+      h("span", { class: "end" }, icon(ICONS.laptop, 22)),
+      h("span", { class: "wire" }, h("span", { class: "spark" })),
+      h("span", { class: "end" }, icon(ICONS.browser, 22)),
+    ),
+    h(
+      "div",
+      { class: "code-card" },
+      h("span", { class: "hint" }, t("signin.codeLabel")),
+      h(
+        "div",
+        { class: "tiles mono", role: "text", "aria-label": s.user_code.split("").join(" ") },
+        ...tiles(a),
+        h("span", { class: "dash" }, "–"),
+        ...tiles(b),
+      ),
+      h("span", { class: "hint" }, t("signin.codeCheck")),
+    ),
+    h(
+      "p",
+      { class: "waiting", role: "status" },
+      h("span", { class: "pulse", "aria-hidden": "true" }),
+      h("span", {}, t("signin.waiting")),
+      h("span", { id: "signin-left", class: "left mono", "data-expires": s.expires_at }, t("signin.expiresIn", { left: timeLeft(s.expires_at) ?? "0:00" })),
+    ),
+    error && alertLine(error),
+    h(
+      "div",
+      { class: "actions one" },
+      h("button", { class: "btn-outline-light with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen")),
+    ),
+    showLink && h("p", { class: "manual-link" }, h("span", { class: "hint" }, t("signin.openByHand")), h("span", { class: "url mono" }, s.approve_url)),
+    h(
+      "div",
+      { class: "small-links" },
+      h("button", { class: "link", type: "button", disabled: busy, onclick: () => void run(async () => { showLink = false; wasSigningIn = false; view = await invoke<AppView>("cancel_sign_in"); }) }, t("signin.cancel")),
+      !showLink && h("button", { class: "link", type: "button", onclick: () => { showLink = true; render(); } }, t("signin.noBrowser")),
+    ),
+  );
+}
+
+/** Just connected by signing in: say so once, then the main view. */
+function connectedView(v: AppView): HTMLElement {
+  return h(
+    "section",
+    { class: "popover signin" },
+    brandHead(),
+    stepsBar(3),
+    h("div", { class: "success-mark", "aria-hidden": "true" }, icon(ICONS.check, 34, "draw")),
+    h("h1", { class: "title center" }, t("signin.doneTitle")),
+    h("p", { class: "muted center" }, t("signin.doneBody", { host: hostOf(v.server_url ?? "") })),
+    h(
+      "ul",
+      { class: "promise" },
+      h("li", {}, icon(ICONS.lock, 16), h("span", {}, t("signin.private"))),
+      h("li", {}, icon(ICONS.check, 16), h("span", {}, t("signin.doneWhat"))),
+    ),
+    h("div", { class: "actions one push" }, h("button", { class: "btn-action", type: "button", onclick: () => { justConnected = false; render(); } }, t("signin.doneButton"))),
+  );
+}
+
+/**
+ * The main way to connect: sign in on the web. `server` is the address to use, or "" when
+ * none is known yet (then the field shows); `changeable` lets the person pick another one.
+ * `left` is the footer's left link (the other way to connect).
+ */
+function signInView(v: AppView, server: string, changeable: boolean, left: HTMLElement): HTMLElement {
+  if (v.sign_in) return signInWaitingView(v.sign_in);
+  const editing = !server || signIn.editing;
+  const builtIn = v.default_server_url;
+  const submit = (e: Event): void => {
+    e.preventDefault();
+    const target = (editing ? signIn.server : server).trim();
+    void run(async () => {
+      showLink = false;
+      view = await invoke<AppView>("sign_in", { serverUrl: target, deviceName: null });
+      signIn.server = target;
+      signIn.editing = false;
+    });
+  };
+  const step = (n: string, title: string, body: string): HTMLElement =>
+    h("li", {}, h("span", { class: "num mono" }, n), h("span", { class: "text" }, h("strong", {}, title), h("span", {}, body)));
+  let serverPart: HTMLElement | null = null;
+  if (editing)
+    serverPart = h(
+      "div",
+      { class: "server-edit" },
+      h(
+        "label",
+        { class: "field" },
+        t("enroll.server"),
+        h("input", {
+          value: signIn.server,
+          type: "url",
+          placeholder: "https://track.example.com",
+          required: true,
+          autocomplete: "url",
+          spellcheck: false,
+          disabled: busy,
+          oninput: (e: Event) => (signIn.server = (e.target as HTMLInputElement).value),
+        }),
+      ),
+      builtIn &&
+        h("button", { class: "link inline", type: "button", disabled: busy, onclick: () => { signIn.server = builtIn; signIn.editing = false; error = null; render(); } }, t("signin.useDefault", { host: hostOf(builtIn) })),
+    );
+  else if (server !== builtIn || !changeable)
+    serverPart = h(
+      "p",
+      { class: "server-chip" },
+      h("span", { class: "label mono" }, t("signin.serverLabel")),
+      h("span", { class: "host" }, hostOf(server)),
+      changeable && h("button", { class: "link inline", type: "button", disabled: busy, onclick: () => { signIn.server = server; signIn.editing = true; render(); } }, t("signin.change")),
+    );
+  const otherServer =
+    changeable && !editing && server === builtIn
+      ? h("button", { class: "link", type: "button", disabled: busy, onclick: () => { signIn.server = ""; signIn.editing = true; render(); } }, t("signin.otherServer"))
+      : h("span", {});
+  const problem = (v.phase === "error" && v.error) || error || v.sign_in_error;
+  return h(
+    "form",
+    { class: "popover signin", onsubmit: submit },
+    brandHead(),
+    stepsBar(1),
+    h("h1", { class: "title" }, t("signin.title")),
+    h("p", { class: "muted" }, t("signin.intro")),
+    h(
+      "ol",
+      { class: "how" },
+      step("1", t("signin.s1"), t("signin.s1b")),
+      step("2", t("signin.s2"), t("signin.s2b")),
+      step("3", t("signin.s3"), t("signin.s3b")),
+    ),
+    serverPart,
+    problem && alertLine(problem),
+    h(
+      "div",
+      { class: "actions one" },
+      h("button", { class: "btn-action with-icon", type: "submit", disabled: busy }, busy ? t("signin.opening") : t("signin.button"), !busy && icon(ICONS.external, 16)),
+    ),
+    h("p", { class: "privacy" }, icon(ICONS.lock, 14), h("span", {}, t("signin.private"))),
+    h("div", { class: "small-links" }, left, otherServer),
+  );
+}
+
 function enrollView(v: AppView): HTMLElement {
+  if (v.deployment && !managed.useAdminCode) return managedEnrollView(v, v.deployment.server_url);
+  const p = v.enroll_prefill;
+  if (p && `${p.server_url} ${p.code}` !== appliedLink) {
+    appliedLink = `${p.server_url} ${p.code}`;
+    enrollForm.server = p.server_url;
+    enrollForm.code = p.code;
+    fromLink = true;
+    // A link brings a code: show the code form, filled in.
+    signIn.useCode = true;
+  }
+  if (!signIn.useCode || v.sign_in) {
+    const known = signIn.server || v.server_url || v.default_server_url || "";
+    return signInView(
+      v,
+      known,
+      true,
+      h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = true; error = null; if (!enrollForm.server) enrollForm.server = known; render(); } }, t("signin.haveCode")),
+    );
+  }
   const input = (key: keyof typeof enrollForm, label: string, attrs: Record<string, unknown>): HTMLElement =>
     h(
       "label",
@@ -384,7 +1086,16 @@ function enrollView(v: AppView): HTMLElement {
       h("input", {
         value: enrollForm[key],
         oninput: (e: Event) => {
-          enrollForm[key] = (e.target as HTMLInputElement).value;
+          const value = (e.target as HTMLInputElement).value;
+          const parts = key === "code" ? linkParts(value) : null;
+          if (parts) {
+            enrollForm.server = parts.server;
+            enrollForm.code = parts.code;
+            fromLink = true;
+            render();
+            return;
+          }
+          enrollForm[key] = value;
         },
         disabled: busy,
         ...attrs,
@@ -407,15 +1118,22 @@ function enrollView(v: AppView): HTMLElement {
       },
     },
     h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
-    h("span", { class: "eyebrow" }, "Set up this computer"),
-    h("h1", { class: "title" }, "Connect to your organization"),
-    h("p", { class: "muted" }, "Your administrator gives you a server address and a one-time code. Nothing is recorded until you start a session."),
+    h("span", { class: "eyebrow" }, t("enroll.setUp")),
+    h("h1", { class: "title" }, t("enroll.title")),
+    h("p", { class: "muted" }, t("enroll.intro")),
+    fromLink && h("p", { class: "hint", role: "status" }, t("enroll.fromLink")),
     v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
-    input("server", "Server address", { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
-    input("code", "Enrollment code", { placeholder: "ABCDEFGHJK", required: true, autocomplete: "one-time-code", spellcheck: false }),
-    input("name", "Device name (optional)", { placeholder: "Defaults to this computer's name" }),
+    input("server", t("enroll.server"), { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
+    input("code", t("enroll.code"), { placeholder: t("enroll.codePlaceholder"), required: true, autocomplete: "one-time-code", spellcheck: false }),
+    input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }),
     error && h("p", { class: "error", role: "alert" }, error),
-    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
+    h(
+      "div",
+      { class: "small-links" },
+      h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = false; fromLink = false; error = null; render(); } }, t("signin.instead")),
+      h("span", {}),
+    ),
   );
 }
 
@@ -424,11 +1142,11 @@ function revokedView(): HTMLElement {
     "section",
     { class: "popover" },
     h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
-    h("span", { class: "eyebrow" }, "Device removed"),
-    h("h1", { class: "title" }, "Tracking has stopped"),
-    h("p", { class: "muted" }, "Your organization removed this computer. Nothing is recorded and data that had not been sent was erased from this computer."),
-    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke<AppView>("reenroll"); }) }, "Enroll again")),
-    h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, "Quit")),
+    h("span", { class: "eyebrow" }, t("revoked.eyebrow")),
+    h("h1", { class: "title" }, t("revoked.title")),
+    h("p", { class: "muted" }, t("revoked.body")),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke<AppView>("reenroll"); }) }, t("revoked.again"))),
+    h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))),
   );
 }
 
@@ -440,14 +1158,23 @@ function render(): void {
   const root = document.getElementById("app");
   if (!root) return;
   const v = view;
+  // The person's language from the Rust side; before the first view, the computer's (G27).
+  setLang(v?.lang ?? browserLang());
+  if (v?.sign_in) wasSigningIn = true;
+  else if (v?.sign_in_error) wasSigningIn = false;
+  else if (wasSigningIn && v && (v.phase === "starting" || v.phase === "running")) {
+    wasSigningIn = false;
+    justConnected = true;
+  }
   let content: HTMLElement;
-  if (!v) content = simpleView("Starting…");
+  if (!v) content = simpleView(t("app.starting"));
   else if (notice) content = noticeView(notice.data, notice.review);
+  else if (justConnected && v.phase !== "enroll" && v.phase !== "revoked") content = connectedView(v);
   else if (v.phase === "enroll" || (v.phase === "error" && !v.server_url)) content = enrollView(v);
   else if (v.phase === "revoked") content = revokedView();
-  else if (v.phase === "error") content = simpleView(v.error ?? "The agent could not start.");
-  else if (v.phase === "starting") content = simpleView("Starting…");
-  else if (v.phase === "stopping") content = simpleView("Stopping the session and sending the last data…");
+  else if (v.phase === "error") content = simpleView(v.error ?? t("error.couldNotStart"));
+  else if (v.phase === "starting") content = simpleView(t("app.starting"));
+  else if (v.phase === "stopping") content = simpleView(t("app.stopping"));
   else content = mainView(v);
   document.body.classList.toggle("light", notice !== null);
   // Keep focus and the select values stable across re-renders.

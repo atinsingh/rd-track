@@ -23,21 +23,29 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::activity::ActivityAggregator;
-use crate::api::{ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo};
+use crate::activity::{ActivityAggregator, IdleRun};
+use crate::api::{
+    ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo, ScheduleToday, WorkLimits,
+};
 use crate::apps::AppTracker;
+use crate::browser::BrowserFamily;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
 use crate::events::{
-    ActivityBucket, DataGap, DataQuality, EventBody, GapReason, PauseReason, SessionStopped,
-    StopReason,
+    ActivityBucket, DataGap, DataQuality, EventBody, GapReason, IdleDecision, IdleDecisionPayload,
+    PauseReason, SessionStopped, StopReason, MAX_IDLE_SPAN_SECONDS,
 };
 use crate::identity::DeviceIdentity;
+use crate::limits::{LimitScope, LimitState, LimitSummary, LIMITS_REFRESH};
 use crate::outbox::{lock, NewEvent, OutboxConfig, OutboxPolicyCache, SharedOutbox};
 use crate::platform::{
     secret_names, CredentialStore, ForegroundApp, ForegroundAppInfo, HttpTransport, InputCounter,
     Permissions, ScreenCapturer,
 };
 use crate::policy::{EffectivePolicy, PolicySettings, PolicySource, PolicyStore, SignedPolicy};
+use crate::reminders::{
+    self, HoursSource, ReminderChoice, ReminderInput, ReminderKind, ReminderSettings,
+    ReminderState, ReminderStep, ReminderWindow, Tracking, SCHEDULE_REFRESH,
+};
 use crate::screenshot::{
     run_job, GateController, ScreenshotJob, ScreenshotOutcome, ScreenshotScheduler, ScreenshotSink,
     SlotDecision,
@@ -55,6 +63,12 @@ pub const META_SYNC_STATUS: &str = "sync_status";
 pub const META_LICENSE_BLOCK: &str = "license_block";
 /// Outbox metadata key holding [`TodayTotals`] (tray "Today" line).
 pub const META_TODAY: &str = "today_totals";
+/// Outbox metadata key holding the work-limit [`LimitState`] (Stage 4 F4: last good
+/// copy, the sessions it leaves out, warnings already shown).
+pub const META_LIMITS: &str = "work_limits";
+/// Outbox metadata key holding the [`ReminderState`] (Stage 4 F3: the employee's
+/// settings, today's schedule, reminders already shown).
+pub const META_REMINDERS: &str = "reminders";
 
 /// Runtime error.
 #[derive(Debug, Error)]
@@ -74,6 +88,12 @@ pub enum AgentError {
     /// Local storage error.
     #[error(transparent)]
     Outbox(#[from] crate::outbox::OutboxError),
+    /// Moving idle time to another project needs that project.
+    #[error("choose the project to move this time to")]
+    IdleProjectRequired,
+    /// Reminder settings that cannot be used (shown to the person).
+    #[error("{0}")]
+    InvalidReminderSettings(&'static str),
 }
 
 /// What to do with a session that was open when the agent last stopped running.
@@ -95,15 +115,19 @@ pub struct AgentConfig {
     pub tick: Duration,
     /// Crash-recovery behaviour.
     pub recovery: Recovery,
+    /// The zone "my hours" (reminders) are in; `None` = the system's local zone.
+    pub time_zone: Option<chrono_tz::Tz>,
 }
 
 impl AgentConfig {
-    /// Production defaults: 1 s tick, resume a session after ≤ 10 minutes of downtime.
+    /// Production defaults: 1 s tick, resume a session after ≤ 10 minutes of downtime,
+    /// the system's local zone.
     pub fn new(identity: DeviceIdentity) -> Self {
         Self {
             identity,
             tick: Duration::from_secs(1),
             recovery: Recovery::ResumeWithin(Duration::from_secs(600)),
+            time_zone: None,
         }
     }
 }
@@ -152,6 +176,154 @@ pub enum Notice {
         /// `true` if resumed, `false` if stopped at the last time the agent was seen.
         resumed: bool,
     },
+    /// The person came back from an idle run (Stage 4 F1): ask whether to keep, remove
+    /// or move that time, then answer with [`Command::ResolveIdle`] using `id`. The
+    /// pending prompt is also in [`LiveStatus::idle_prompt`] until it is answered or
+    /// replaced by a newer run (an unanswered prompt counts as keep; nothing is sent).
+    IdleReturn {
+        /// Prompt id ([`IdlePrompt::id`]).
+        id: Uuid,
+        /// First second of the idle run.
+        #[serde(with = "crate::ts")]
+        started_at: DateTime<Utc>,
+        /// When the person came back.
+        #[serde(with = "crate::ts")]
+        ended_at: DateTime<Utc>,
+        /// Idle seconds in the run.
+        seconds: u32,
+        /// The session's project (`None` = no project).
+        project_id: Option<String>,
+    },
+    /// Time worked reached 80% or 100% of a daily or weekly work limit (Stage 4 F4). A
+    /// heads-up only: tracking carries on, and nothing is sent anywhere. Raised once per
+    /// threshold and period, only while a session is `Active`.
+    LimitWarning {
+        /// Stable id, e.g. `daily:2026-10-28:80`.
+        id: String,
+        /// Which limit.
+        scope: LimitScope,
+        /// `80` or `100`.
+        percent: u8,
+        /// The limit.
+        limit_minutes: u32,
+        /// Worked so far (all of the person's devices plus this session).
+        worked_seconds: u64,
+    },
+    /// A start / stop / "still tracking?" reminder (Stage 4 F3). It is also in
+    /// [`LiveStatus::reminder`] until answered with [`Command::ResolveReminder`] or
+    /// withdrawn; never raised while a session is paused.
+    Reminder {
+        /// [`ReminderPrompt::id`].
+        id: Uuid,
+        /// Which reminder.
+        reminder: ReminderKind,
+    },
+}
+
+/// The reminder being shown (at most one at a time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderPrompt {
+    /// Prompt id, passed back in [`Command::ResolveReminder`].
+    pub id: Uuid,
+    /// Which reminder.
+    pub kind: ReminderKind,
+    /// Start of the hours it relates to (start and stop reminders).
+    #[serde(default, with = "crate::ts::option")]
+    pub hours_start: Option<DateTime<Utc>>,
+    /// End of the hours it relates to.
+    #[serde(with = "crate::ts")]
+    pub hours_end: DateTime<Utc>,
+    /// The organization's schedule or the person's own hours.
+    pub source: HoursSource,
+}
+
+/// Reminder settings and today's hours, for the tray's "Reminders" section.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderStatus {
+    /// The employee's settings.
+    pub settings: ReminderSettings,
+    /// The organization's schedule decides today's hours ("my hours" are not used).
+    pub schedule_sets_hours: bool,
+    /// Today's window, if today has one.
+    pub window: Option<ReminderWindow>,
+}
+
+/// Something the agent wants fetched for local notices (never sends data).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DataRequest {
+    /// `GET /v1/device/work-limits`, leaving out the running session.
+    WorkLimits {
+        /// The running session.
+        exclude_session_id: Option<Uuid>,
+    },
+    /// `GET /v1/device/schedule-today`.
+    ScheduleToday,
+}
+
+/// An unanswered idle-return prompt (at most one at a time).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IdlePrompt {
+    /// Prompt id, passed back in [`Command::ResolveIdle`].
+    pub id: Uuid,
+    /// The session in which the idle run happened (the decision's `session_id`).
+    pub session_id: Uuid,
+    /// First second of the idle run.
+    #[serde(with = "crate::ts")]
+    pub started_at: DateTime<Utc>,
+    /// When the person came back.
+    #[serde(with = "crate::ts")]
+    pub ended_at: DateTime<Utc>,
+    /// Idle seconds in the run.
+    pub seconds: u32,
+    /// The session's project (`None` = no project).
+    pub project_id: Option<String>,
+    /// The session's task.
+    pub task_id: Option<String>,
+    /// Monotonic origin of that session (for the decision's `monotonic_ms`).
+    #[serde(skip)]
+    mono_origin: Duration,
+}
+
+impl IdlePrompt {
+    fn notice(&self) -> Notice {
+        Notice::IdleReturn {
+            id: self.id,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            seconds: self.seconds,
+            project_id: self.project_id.clone(),
+        }
+    }
+}
+
+/// The `idle.decision.v1` payloads for a span: one per ≤ 12 h piece (the contract's
+/// limit), in order, each with the same decision. Empty for an empty span.
+pub fn idle_decision_payloads(
+    started_at: DateTime<Utc>,
+    ended_at: DateTime<Utc>,
+    decision: IdleDecision,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Vec<IdleDecisionPayload> {
+    let max = TimeDelta::seconds(MAX_IDLE_SPAN_SECONDS);
+    let (project_id, task_id) = match decision {
+        IdleDecision::Reassign => (project_id, task_id),
+        IdleDecision::Keep | IdleDecision::Discard => (None, None),
+    };
+    let mut out = Vec::new();
+    let mut from = started_at;
+    while from < ended_at {
+        let to = (from + max).min(ended_at);
+        out.push(IdleDecisionPayload {
+            idle_started_at: from,
+            idle_ended_at: to,
+            decision,
+            project_id: project_id.clone(),
+            task_id: task_id.clone(),
+        });
+        from = to;
+    }
+    out
 }
 
 /// Snapshot of the agent for `rd-agent status` and the UI.
@@ -182,6 +354,12 @@ pub struct AgentStatus {
     /// Licence state from the last heartbeat.
     #[serde(default)]
     pub license: Option<LicenseInfo>,
+    /// The person's language from the last heartbeat (`fr-CA`…; `None`: the computer's).
+    #[serde(default)]
+    pub locale: Option<String>,
+    /// Whether a heartbeat has said the language yet (until then `locale` means nothing).
+    #[serde(default)]
+    pub locale_known: bool,
     /// When this snapshot was written.
     #[serde(with = "crate::ts")]
     pub updated_at: DateTime<Utc>,
@@ -310,6 +488,16 @@ pub struct LiveStatus {
     pub outbox_depth: u64,
     /// The device was revoked (collection stopped, local data wiped).
     pub revoked: bool,
+    /// The unanswered idle-return prompt, if any (cleared once answered).
+    pub idle_prompt: Option<IdlePrompt>,
+    /// Progress against the work limits (`None`: no limits, or no copy for today).
+    pub limits: Option<LimitSummary>,
+    /// The reminder being shown, if any.
+    pub reminder: Option<ReminderPrompt>,
+    /// Reminder settings and today's hours.
+    pub reminders: ReminderStatus,
+    /// Browsers whose Track extension was heard from lately (website domains, Pro).
+    pub browser_extensions: Vec<BrowserFamily>,
 }
 
 /// Receives [`LiveStatus`] snapshots and [`Notice`]s from a running [`Runtime`] (the
@@ -368,12 +556,21 @@ pub struct Agent {
     revoked: bool,
     license_block: Option<LicenseBlock>,
     license: Option<LicenseInfo>,
+    locale: Option<String>,
+    locale_known: bool,
     ticks: u64,
     queued: usize,
     notices: Vec<Notice>,
     policy_requests: Vec<Option<String>>,
     today: TodayTotals,
     session_tracked: Duration,
+    idle_prompt: Option<IdlePrompt>,
+    limits: LimitState,
+    reminders: ReminderState,
+    reminder: Option<ReminderPrompt>,
+    data_requests: Vec<DataRequest>,
+    last_limits_fetch: Option<Duration>,
+    last_schedule_fetch: Option<(Duration, NaiveDate)>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -431,12 +628,21 @@ impl Agent {
             revoked: false,
             license_block: None,
             license: None,
+            locale: None,
+            locale_known: false,
             ticks: 0,
             queued: 0,
             notices: Vec::new(),
             policy_requests: vec![None],
             today: TodayTotals::default(),
             session_tracked: Duration::ZERO,
+            idle_prompt: None,
+            limits: LimitState::default(),
+            reminders: ReminderState::default(),
+            reminder: None,
+            data_requests: Vec::new(),
+            last_limits_fetch: None,
+            last_schedule_fetch: None,
             effective,
             policy,
             cfg,
@@ -450,6 +656,8 @@ impl Agent {
             .get_meta(META_TODAY)?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
+        agent.limits = agent.load_meta(META_LIMITS)?;
+        agent.reminders = agent.load_meta(META_REMINDERS)?;
         agent.recover()?;
         if let Some(block) = agent.license_block {
             // Still refused from a previous run: never resume capture.
@@ -499,6 +707,12 @@ impl Agent {
             screen_recording: capturer.map(|c| c.permission()).unwrap_or_default(),
             accessibility: self.foreground.permission(),
         }
+    }
+
+    /// Browsers whose Track extension was heard from lately.
+    pub fn browser_extensions(&mut self) -> Vec<BrowserFamily> {
+        let now = self.clock.wall();
+        self.foreground.browser_extensions(now)
     }
 
     /// The open session for the UI (`None` when idle or stopped).
@@ -552,9 +766,135 @@ impl Agent {
         std::mem::take(&mut self.notices)
     }
 
+    /// The unanswered idle-return prompt, if any.
+    pub fn idle_prompt(&self) -> Option<&IdlePrompt> {
+        self.idle_prompt.as_ref()
+    }
+
+    /// Answers the idle-return prompt `id` with the person's choice: queues
+    /// `idle.decision.v1` in the outbox (so it is delivered even after going offline or
+    /// restarting) for the session the run happened in, and clears the prompt. A span
+    /// longer than the contract's 12 h is sent as consecutive ≤ 12 h pieces.
+    ///
+    /// Returns `Ok(false)` (and changes nothing) for an unknown or stale `id`.
+    /// `project_id` / `task_id` are only sent with [`IdleDecision::Reassign`], which
+    /// requires a project. Tracking is never affected.
+    pub fn resolve_idle(
+        &mut self,
+        id: Uuid,
+        decision: IdleDecision,
+        project_id: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<bool, AgentError> {
+        if self.revoked {
+            return Err(AgentError::Revoked);
+        }
+        if self.idle_prompt.as_ref().is_none_or(|p| p.id != id) {
+            log::info!("ignoring an answer to an idle prompt that is no longer pending");
+            return Ok(false);
+        }
+        let project_id = project_id.filter(|p| !p.is_empty());
+        let task_id = task_id.filter(|t| !t.is_empty() && project_id.is_some());
+        if decision == IdleDecision::Reassign && project_id.is_none() {
+            return Err(AgentError::IdleProjectRequired);
+        }
+        let Some(p) = self.idle_prompt.take() else {
+            return Ok(false);
+        };
+        let now = ClockReading::now(self.clock.as_ref());
+        let monotonic_ms = mono_ms(now.mono, p.mono_origin);
+        for payload in
+            idle_decision_payloads(p.started_at, p.ended_at, decision, project_id, task_id)
+        {
+            self.emit_raw(
+                p.session_id,
+                EventBody::IdleDecision(payload),
+                now.wall,
+                monotonic_ms,
+            );
+        }
+        log::info!("idle time answered: {decision:?}");
+        Ok(true)
+    }
+
     /// Takes the projects whose policy should be fetched now (`None` = base policy).
     pub fn take_policy_requests(&mut self) -> Vec<Option<String>> {
         std::mem::take(&mut self.policy_requests)
+    }
+
+    /// Takes the work-limit / schedule fetches due now.
+    pub fn take_data_requests(&mut self) -> Vec<DataRequest> {
+        std::mem::take(&mut self.data_requests)
+    }
+
+    /// Progress against the work limits now (`None`: no limits, or no copy for today).
+    pub fn limit_summary(&self) -> Option<LimitSummary> {
+        let now = self.clock.wall();
+        LimitSummary::of(&self.limits.progress(
+            self.running_session(),
+            self.activity.unemitted_seconds(),
+            now,
+        ))
+    }
+
+    /// The reminder being shown, if any.
+    pub fn reminder(&self) -> Option<&ReminderPrompt> {
+        self.reminder.as_ref()
+    }
+
+    /// Reminder settings and today's hours.
+    pub fn reminder_status(&self) -> ReminderStatus {
+        let now = self.clock.wall();
+        ReminderStatus {
+            settings: self.reminders.settings.clone(),
+            schedule_sets_hours: self
+                .reminders
+                .schedule
+                .as_ref()
+                .is_some_and(|s| s.is_current(now) && s.applies()),
+            window: self.reminder_window(now),
+        }
+    }
+
+    /// The person's answer to the reminder `id`. "Stop tracking" stops the session
+    /// (the person's own stop); "Not today" suppresses the start reminder for the day;
+    /// "Start tracking" only clears it (the tray then runs its usual start flow).
+    ///
+    /// Returns `Ok(false)` (and changes nothing) for an unknown or stale `id`, or a
+    /// choice that does not answer that reminder.
+    pub fn resolve_reminder(
+        &mut self,
+        id: Uuid,
+        choice: ReminderChoice,
+    ) -> Result<bool, AgentError> {
+        if self.revoked {
+            return Err(AgentError::Revoked);
+        }
+        let Some(p) = self.reminder.as_ref().filter(|p| p.id == id) else {
+            log::info!("ignoring an answer to a reminder that is no longer shown");
+            return Ok(false);
+        };
+        if !choice.answers(p.kind) {
+            return Ok(false);
+        }
+        self.reminder = None;
+        reminders::answer(&mut self.reminders.ledger, choice);
+        self.save_meta(META_REMINDERS, &self.reminders);
+        if choice == ReminderChoice::Stop && self.machine.is_open() {
+            self.stop(StopReason::User)?;
+        }
+        Ok(true)
+    }
+
+    /// Replaces the employee's reminder settings (validated, persisted locally).
+    pub fn set_reminder_settings(&mut self, settings: ReminderSettings) -> Result<(), AgentError> {
+        let settings = settings
+            .validated()
+            .map_err(AgentError::InvalidReminderSettings)?;
+        self.reminders.settings = settings;
+        self.save_meta(META_REMINDERS, &self.reminders);
+        log::info!("reminder settings changed");
+        Ok(())
     }
 
     /// `true` once the device has been revoked.
@@ -586,6 +926,8 @@ impl Agent {
             tracking_unavailable: self.license_block,
             tracking_unavailable_message: self.license_block.map(|b| b.message().to_owned()),
             license: self.license.clone(),
+            locale: self.locale.clone(),
+            locale_known: self.locale_known,
             updated_at: self.clock.wall(),
         }
     }
@@ -626,6 +968,9 @@ impl Agent {
         }
         self.enter_active(now);
         let id = self.machine.session().map(|s| s.id).unwrap_or_default();
+        self.limits.session_started(id, now.wall);
+        self.save_meta(META_LIMITS, &self.limits);
+        self.last_limits_fetch = None;
         log::info!("session started");
         if !self.effective.settings.within_work_hours(now.wall) {
             self.pause_with(PauseReason::WorkHours, now)?;
@@ -655,6 +1000,7 @@ impl Agent {
         }
         let now = ClockReading::now(self.clock.as_ref());
         self.resume_at(now)?;
+        self.last_limits_fetch = None;
         if !self.effective.settings.within_work_hours(now.wall) {
             self.pause_with(PauseReason::WorkHours, now)?;
             self.notices.push(Notice::OutsideWorkHours);
@@ -684,6 +1030,7 @@ impl Agent {
             self.capture_until(now);
         }
         self.input.set_capturing(false);
+        self.foreground.want_domains(None);
         self.last_capture = None;
         let buckets = self.activity.flush_all();
         let apps = self.apps.flush();
@@ -727,7 +1074,26 @@ impl Agent {
         }
         let interval = self.effective.settings.screenshot_interval();
         self.scheduler.set_interval(interval, now, &mut self.rng);
+        if !self.effective.settings.idle.prompt_on_return && self.idle_prompt.take().is_some() {
+            log::info!("idle prompts were turned off; the pending idle time is kept");
+        }
         self.write_status();
+    }
+
+    /// Applies fetched work limits (`None`: the plan has none) that leave out
+    /// `excluded`. Warnings are checked on the next `Active` tick.
+    pub fn on_work_limits(&mut self, limits: Option<WorkLimits>, excluded: Option<Uuid>) {
+        self.limits.on_fetched(limits, excluded);
+        self.save_meta(META_LIMITS, &self.limits);
+    }
+
+    /// Applies today's schedule (`None`: the server has no schedules, so "my hours"
+    /// apply).
+    pub fn on_schedule(&mut self, schedule: Option<ScheduleToday>) {
+        if self.reminders.schedule != schedule {
+            self.reminders.schedule = schedule;
+            self.save_meta(META_REMINDERS, &self.reminders);
+        }
     }
 
     /// Handles sessions the server rejected as overlapping: stops the local session.
@@ -796,6 +1162,15 @@ impl Agent {
         }
     }
 
+    /// Records the person's language from a heartbeat (for display only).
+    pub fn on_locale(&mut self, locale: Option<String>) {
+        if self.locale != locale || !self.locale_known {
+            self.locale = locale;
+            self.locale_known = true;
+            self.write_status();
+        }
+    }
+
     /// `401 device_revoked`: stop collecting at once (no event — the server already
     /// knows), and wipe the outbox. The caller wipes the credential.
     pub fn on_revoked(&mut self) {
@@ -803,6 +1178,8 @@ impl Agent {
             return;
         }
         self.revoked = true;
+        self.idle_prompt = None;
+        self.reminder = None;
         self.gates.close_all();
         if self.machine.is_open() {
             let now = ClockReading::now(self.clock.as_ref());
@@ -860,6 +1237,7 @@ impl Agent {
             }
             _ => {}
         }
+        self.nudges(now);
         if self.machine.is_open() && self.ticks % 10 == 0 {
             self.persist_session(now);
         }
@@ -896,6 +1274,7 @@ impl Agent {
     fn leave_active(&mut self, now: ClockReading) {
         self.gates.close_all();
         self.input.set_capturing(false);
+        self.foreground.want_domains(None);
         self.last_capture = None;
         let buckets = self.activity.interrupt(now.wall);
         let apps = self.apps.flush();
@@ -943,9 +1322,13 @@ impl Agent {
         let sample = self.input.sample();
         let buckets = self.activity.record(now.wall, elapsed, sample);
         self.emit_buckets(buckets, now.wall);
+        for run in self.activity.take_idle_returns() {
+            self.on_idle_return(run);
+        }
 
         let s = &self.effective.settings;
         let want_apps = s.apps.capture_app_name;
+        let want_domains = want_apps && s.apps.capture_domains;
         let want_fg =
             want_apps || (s.screenshots.enabled && !s.screenshots.excluded_apps.is_empty());
         self.last_foreground = if want_fg {
@@ -953,12 +1336,52 @@ impl Agent {
         } else {
             None
         };
+        self.foreground
+            .want_domains(want_domains.then_some(now.wall));
         if want_apps {
-            let segs = self
-                .apps
-                .record(now.wall, elapsed, self.last_foreground.clone());
+            let domain = match (&self.last_foreground, want_domains) {
+                (Some(app), true) => self.foreground.active_domain(app, now.wall),
+                _ => None,
+            };
+            let segs = self.apps.record_with_domain(
+                now.wall,
+                elapsed,
+                self.last_foreground.clone(),
+                domain,
+            );
             self.emit_apps(segs, now.wall);
         }
+    }
+
+    /// Input resumed after an idle run while the session is `Active`: prompt (unless the
+    /// policy says to keep idle time without asking). A newer run replaces an unanswered
+    /// prompt; the older span then simply stays as recorded (keep), with no event.
+    fn on_idle_return(&mut self, run: IdleRun) {
+        if !self.effective.settings.idle.prompt_on_return {
+            return;
+        }
+        if run.ended_at <= run.started_at || run.idle_seconds == 0 {
+            return;
+        }
+        let Some(sess) = self.machine.session() else {
+            return;
+        };
+        let prompt = IdlePrompt {
+            id: Uuid::new_v4(),
+            session_id: sess.id,
+            started_at: run.started_at,
+            ended_at: run.ended_at,
+            seconds: run.idle_seconds,
+            project_id: sess.project_id.clone(),
+            task_id: sess.task_id.clone(),
+            mono_origin: sess.mono_origin,
+        };
+        if self.idle_prompt.is_some() {
+            log::info!("an unanswered idle prompt was replaced by a newer one; its time is kept");
+        }
+        log::info!("back after {} s idle", run.idle_seconds);
+        self.notices.push(prompt.notice());
+        self.idle_prompt = Some(prompt);
     }
 
     fn on_suspend(&mut self, gap_start: DateTime<Utc>, gap_end: DateTime<Utc>, now: ClockReading) {
@@ -1034,6 +1457,7 @@ impl Agent {
                     session_id,
                     max_width: s.max_width_px,
                     primary_monitor_only: s.primary_monitor_only,
+                    blur: s.blur,
                     gate: self.gates.gate(),
                 });
                 true
@@ -1045,9 +1469,11 @@ impl Agent {
         let any = !buckets.is_empty();
         for b in buckets {
             let end = b.bucket_start + TimeDelta::minutes(1);
-            if self.machine.session().is_some() {
+            if let Some(sess) = self.machine.session() {
                 let date = b.bucket_start.with_timezone(&Local).date_naive();
                 self.today.add(date, &b);
+                self.limits
+                    .add_seconds(sess.id, u64::from(b.active_seconds + b.idle_seconds));
             }
             self.emit(EventBody::ActivityBucket(b), end.min(now));
         }
@@ -1057,6 +1483,7 @@ impl Agent {
                     log::debug!("could not persist today's totals: {e}");
                 }
             }
+            self.save_meta(META_LIMITS, &self.limits);
         }
     }
 
@@ -1104,6 +1531,146 @@ impl Agent {
                 log::debug!("queued {event_type} #{}", env.sequence);
             }
             Err(e) => log::error!("could not queue {event_type}: {e}"),
+        }
+    }
+
+    /// The open session while it counts toward the limits (`Active` or suspended).
+    fn running_session(&self) -> Option<Uuid> {
+        matches!(
+            self.machine.state(),
+            SessionState::Active | SessionState::Suspended
+        )
+        .then(|| self.machine.session().map(|s| s.id))
+        .flatten()
+    }
+
+    fn local_date(&self, t: DateTime<Utc>) -> NaiveDate {
+        match self.cfg.time_zone {
+            Some(tz) => t.with_timezone(&tz).date_naive(),
+            None => t.with_timezone(&Local).date_naive(),
+        }
+    }
+
+    fn reminder_window(&self, now: DateTime<Utc>) -> Option<ReminderWindow> {
+        let schedule = self.reminders.schedule.as_ref();
+        let mine = &self.reminders.settings.my_hours;
+        match self.cfg.time_zone {
+            Some(tz) => reminders::window_today(now, &tz, schedule, mine),
+            None => reminders::window_today(now, &Local, schedule, mine),
+        }
+    }
+
+    /// Stage 4 F4 / F3, every tick: schedules the fetches (limits every 5 min while
+    /// `Active`; the schedule at startup, hourly and when the date changes), raises
+    /// limit warnings while `Active`, and steps the reminders. All local: nothing here
+    /// queues an event.
+    fn nudges(&mut self, now: ClockReading) {
+        let today = self.local_date(now.wall);
+        let schedule_due = self.last_schedule_fetch.is_none_or(|(at, date)| {
+            date != today || reminders::refresh_due(Some(at), now.mono, SCHEDULE_REFRESH)
+        });
+        if schedule_due && self.license_block.is_none() {
+            self.last_schedule_fetch = Some((now.mono, today));
+            self.data_requests.push(DataRequest::ScheduleToday);
+        }
+        if self.limits.expire(now.wall) {
+            self.save_meta(META_LIMITS, &self.limits);
+        }
+        let state = self.machine.state();
+        let session = self.machine.session().map(|s| (s.id, s.started_at));
+        if state == SessionState::Active {
+            if reminders::refresh_due(self.last_limits_fetch, now.mono, LIMITS_REFRESH) {
+                self.last_limits_fetch = Some(now.mono);
+                self.data_requests.push(DataRequest::WorkLimits {
+                    exclude_session_id: session.map(|(id, _)| id),
+                });
+            }
+            let progress = self.limits.progress(
+                session.map(|(id, _)| id),
+                self.activity.unemitted_seconds(),
+                now.wall,
+            );
+            let warnings = self.limits.ledger.check(&progress);
+            if !warnings.is_empty() {
+                self.save_meta(META_LIMITS, &self.limits);
+            }
+            for w in warnings {
+                log::info!("work limit: {}% of the {:?} limit", w.percent, w.scope);
+                self.notices.push(Notice::LimitWarning {
+                    id: w.id(),
+                    scope: w.scope,
+                    percent: w.percent,
+                    limit_minutes: w.limit_minutes,
+                    worked_seconds: w.worked_seconds,
+                });
+            }
+        }
+
+        let tracking = match (state, session) {
+            (SessionState::Active | SessionState::Suspended, Some((session_id, started_at))) => {
+                Tracking::Active {
+                    session_id,
+                    started_at,
+                }
+            }
+            (SessionState::Paused(_), _) => Tracking::Paused,
+            _ => Tracking::Idle,
+        };
+        let window = self.reminder_window(now.wall);
+        let before = self.reminders.ledger.clone();
+        let input = ReminderInput {
+            now: now.wall,
+            settings: &self.reminders.settings,
+            window: window.as_ref(),
+            tracking,
+            ran_today: self.today().tracked_seconds > 0,
+            can_start: self.license_block.is_none(),
+            pending: self.reminder.as_ref().map(|r| r.kind),
+        };
+        match reminders::step(&mut self.reminders.ledger, &input) {
+            ReminderStep::Nothing => {}
+            ReminderStep::Clear => self.reminder = None,
+            ReminderStep::Show {
+                kind,
+                hours_start,
+                hours_end,
+                source,
+            } => {
+                let prompt = ReminderPrompt {
+                    id: Uuid::new_v4(),
+                    kind,
+                    hours_start,
+                    hours_end,
+                    source,
+                };
+                log::info!("reminder: {kind:?}");
+                self.notices.push(Notice::Reminder {
+                    id: prompt.id,
+                    reminder: kind,
+                });
+                self.reminder = Some(prompt);
+            }
+        }
+        if self.reminders.ledger != before {
+            self.save_meta(META_REMINDERS, &self.reminders);
+        }
+    }
+
+    fn load_meta<T: serde::de::DeserializeOwned + Default>(
+        &self,
+        key: &str,
+    ) -> Result<T, AgentError> {
+        Ok(lock(&self.outbox)
+            .get_meta(key)?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default())
+    }
+
+    fn save_meta<T: Serialize>(&self, key: &str, value: &T) {
+        if let Ok(json) = serde_json::to_string(value) {
+            if let Err(e) = lock(&self.outbox).set_meta(key, &json) {
+                log::debug!("could not persist {key}: {e}");
+            }
         }
     }
 
@@ -1184,6 +1751,8 @@ impl Agent {
             .map_or(SessionState::Active, SessionState::Paused);
         self.machine = SessionMachine::restore(info, state);
         self.session_tracked = Duration::from_millis(snap.tracked_ms);
+        self.limits
+            .session_started(snap.session_id, snap.started_at);
         if down > self.cfg.tick * 2 && state == SessionState::Active {
             self.emit(
                 EventBody::DataGap(DataGap {
@@ -1235,6 +1804,28 @@ pub enum Command {
         /// Project (`None` = no project).
         project_id: Option<String>,
     },
+    /// The person's answer to [`Notice::IdleReturn`]: queues `idle.decision.v1` and
+    /// clears [`LiveStatus::idle_prompt`]. Unknown or stale ids are ignored. Only the
+    /// person answers: nothing else in the agent sends this.
+    ResolveIdle {
+        /// [`IdlePrompt::id`].
+        id: Uuid,
+        /// Keep, discard or reassign.
+        decision: IdleDecision,
+        /// Target project (required for `reassign`, ignored otherwise).
+        project_id: Option<String>,
+        /// Target task (`reassign` only, optional).
+        task_id: Option<String>,
+    },
+    /// The person's answer to [`Notice::Reminder`]. Unknown or stale ids are ignored.
+    ResolveReminder {
+        /// [`ReminderPrompt::id`].
+        id: Uuid,
+        /// Their choice.
+        choice: ReminderChoice,
+    },
+    /// The employee changed their reminder settings.
+    SetReminderSettings(ReminderSettings),
 }
 
 /// Messages from the network worker.
@@ -1259,6 +1850,17 @@ pub enum NetEvent {
     LicenseRestored,
     /// Licence info from a successful heartbeat.
     License(Option<LicenseInfo>),
+    /// The person's language from a successful heartbeat.
+    Locale(Option<String>),
+    /// Work limits were fetched (`None`: the plan has none).
+    WorkLimits {
+        /// The session they leave out.
+        excluded: Option<Uuid>,
+        /// The figures.
+        limits: Option<WorkLimits>,
+    },
+    /// Today's schedule was fetched (`None`: the server has no schedules).
+    Schedule(Option<ScheduleToday>),
 }
 
 /// Everything the tick loop can receive.
@@ -1284,6 +1886,8 @@ impl AgentHandle {
 enum NetJob {
     Screenshot(ScreenshotJob),
     FetchPolicy(Option<String>),
+    FetchWorkLimits(Option<Uuid>),
+    FetchSchedule,
     Shutdown { deadline: Duration },
 }
 
@@ -1298,6 +1902,7 @@ impl ScreenshotSink for ChannelSink {
 #[derive(Debug, Clone, Default)]
 struct Health {
     permissions: Permissions,
+    browser_extensions: Vec<BrowserFamily>,
     applied_revision: i64,
     project_id: Option<String>,
 }
@@ -1482,6 +2087,11 @@ impl Runtime {
                 .clone(),
             outbox_depth: depth,
             revoked: self.agent.is_revoked(),
+            idle_prompt: self.agent.idle_prompt().cloned(),
+            limits: self.agent.limit_summary(),
+            reminder: self.agent.reminder().cloned(),
+            reminders: self.agent.reminder_status(),
+            browser_extensions: self.agent.browser_extensions(),
         }
     }
 
@@ -1499,8 +2109,10 @@ impl Runtime {
         let perms = self.agent.permissions(Some(self.capturer.as_ref()));
         let rev = self.agent.applied_policy_revision();
         let project = self.agent.current_project();
+        let browsers = self.agent.browser_extensions();
         let mut h = self.health.lock().unwrap_or_else(|e| e.into_inner());
         h.permissions = perms;
+        h.browser_extensions = browsers;
         h.applied_revision = rev;
         h.project_id = project;
     }
@@ -1508,6 +2120,14 @@ impl Runtime {
     fn forward_agent_outputs(&mut self) {
         for p in self.agent.take_policy_requests() {
             let _ = self.jobs_tx.send(NetJob::FetchPolicy(p));
+        }
+        for r in self.agent.take_data_requests() {
+            let _ = self.jobs_tx.send(match r {
+                DataRequest::WorkLimits { exclude_session_id } => {
+                    NetJob::FetchWorkLimits(exclude_session_id)
+                }
+                DataRequest::ScheduleToday => NetJob::FetchSchedule,
+            });
         }
         for n in self.agent.take_notices() {
             if let Some(o) = self.observer.as_mut() {
@@ -1530,6 +2150,31 @@ impl Runtime {
                 Notice::Recovered { resumed, .. } => log::info!(
                     "NOTICE: a session from a previous run was {}",
                     if resumed { "resumed" } else { "closed" }
+                ),
+                Notice::IdleReturn { seconds, .. } => log::info!(
+                    "NOTICE: welcome back after {} min idle; unless answered in the app, the time is kept",
+                    (seconds + 30) / 60
+                ),
+                Notice::LimitWarning {
+                    scope,
+                    percent,
+                    limit_minutes,
+                    ..
+                } => log::info!(
+                    "NOTICE: {percent}% of your {} {} min work limit; tracking continues",
+                    match scope {
+                        LimitScope::Daily => "daily",
+                        LimitScope::Weekly => "weekly",
+                    },
+                    limit_minutes
+                ),
+                Notice::Reminder { reminder, .. } => log::info!(
+                    "NOTICE: {}",
+                    match reminder {
+                        ReminderKind::Start => "your hours have started; start tracking when ready",
+                        ReminderKind::Stop => "your hours have ended and this session is still tracking",
+                        ReminderKind::StillTracking => "still tracking past your hours",
+                    }
                 ),
             }
         }
@@ -1663,6 +2308,19 @@ impl Runtime {
                 self.preview = Some(project_id);
                 Ok(())
             }
+            Command::ResolveIdle {
+                id,
+                decision,
+                project_id,
+                task_id,
+            } => self
+                .agent
+                .resolve_idle(id, decision, project_id, task_id)
+                .map(|_| ()),
+            Command::ResolveReminder { id, choice } => {
+                self.agent.resolve_reminder(id, choice).map(|_| ())
+            }
+            Command::SetReminderSettings(s) => self.agent.set_reminder_settings(s),
         };
         if let Err(e) = r {
             log::warn!("command refused: {e}");
@@ -1684,6 +2342,11 @@ impl Runtime {
                 self.maybe_auto_start();
             }
             NetEvent::License(info) => self.agent.on_license_info(info),
+            NetEvent::Locale(locale) => self.agent.on_locale(locale),
+            NetEvent::WorkLimits { excluded, limits } => {
+                self.agent.on_work_limits(limits, excluded)
+            }
+            NetEvent::Schedule(s) => self.agent.on_schedule(s),
             NetEvent::Revoked => {}
         }
         self.update_health();
@@ -1796,6 +2459,18 @@ impl NetWorker {
                 Ok(NetJob::FetchPolicy(_)) if self.blocked.is_some() => {}
                 Ok(NetJob::FetchPolicy(p)) => {
                     if self.fetch_policy(p) {
+                        return;
+                    }
+                }
+                Ok(NetJob::FetchWorkLimits(_) | NetJob::FetchSchedule)
+                    if self.blocked.is_some() => {}
+                Ok(NetJob::FetchWorkLimits(excluded)) => {
+                    if self.fetch_work_limits(excluded) {
+                        return;
+                    }
+                }
+                Ok(NetJob::FetchSchedule) => {
+                    if self.fetch_schedule() {
                         return;
                     }
                 }
@@ -1935,6 +2610,7 @@ impl NetWorker {
             agent_version: crate::AGENT_VERSION.into(),
             client_time: crate::ts::to_millis(self.clock.wall()),
             permissions: h.permissions,
+            browser_extensions: h.browser_extensions.clone(),
             outbox_depth: lock(&self.outbox).depth().unwrap_or(0),
             applied_policy_revision: h.applied_revision,
         };
@@ -1946,6 +2622,7 @@ impl NetWorker {
                     return true;
                 }
                 self.send(NetEvent::License(resp.license.clone()));
+                self.send(NetEvent::Locale(resp.locale.clone()));
                 self.unblock();
                 if resp.policy_revision > h.applied_revision {
                     if self.fetch_policy(None) {
@@ -1987,6 +2664,48 @@ impl NetWorker {
                 false
             }
         }
+    }
+
+    /// Returns `true` if the device turned out to be revoked. Offline or failing: the
+    /// agent keeps its last good copy. `404` (an older server): no limits.
+    fn fetch_work_limits(&mut self, excluded: Option<Uuid>) -> bool {
+        let limits = match self.api.work_limits(excluded) {
+            Ok(l) => l,
+            Err(ApiError::Http { status: 404, .. }) => None,
+            Err(ApiError::DeviceRevoked) => {
+                self.send(NetEvent::Revoked);
+                return true;
+            }
+            Err(e) => {
+                log::debug!("work limits fetch failed: {e}");
+                self.note_api_error(&e);
+                return false;
+            }
+        };
+        self.set_online(true);
+        self.send(NetEvent::WorkLimits { excluded, limits });
+        false
+    }
+
+    /// Returns `true` if the device turned out to be revoked. Offline or failing: the
+    /// cached copy stays. `404` (an older server): no schedules, "my hours" apply.
+    fn fetch_schedule(&mut self) -> bool {
+        let schedule = match self.api.schedule_today() {
+            Ok(s) => Some(s),
+            Err(ApiError::Http { status: 404, .. }) => None,
+            Err(ApiError::DeviceRevoked) => {
+                self.send(NetEvent::Revoked);
+                return true;
+            }
+            Err(e) => {
+                log::debug!("schedule fetch failed: {e}");
+                self.note_api_error(&e);
+                return false;
+            }
+        };
+        self.set_online(true);
+        self.send(NetEvent::Schedule(schedule));
+        false
     }
 
     fn screenshot(&mut self, job: &ScreenshotJob) {

@@ -1,0 +1,23 @@
+.chip,
+.plain {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+}
+.chip {
+  padding: 6px 10px;
+  background: #fff;
+  border-radius: var(--radius-control);
+}
+.img {
+  display: block;
+  max-height: 28px;
+  max-width: 180px;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+.plain .img {
+  max-height: 48px;
+  max-width: 220px;
+}

@@ -11,12 +11,12 @@ import { Checkbox, SelectField, TextArea, TextField } from '@/components/ui/Fiel
 import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridClass, numClass, tableClass } from '@/components/ui/Layout';
 import { useMe } from '@/lib/me';
 import {
-  LEDGER_KIND_LABEL,
-  REQUEST_STATUS_LABEL,
   accrualLabel,
   attendanceDetail,
   dateSpanLabel,
   formatHours,
+  ledgerKindLabel,
+  requestStatusLabel,
   sched,
   shiftTimesLabel,
   signedHours,
@@ -25,6 +25,7 @@ import {
 } from '@/lib/scheduling';
 import { addDays, formatDateTime, formatShortDay, startOfWeek, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t, tPlural } from '@/lib/i18n';
 import { NoAccess } from '../../NoAccess';
 
 function WeekAttendance({ data, tz }: { data: AttendanceResponse; tz: string }) {
@@ -33,19 +34,24 @@ function WeekAttendance({ data, tz }: { data: AttendanceResponse; tz: string }) 
     <>
       <p className="secondary small">
         {sum.scheduled_days === 0
-          ? 'No shifts this week'
-          : `${sum.scheduled_days} scheduled ${sum.scheduled_days === 1 ? 'day' : 'days'} · ${sum.on_time} on schedule · ${sum.late} started late · ${sum.left_early} left early · ${sum.absent} with nothing recorded · ${sum.on_leave} on leave · ${sum.holiday} holiday`}
-        . Late means the first recorded time began more than {data.late_grace_minutes} min after the shift start.
+          ? t('sched.noShifts')
+          : tPlural(sum.scheduled_days, 'sched.summary.one', 'sched.summary.other', { on_time: sum.on_time,
+              late: sum.late,
+              left_early: sum.left_early,
+              absent: sum.absent,
+              on_leave: sum.on_leave,
+              holiday: sum.holiday, })}
+        {t('sched.lateMeans', { n: data.late_grace_minutes })}
       </p>
-      <TableBox label="Attendance this week">
+      <TableBox label={t('sched.attWeek')}>
         <table className={tableClass} style={{ minWidth: 620 }}>
-          <caption className="visually-hidden">Your shifts and recorded time, day by day</caption>
+          <caption className="visually-hidden">{t('sched.attCaption')}</caption>
           <thead>
             <tr>
-              <th scope="col">Day</th>
-              <th scope="col">Shift</th>
-              <th scope="col">Status</th>
-              <th scope="col">Details</th>
+              <th scope="col">{t('sched.col.day')}</th>
+              <th scope="col">{t('sched.col.shift')}</th>
+              <th scope="col">{t('sched.col.status')}</th>
+              <th scope="col">{t('sched.col.details')}</th>
             </tr>
           </thead>
           <tbody>
@@ -71,18 +77,18 @@ function WeekAttendance({ data, tz }: { data: AttendanceResponse; tz: string }) 
 }
 
 function Balances({ balances }: { balances: TimeOffBalanceDTO[] }) {
-  if (balances.length === 0) return <Empty title="No time-off policy yet">An org admin assigns time-off policies.</Empty>;
+  if (balances.length === 0) return <Empty title={t('sched.noPolicy')}>{t('sched.noPolicyBody')}</Empty>;
   return (
     <div className={s.balances}>
       {balances.map((b) => (
         <div key={b.policy_id} className={s.balance}>
           <span className="label-mono">
-            {b.policy_name} · {b.kind}
+            {b.policy_name} · {t(`sched.kind.${b.kind}`)}
           </span>
-          {b.kind === 'paid' ? <span className={s.balanceValue}>{formatHours(b.balance_hours)}</span> : <span className={s.balanceValue}>Unpaid</span>}
+          {b.kind === 'paid' ? <span className={s.balanceValue}>{formatHours(b.balance_hours)}</span> : <span className={s.balanceValue}>{t('sched.unpaid')}</span>}
           <span className="small secondary">
             {accrualLabel(b)}
-            {b.pending_hours > 0 ? ` · ${formatHours(b.pending_hours)} waiting for approval` : ''}
+            {b.pending_hours > 0 ? t('sched.pendingHours', { hours: formatHours(b.pending_hours) }) : ''}
           </span>
         </div>
       ))}
@@ -120,7 +126,7 @@ function RequestForm({ balances, onDone }: { balances: TimeOffBalanceDTO[]; onDo
   return (
     <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
       <div className={formGridClass}>
-        <SelectField label="Policy" value={policyId} onChange={(e) => setPolicyId(e.target.value)}>
+        <SelectField label={t('sched.policy')} value={policyId} onChange={(e) => setPolicyId(e.target.value)}>
           {balances.map((b) => (
             <option key={b.policy_id} value={b.policy_id}>
               {b.policy_name}
@@ -128,7 +134,7 @@ function RequestForm({ balances, onDone }: { balances: TimeOffBalanceDTO[]; onDo
           ))}
         </SelectField>
         <TextField
-          label="First day"
+          label={t('sched.firstDay')}
           type="date"
           value={start}
           onChange={(e) => {
@@ -138,26 +144,26 @@ function RequestForm({ balances, onDone }: { balances: TimeOffBalanceDTO[]; onDo
           required
         />
         {partial ? (
-          <TextField label="Hours" type="number" min={0.5} max={24} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} required />
+          <TextField label={t('sched.hours')} type="number" min={0.5} max={24} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} required />
         ) : (
-          <TextField label="Last day" type="date" min={start} value={end} onChange={(e) => setEnd(e.target.value)} required />
+          <TextField label={t('sched.lastDay')} type="date" min={start} value={end} onChange={(e) => setEnd(e.target.value)} required />
         )}
       </div>
-      <Checkbox label="Part of a day" hint="For a few hours on one day." checked={partial} onChange={(e) => setPartial(e.target.checked)} />
-      <TextArea label="Note for your manager (optional)" rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
+      <Checkbox label={t('sched.partial')} hint={t('sched.partialHint')} checked={partial} onChange={(e) => setPartial(e.target.checked)} />
+      <TextArea label={t('sched.noteManager')} rows={2} maxLength={1000} value={reason} onChange={(e) => setReason(e.target.value)} />
       <p className="small secondary" aria-live="polite">
         {!valid
-          ? 'Choose the dates.'
+          ? t('sched.chooseDates')
           : estimate.data
-            ? `This request is ${formatHours(estimate.data.hours)}. Full days count your shift hours on scheduled days; weekends, days off and holidays cost nothing.`
+            ? t('sched.estimate', { hours: formatHours(estimate.data.hours) })
             : estimate.error
-              ? 'Couldn’t work out the hours yet.'
-              : 'Working out the hours…'}
+              ? t('sched.estimateFailed')
+              : t('sched.estimating')}
       </p>
       <ActionError error={action.error} />
       <div className={formActionsClass}>
         <Button type="submit" variant="primary" disabled={!valid || action.busy}>
-          {action.busy ? 'Sending…' : 'Request time off'}
+          {action.busy ? t('sched.sending') : t('sched.requestTimeOff')}
         </Button>
       </div>
     </form>
@@ -171,23 +177,23 @@ function Requests({ data, onChanged }: { data: MyTimeOffResponse; onChanged: () 
   const cancel = async (id: string) => {
     if (await action.run(() => sched.my.cancel(id))) onChanged();
   };
-  if (data.requests.length === 0) return <Empty title="No requests yet" />;
+  if (data.requests.length === 0) return <Empty title={t('sched.noRequests')} />;
   return (
     <>
       <ActionError error={action.error} />
-      <TableBox label="Your time-off requests">
+      <TableBox label={t('sched.yourRequests')}>
         <table className={tableClass} style={{ minWidth: 640 }}>
           <thead>
             <tr>
-              <th scope="col">Dates</th>
-              <th scope="col">Policy</th>
+              <th scope="col">{t('sched.col.dates')}</th>
+              <th scope="col">{t('sched.col.policy')}</th>
               <th scope="col" className={numClass}>
-                Hours
+                {t('sched.col.hours')}
               </th>
-              <th scope="col">Status</th>
-              <th scope="col">Reviewer note</th>
+              <th scope="col">{t('sched.col.status')}</th>
+              <th scope="col">{t('sched.col.reviewerNote')}</th>
               <th scope="col">
-                <span className="visually-hidden">Actions</span>
+                <span className="visually-hidden">{t('sched.col.actions')}</span>
               </th>
             </tr>
           </thead>
@@ -198,14 +204,14 @@ function Requests({ data, onChanged }: { data: MyTimeOffResponse; onChanged: () 
                 <td>{r.policy_name}</td>
                 <td className={numClass}>{formatHours(r.hours)}</td>
                 <td>
-                  <Badge tone={r.status === 'approved' ? 'solid' : 'outline'}>{REQUEST_STATUS_LABEL[r.status]}</Badge>
+                  <Badge tone={r.status === 'approved' ? 'solid' : 'outline'}>{requestStatusLabel(r.status)}</Badge>
                   {r.reviewer_name ? <span className="small muted"> · {r.reviewer_name}</span> : null}
                 </td>
                 <td className="small secondary">{r.review_note ? `“${r.review_note}”` : '—'}</td>
                 <td>
                   {r.status === 'pending' || (r.status === 'approved' && r.start_date > today) ? (
-                    <Button size="sm" variant="quiet" disabled={action.busy} onClick={() => cancel(r.id)} aria-label={`Cancel time off ${dateSpanLabel(r.start_date, r.end_date)}`}>
-                      Cancel
+                    <Button size="sm" variant="quiet" disabled={action.busy} onClick={() => cancel(r.id)} aria-label={t('sched.cancelLabel', { dates: dateSpanLabel(r.start_date, r.end_date) })}>
+                      {t('common.cancel')}
                     </Button>
                   ) : null}
                 </td>
@@ -216,16 +222,16 @@ function Requests({ data, onChanged }: { data: MyTimeOffResponse; onChanged: () 
       </TableBox>
       {data.ledger.length > 0 ? (
         <details>
-          <summary className="small">Balance history</summary>
-          <TableBox label="Balance history">
+          <summary className="small">{t('sched.history')}</summary>
+          <TableBox label={t('sched.history')}>
             <table className={tableClass}>
               <thead>
                 <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Policy</th>
-                  <th scope="col">Entry</th>
+                  <th scope="col">{t('sched.col.date')}</th>
+                  <th scope="col">{t('sched.col.policy')}</th>
+                  <th scope="col">{t('sched.col.entry')}</th>
                   <th scope="col" className={numClass}>
-                    Hours
+                    {t('sched.col.hours')}
                   </th>
                 </tr>
               </thead>
@@ -235,7 +241,7 @@ function Requests({ data, onChanged }: { data: MyTimeOffResponse; onChanged: () 
                     <td>{formatShortDay(e.effective_date)}</td>
                     <td>{data.balances.find((b) => b.policy_id === e.policy_id)?.policy_name ?? '—'}</td>
                     <td>
-                      {LEDGER_KIND_LABEL[e.kind]}
+                      {ledgerKindLabel(e.kind)}
                       {e.note ? <span className="small muted"> · {e.note}</span> : null}
                     </td>
                     <td className={numClass}>{signedHours(e.hours)}</td>
@@ -262,46 +268,47 @@ export default function MySchedulePage() {
   const schedule = useApi(schedules ? `me:schedule|${range.from}` : null, (signal) => sched.my.schedule(range, signal));
   const mine = useApi(timeOff ? 'me:time-off' : null, (signal) => sched.my.timeOff(signal));
 
-  if (!schedules && !timeOff) return <NoAccess what="Your organization's plan doesn't include schedules or time off." />;
+  if (!schedules && !timeOff) return <NoAccess what={t('sched.noAccess')} />;
 
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Schedule and time off"
-        title="My schedule"
-        description="Your shifts, how your recorded time lines up with them, and your time off. Your manager sees the same attendance for you — it's about the schedule, not your performance."
+        eyebrow={t('sched.eyebrow')}
+        title={t('sched.title')}
+        description={t('sched.description')}
         actions={
           schedules ? (
-            <DateSwitcher date={day} onDate={setDay} tz={tz} step={7} unit="week" label={`${week === startOfWeek(todayInTz(tz)) ? 'This week · ' : ''}${weekLabel(range.from, range.to)}`} />
+            <DateSwitcher date={day} onDate={setDay} tz={tz} step={7} unit="week" label={`${week === startOfWeek(todayInTz(tz)) ? t('ts.thisWeekPrefix') : ''}${weekLabel(range.from, range.to)}`} />
           ) : undefined
         }
       />
       {notice ? (
-        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
-          Your manager has been notified. You&apos;ll get a notification when it&apos;s reviewed.
+        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>{t('common.dismiss')}</Button>}>
+          {t('sched.notified')}
         </Banner>
       ) : null}
 
       {schedules ? (
         <>
-          <Card title="Attendance" subtitle={weekLabel(range.from, range.to)}>
-            <Resource {...attendance} label="Loading attendance">
+          <Card title={t('sched.attendance')} subtitle={weekLabel(range.from, range.to)}>
+            <Resource {...attendance} label={t('sched.loadingAttendance')}>
               {(data) => <WeekAttendance data={data} tz={tz} />}
             </Resource>
           </Card>
-          <Card title="Your shifts">
-            <Resource {...schedule} label="Loading your schedule">
+          <Card title={t('sched.yourShifts')}>
+            <Resource {...schedule} label={t('sched.loadingSchedule')}>
               {(data) =>
                 data.shifts.length === 0 ? (
-                  <Empty title="No recurring shifts">If your organization uses schedules, an org admin assigns them.</Empty>
+                  <Empty title={t('sched.noRecurring')}>{t('sched.noRecurringBody')}</Empty>
                 ) : (
                   <ul className="stack" style={{ gap: 8, margin: 0, paddingLeft: 18 }}>
                     {data.shifts.map((x) => (
                       <li key={x.id}>
                         <strong>{weekdaysLabel(x.weekdays)}</strong> <span className="mono">{shiftTimesLabel(x)}</span>{' '}
                         <span className="small muted">
-                          {x.timezone} · from {formatShortDay(x.effective_from)}
-                          {x.effective_to ? ` to ${formatShortDay(x.effective_to)}` : ''}
+                          {x.timezone}
+                          {t('sched.from', { date: formatShortDay(x.effective_from) })}
+                          {x.effective_to ? t('sched.to', { date: formatShortDay(x.effective_to) }) : ''}
                         </span>
                       </li>
                     ))}
@@ -314,24 +321,24 @@ export default function MySchedulePage() {
       ) : null}
 
       {timeOff ? (
-        <Resource {...mine} label="Loading time off">
+        <Resource {...mine} label={t('sched.loadingTimeOff')}>
           {(data) => (
             <>
-              <Card title="Time-off balances">
+              <Card title={t('sched.balances')}>
                 <Balances balances={data.balances} />
               </Card>
               {data.balances.length > 0 ? (
-                <Card title="Request time off">
+                <Card title={t('sched.requestTimeOff')}>
                   <RequestForm
                     balances={data.balances}
                     onDone={(r) => {
-                      setNotice(`Time off requested: ${dateSpanLabel(r.start_date, r.end_date)} · ${formatHours(r.hours)}`);
+                      setNotice(t('sched.requested', { dates: dateSpanLabel(r.start_date, r.end_date), hours: formatHours(r.hours) }));
                       mine.reload();
                     }}
                   />
                 </Card>
               ) : null}
-              <Card title="Your requests" subtitle={data.requests[0] ? `Latest ${formatDateTime(data.requests[0].created_at, tz)}` : undefined}>
+              <Card title={t('sched.requestsTitle')} subtitle={data.requests[0] ? t('sched.latest', { when: formatDateTime(data.requests[0].created_at, tz) }) : undefined}>
                 <Requests data={data} onChanged={mine.reload} />
               </Card>
             </>

@@ -1,8 +1,11 @@
 .dialog {
-  border: 1px solid var(--text);
-  border-radius: 0;
+  border: 1px solid var(--glass-edge);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 24px 64px rgb(11 12 15 / 0.24), 0 2px 6px rgb(11 12 15 / 0.08);
   padding: 0;
-  background: var(--surface);
+  background: var(--glass-strong);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
   color: var(--text);
   width: min(560px, calc(100vw - 32px));
   max-height: calc(100vh - 48px);
@@ -14,17 +17,25 @@
   width: min(760px, calc(100vw - 32px));
 }
 .dialog::backdrop {
-  background: rgb(11 12 15 / 0.45);
+  background: rgb(11 12 15 / 0.4);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+@media (forced-colors: active) {
+  .dialog {
+    border-color: CanvasText;
+  }
 }
 .sheet {
   margin: 0 0 0 auto;
   height: 100vh;
   max-height: 100vh;
   border-width: 0 0 0 1px;
+  border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .ink {
-  background: var(--ink);
-  border-color: var(--ink-border);
+  background: var(--ink-glass);
+  border-color: var(--ink-glass-edge);
   color: var(--ink-text);
 }
 .ink h2 {
@@ -70,6 +81,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
 }

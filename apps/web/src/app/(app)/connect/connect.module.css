@@ -1,0 +1,168 @@
+.card {
+  max-width: 620px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+.steps span {
+  height: 3px;
+  background: var(--rule);
+}
+.steps .stepDone {
+  background: var(--text);
+}
+.steps .stepOn {
+  background: var(--brand-red);
+}
+.eyebrow {
+  margin: -6px 0 0;
+  font: 400 11px var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.device {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.deviceIcon {
+  flex: none;
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: var(--text-on-ink);
+}
+.deviceText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.deviceText strong {
+  font-size: 17px;
+}
+.codeBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--rule);
+  background: var(--surface);
+}
+.tiles {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  user-select: all;
+}
+.tile {
+  width: 42px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--text);
+  font: 600 26px var(--font-mono);
+  color: var(--text);
+  background: var(--surface);
+}
+.dash {
+  padding: 0 4px;
+  color: var(--text-3);
+  font: 400 22px var(--font-mono);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+.left {
+  margin-left: auto;
+}
+.done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+  padding: 12px 8px 4px;
+}
+.done p {
+  margin: 0;
+  max-width: 460px;
+}
+.mark {
+  width: 68px;
+  height: 68px;
+  display: grid;
+  place-items: center;
+  border: 2px solid var(--brand-red);
+  color: var(--text);
+  animation: pop 360ms ease-out both;
+}
+.draw {
+  stroke-dasharray: 30;
+  stroke-dashoffset: 30;
+  animation: draw 420ms 200ms ease-out forwards;
+}
+.doneTitle {
+  margin: 4px 0 0;
+  font: 700 24px/1.2 var(--font-display, inherit);
+  letter-spacing: -0.02em;
+}
+@keyframes pop {
+  from {
+    transform: scale(0.7);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (max-width: 480px) {
+  .tiles {
+    flex-wrap: nowrap;
+    gap: 4px;
+  }
+  .tile {
+    width: 28px;
+    height: 40px;
+    font-size: 18px;
+  }
+  .dash {
+    padding: 0 1px;
+  }
+  .codeBlock {
+    padding: 12px;
+  }
+  .left {
+    margin-left: 0;
+    width: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mark {
+    animation: none;
+  }
+  .draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+}

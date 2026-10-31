@@ -2,14 +2,16 @@
 
 import { useState, type FormEvent } from 'react';
 import type { ClientDTO, ProjectDTO } from '@rd/contracts';
+import { ClientPortalAccess } from '@/components/money/ClientPortalAccess';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { SelectField, TextArea, TextField } from '@/components/ui/Field';
 import { Badge, Card, PageHeader, formActionsClass, formGridClass } from '@/components/ui/Layout';
 import { rd, type ClientBody } from '@/lib/api';
-import { plural } from '@/lib/format';
+import { useMe } from '@/lib/me';
 import { CURRENCIES } from '@/lib/money';
 import { useAction, useApi } from '@/lib/useApi';
+import { t, tPlural } from '@/lib/i18n';
 import { MoneyGate } from '../MoneyGate';
 import s from '../admin.module.css';
 import m from '../money.module.css';
@@ -17,7 +19,7 @@ import m from '../money.module.css';
 function CurrencySelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const options = CURRENCIES.includes(value as (typeof CURRENCIES)[number]) ? CURRENCIES : [value, ...CURRENCIES];
   return (
-    <SelectField label="Currency" value={value} onChange={(e) => onChange(e.target.value)} hint="Invoices for this client use it">
+    <SelectField label={t('money.rates.currency')} value={value} onChange={(e) => onChange(e.target.value)} hint={t('money.clients.currencyHint')}>
       {options.map((c) => (
         <option key={c} value={c}>
           {c}
@@ -54,11 +56,11 @@ function ClientForm({
   return (
     <form onSubmit={submit} className={m.stack}>
       <div className={formGridClass}>
-        <TextField label="Client name" value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} />
-        <TextField label="Billing contact email (optional)" type="email" value={email} maxLength={320} onChange={(e) => setEmail(e.target.value)} />
+        <TextField label={t('money.clients.name')} value={name} maxLength={200} required onChange={(e) => setName(e.target.value)} />
+        <TextField label={t('money.clients.email')} type="email" value={email} maxLength={320} onChange={(e) => setEmail(e.target.value)} />
         <CurrencySelect value={currency} onChange={setCurrency} />
       </div>
-      <TextArea label="Billing address (optional)" rows={3} value={address} maxLength={2000} onChange={(e) => setAddress(e.target.value)} />
+      <TextArea label={t('money.clients.address')} rows={3} value={address} maxLength={2000} onChange={(e) => setAddress(e.target.value)} />
       <div className={formActionsClass}>
         <Button type="submit" variant={initial ? 'secondary' : 'primary'} disabled={!name.trim() || busy}>
           {submitLabel}
@@ -70,6 +72,9 @@ function ClientForm({
 
 function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projects: ProjectDTO[]; onChanged: () => void }) {
   const action = useAction();
+  const { timezone } = useMe();
+  // Contacts load only when the client is opened, not for every client on the page.
+  const [open, setOpen] = useState(false);
   const [projectId, setProjectId] = useState('');
   const mine = new Set(client.projects.map((p) => p.id));
   const assignable = projects.filter((p) => !mine.has(p.id) && p.status === 'active').sort((a, b) => a.name.localeCompare(b.name));
@@ -91,36 +96,36 @@ function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projec
   };
   return (
     <li className={s.item}>
-      <details>
+      <details onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary>
           <span className={s.summaryName}>
-            {client.name} {client.archived ? <Badge>Archived</Badge> : null}
+            {client.name} {client.archived ? <Badge>{t('money.clients.archived')}</Badge> : null}
           </span>
           <span className="small muted">
-            {client.currency} · {plural(client.projects.length, 'project')}
+            {client.currency} · {tPlural(client.projects.length, 'money.clients.projects.one', 'money.clients.projects.other')}
             {client.contact_email ? ` · ${client.contact_email}` : ''}
           </span>
         </summary>
         <div className={s.detail}>
           <div className={m.stack}>
-            <span className="eyebrow">Projects billed to {client.name}</span>
+            <span className="eyebrow">{t('money.clients.projectsOf', { name: client.name })}</span>
             {client.projects.length === 0 ? (
-              <p className="secondary">No projects yet. Time on a client&apos;s projects is what its invoices are built from.</p>
+              <p className="secondary">{t('money.clients.noProjects')}</p>
             ) : (
               <ul className={s.members}>
                 {client.projects.map((p) => (
                   <li key={p.id} className={s.member}>
                     <span>{p.name}</span>
-                    <Button size="sm" variant="quiet" onClick={() => unassign(p.id)} disabled={action.busy} aria-label={`Remove ${p.name} from ${client.name}`}>
-                      Remove
+                    <Button size="sm" variant="quiet" onClick={() => unassign(p.id)} disabled={action.busy} aria-label={t('money.clients.removeAria', { project: p.name, client: client.name })}>
+                      {t('money.clients.remove')}
                     </Button>
                   </li>
                 ))}
               </ul>
             )}
             <form className={s.inlineForm} onSubmit={assign}>
-              <SelectField label="Add a project" value={projectId} onChange={(e) => setProjectId(e.target.value)}>
-                <option value="">Choose a project…</option>
+              <SelectField label={t('money.clients.addProject')} value={projectId} onChange={(e) => setProjectId(e.target.value)}>
+                <option value="">{t('money.clients.chooseProject')}</option>
                 {assignable.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -128,15 +133,16 @@ function ClientItem({ client, projects, onChanged }: { client: ClientDTO; projec
                 ))}
               </SelectField>
               <Button type="submit" disabled={!projectId || action.busy}>
-                Add
+                {t('money.clients.add')}
               </Button>
             </form>
-            <p className="small muted">A project belongs to one client at a time. Moving it changes future invoices only; issued invoices stay as they are.</p>
+            <p className="small muted">{t('money.clients.oneClient')}</p>
           </div>
-          <ClientForm initial={client} submitLabel="Save changes" busy={action.busy} onSubmit={update} />
+          {open ? <ClientPortalAccess client={client} tz={timezone} onChanged={onChanged} /> : null}
+          <ClientForm initial={client} submitLabel={t('money.clients.save')} busy={action.busy} onSubmit={update} />
           <div>
             <Button size="sm" variant="quiet" onClick={() => update({ archived: !client.archived })} disabled={action.busy}>
-              {client.archived ? 'Restore client' : 'Archive client'}
+              {client.archived ? t('money.clients.restore') : t('money.clients.archive')}
             </Button>
           </div>
           <ActionError error={action.error} />
@@ -157,13 +163,13 @@ function ClientsContent() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Money"
-        title="Clients"
-        description="Who you bill. Assign projects to a client, then build invoices from the time recorded on them."
+        eyebrow={t('money.gate.eyebrow')}
+        title={t('money.clients.title')}
+        description={t('money.clients.description')}
       />
-      <Card title="New client">
+      <Card title={t('money.clients.new')}>
         <ClientForm
-          submitLabel="Create client"
+          submitLabel={t('money.clients.create')}
           busy={create.busy}
           onSubmit={async (body) => {
             const r = await create.run(() => rd.money.createClient(body));
@@ -173,11 +179,11 @@ function ClientsContent() {
         />
         <ActionError error={create.error} />
       </Card>
-      <Card title="Clients">
-        <Resource {...clients} label="Loading clients">
+      <Card title={t('money.clients.title')}>
+        <Resource {...clients} label={t('money.clients.loading')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No clients yet">Create one above, then assign its projects.</Empty>
+              <Empty title={t('money.clients.empty')}>{t('money.clients.emptyBody')}</Empty>
             ) : (
               <ul className={s.list}>
                 {[...list]
@@ -196,7 +202,7 @@ function ClientsContent() {
 
 export default function ClientsPage() {
   return (
-    <MoneyGate title="Clients">
+    <MoneyGate title={t('money.clients.title')}>
       <ClientsContent />
     </MoneyGate>
   );

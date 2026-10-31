@@ -10,6 +10,7 @@ import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 export default function MyScreenshotsPage() {
   const { timezone } = useMe();
@@ -26,9 +27,9 @@ export default function MyScreenshotsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Screenshots"
-        title="My screenshots"
-        description="Every screenshot taken of your screen, for the week. Images load only when you open one."
+        eyebrow={t('myshots.eyebrow')}
+        title={t('myshots.title')}
+        description={t('myshots.description')}
         actions={
           <DateSwitcher
             date={day}
@@ -42,11 +43,11 @@ export default function MyScreenshotsPage() {
         }
       />
       {policy.data && !info.enabled ? (
-        <Banner tag="NOTE" title="Screenshots are off for you">
-          No policy that applies to you turns screenshots on. Older screenshots stay until their retention date.
+        <Banner tag="NOTE" title={t('myshots.offTitle')}>
+          {t('myshots.offBody')}
         </Banner>
       ) : null}
-      <Resource {...shots} label="Loading screenshots">
+      <Resource {...shots} label={t('myshots.loading')}>
         {(list) => (
           <ScreenshotStrip
             shots={list}

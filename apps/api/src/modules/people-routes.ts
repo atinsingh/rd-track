@@ -1,4 +1,15 @@
-import { deletionRequestCreate, exportCreateRequest, reviewRequest, timeCorrectionRequest, type MemberVisibility } from '@rd/contracts';
+import {
+  deletionRequestCreate,
+  exportCreateRequest,
+  reviewRequest,
+  timeCorrectionRequest,
+  notificationPreferencesUpdate,
+  type DirectoryPerson,
+  type DirectoryResponse,
+  type MemberVisibility,
+  type NotificationPreferencesResponse,
+  type NotificationsResponse,
+} from '@rd/contracts';
 import { z } from 'zod';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Deps, UserActor } from '../context';
@@ -14,7 +25,8 @@ import { myCorrections, pendingForReviewer, proposeCorrection, reviewCorrection 
 import { createExport, getExport, listExports } from './exports/service';
 import { listProjects, projectsForUser } from './org/service';
 import { myPolicy, resolveFor } from './policy/service';
-import { listNotifications, markNotificationRead, requestDeletion } from './privacy/service';
+import { requestDeletion } from './privacy/service';
+import { listNotifications, markAllRead, markRead, preferencesFor, unreadCount, updatePreferences } from './engine/notify';
 import { listScreenshots, viewUrl } from './screenshots/service';
 
 type RangeReq = FastifyRequest<{ Querystring: { from?: string; to?: string; tz?: string } }>;
@@ -50,10 +62,23 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     const a = userOf(req);
     return { items: await projectsForUser(pool, a.organizationId, a.userId) };
   });
-  app.get('/v1/me/notifications', user, async (req) => ({ items: await listNotifications(pool, userOf(req).userId) }));
+  // Engine: the person's own notifications and how they want to get them.
+  app.get<{ Querystring: { unread?: string } }>('/v1/me/notifications', user, async (req): Promise<NotificationsResponse> =>
+    listNotifications(pool, userOf(req).userId, { unreadOnly: req.query.unread === '1' || req.query.unread === 'true' }),
+  );
+  app.get('/v1/me/notifications/unread-count', user, async (req) => ({ unread: await unreadCount(pool, userOf(req).userId) }));
   app.post<{ Params: { id: string } }>('/v1/me/notifications/:id/read', user, async (req) => {
-    await markNotificationRead(pool, userOf(req).userId, req.params.id);
+    await markRead(pool, userOf(req).userId, parse(z.uuid(), req.params.id));
     return { ok: true };
+  });
+  app.post('/v1/me/notifications/read-all', user, async (req) => ({ marked: await markAllRead(pool, userOf(req).userId) }));
+  app.get('/v1/me/notification-preferences', user, async (req): Promise<NotificationPreferencesResponse> => ({
+    items: await preferencesFor(pool, userOf(req).userId),
+  }));
+  app.put('/v1/me/notification-preferences', user, async (req): Promise<NotificationPreferencesResponse> => {
+    const a = userOf(req);
+    const body = parse(notificationPreferencesUpdate, req.body);
+    return { items: await withTx(pool, (tx) => updatePreferences(tx, a.organizationId, a.userId, body.items)) };
   });
   app.get('/v1/me/corrections', user, async (req) => ({ items: await myCorrections(pool, userOf(req)) }));
   app.post('/v1/me/time-corrections', user, async (req, reply) => {
@@ -152,6 +177,25 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
       return report;
     },
   );
+  // Names for jumping to a person or project (⌘K). Not a data view, so not audited as one.
+  app.get('/v1/me/directory', user, async (req): Promise<DirectoryResponse> => {
+    const a = userOf(req);
+    const [teams, projects] = await Promise.all([managedTeamIds(pool, a.userId), managedProjectIds(pool, a.userId)]);
+    const people = await many<DirectoryPerson>(
+      pool,
+      `SELECT DISTINCT ON (u.id) u.id AS user_id, u.display_name, t.id AS team_id, t.name AS team_name
+       FROM team_memberships m JOIN teams t ON t.id = m.team_id JOIN users u ON u.id = m.user_id
+       WHERE t.organization_id = $1 AND t.id = ANY($2::uuid[]) AND m.valid_to IS NULL
+         AND u.status = 'active' AND u.id <> $3
+       ORDER BY u.id, t.name`,
+      [a.organizationId, teams, a.userId],
+    );
+    const list = projects.length ? await listProjects(pool, a.organizationId, projects) : [];
+    return {
+      people: people.sort((x, y) => x.display_name.localeCompare(y.display_name)),
+      projects: list.filter((p) => p.status === 'active').map((p) => ({ id: p.id, name: p.name })),
+    };
+  });
   app.get('/v1/projects', user, async (req) => {
     const a = userOf(req);
     return { items: await listProjects(pool, a.organizationId, await managedProjectIds(pool, a.userId)) };

@@ -87,7 +87,7 @@ describe('licensing and plans', () => {
     expect(r.body.error.code).toBe('seat_limit_reached');
     const up = await org.admin.post('/v1/billing/plan', { plan: 'standard', seats: 5 });
     expect(up.status).toBe(200);
-    expect(up.body.subscription.estimated_monthly_cents).toBe(5 * 250);
+    expect(up.body.subscription.estimated_monthly_cents).toBe(5 * 500); // month to month
     expect(up.body.checkout_url).toBeNull();
     expect((await org.admin.post('/v1/admin/users', { email: 'x@std.test', display_name: 'X', password: 'correct-horse-battery' })).status).toBe(201);
   });
@@ -257,5 +257,45 @@ describe('multi-factor authentication', () => {
     } finally {
       await strict.close();
     }
+  });
+});
+
+describe('billing terms', () => {
+  it('an annual term halves the seat price and is invoiced 12 months at a time', async () => {
+    const org = await makeOrg(env, 'term1', 'free');
+    const r = await org.admin.post('/v1/billing/plan', { plan: 'standard', seats: 4, interval: 'year' });
+    expect(r.status).toBe(200);
+    expect(r.body.subscription).toMatchObject({
+      plan: 'standard',
+      billing_interval: 'year',
+      price_per_seat_cents: 250,
+      estimated_monthly_cents: 1000,
+      estimated_invoice_cents: 12_000,
+    });
+    // The term runs a year from today.
+    const end = new Date(r.body.subscription.current_period_end).getTime();
+    expect(Math.round((end - env.clock.t) / 86_400_000)).toBeGreaterThanOrEqual(365);
+    // Leaving out the term keeps it; Pro on an annual term is $5.
+    const pro = await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 5 });
+    expect(pro.body.subscription).toMatchObject({ plan: 'pro', billing_interval: 'year', price_per_seat_cents: 500, current_period_end: r.body.subscription.current_period_end });
+  });
+
+  it('month to month is the default and costs the full price', async () => {
+    const org = await makeOrg(env, 'term2', 'free');
+    const r = await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 2 });
+    expect(r.body.subscription).toMatchObject({ billing_interval: 'month', price_per_seat_cents: 1000, estimated_invoice_cents: 2000 });
+  });
+
+  it('moving from an annual term to monthly waits for renewal', async () => {
+    const org = await makeOrg(env, 'term3', 'free');
+    await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 3, interval: 'year' });
+    const early = await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 3, interval: 'month' });
+    expect(early.status).toBe(409);
+    expect(early.body.error.code).toBe('annual_term_active');
+    // From the renewal date, monthly is allowed.
+    await env.deps.pool.query(`UPDATE subscriptions SET current_period_end = $2 WHERE organization_id = $1`, [org.id, env.clock.iso(-1000)]);
+    const later = await org.admin.post('/v1/billing/plan', { plan: 'pro', seats: 3, interval: 'month' });
+    expect(later.status).toBe(200);
+    expect(later.body.subscription).toMatchObject({ billing_interval: 'month', price_per_seat_cents: 1000 });
   });
 });

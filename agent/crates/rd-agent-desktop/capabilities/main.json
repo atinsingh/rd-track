@@ -8,6 +8,9 @@
     "core:event:allow-unlisten",
     "allow-get-view",
     "allow-enroll",
+    "allow-sign-in",
+    "allow-cancel-sign-in",
+    "allow-reopen-sign-in",
     "allow-list-projects",
     "allow-prepare-session",
     "allow-start-session",
@@ -15,6 +18,9 @@
     "allow-pause-session",
     "allow-resume-session",
     "allow-stop-session",
+    "allow-resolve-idle",
+    "allow-resolve-reminder",
+    "allow-set-reminder-settings",
     "allow-dismiss-banner",
     "allow-open-dashboard",
     "allow-open-permission-settings",
@@ -22,6 +28,9 @@
     "allow-hide-window",
     "allow-quit-app",
     "allow-reenroll",
-    "allow-install-update"
+    "allow-install-update",
+    "allow-request-email-code",
+    "allow-get-open-at-login",
+    "allow-set-open-at-login"
   ]
 }

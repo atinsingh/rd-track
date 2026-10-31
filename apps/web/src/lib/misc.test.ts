@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Me } from '@rd/contracts';
 import { buildPath, parseErrorBody, unwrapList } from './api';
 import { stackDaily } from './charts';
-import { accessFor, activeHref, navFor } from './nav';
+import { accessFor, activeHref, groupOf, navFor } from './nav';
 
 describe('api helpers', () => {
   it('parses the error envelope', () => {
@@ -22,8 +22,8 @@ describe('api helpers', () => {
 
 describe('navigation by role', () => {
   const me = (over: Partial<Me['user']>, teams: string[] = [], projects: string[] = []): Me => ({
-    user: { id: 'u', email: 'e', display_name: 'D', org_role: 'employee', timezone: 'UTC', tracking_enabled: true, mfa_enabled: false, ...over },
-    organization: { id: 'o', name: 'Org', plan: 'standard', license: 'active' },
+    user: { id: 'u', email: 'e', display_name: 'D', org_role: 'employee', timezone: 'UTC', tracking_enabled: true, mfa_enabled: false, locale: null, ...over },
+    organization: { id: 'o', name: 'Org', plan: 'standard', license: 'active', locale: null, logo_url: null },
     mfa_verified: false,
     managed_team_ids: teams,
     managed_project_ids: projects,
@@ -32,7 +32,7 @@ describe('navigation by role', () => {
   const hrefs = (m: Me) => navFor(accessFor(m)).flatMap((g) => g.items.map((i) => i.href));
 
   it('shows employees only their own pages', () => {
-    expect(hrefs(me({}))).toEqual(['/me', '/me/time', '/me/insights', '/me/privacy', '/exports']);
+    expect(hrefs(me({}))).toEqual(['/me', '/me/time', '/me/insights', '/me/computers', '/me/privacy', '/me/settings', '/exports']);
   });
   it('adds team pages for managers and admin pages for admins', () => {
     expect(hrefs(me({}, ['t1']))).toContain('/approvals');
@@ -41,13 +41,21 @@ describe('navigation by role', () => {
     expect(admin).toContain('/admin/policies');
     expect(admin).toContain('/audit');
     expect(admin).not.toContain('/team');
-    // Webhooks are a Pro feature.
-    expect(admin).not.toContain('/admin/webhooks');
-    expect(navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['webhooks'] })).flatMap((g) => g.items.map((i) => i.href))).toContain('/admin/webhooks');
+    // Developers (API tokens, webhooks) is there for every admin; the page says what needs Pro.
+    expect(admin).toContain('/admin/developers');
+    expect(hrefs(me({}))).not.toContain('/admin/developers');
   });
-  it('gives auditors the audit log only', () => {
+  it('gives auditors the audit log only, under Settings', () => {
     const groups = navFor(accessFor(me({ org_role: 'auditor' })));
-    expect(groups.map((g) => g.label)).toEqual(['Me', 'Audit']);
+    expect(groups.map((g) => g.label)).toEqual(['Me', 'Settings']);
+    expect(groups[1]!.items.map((i) => i.href)).toEqual(['/audit']);
+  });
+  it('groups an admin\u2019s pages into Me, Money, Admin and Settings', () => {
+    const groups = navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['budgets_invoicing', 'webhooks'] }));
+    expect(groups.map((g) => g.key)).toEqual(['me', 'money', 'admin', 'settings']);
+    expect(groupOf(groups, '/admin/billing')).toBe('settings');
+    expect(groupOf(groups, '/admin/invoices')).toBe('money');
+    expect(groupOf(groups, null)).toBeNull();
   });
   it('highlights the longest matching item', () => {
     const groups = navFor(accessFor(me({}, ['t1'])));

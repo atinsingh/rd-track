@@ -5,8 +5,9 @@
 //! foreground becomes empty, when capture is interrupted, and at the latest every
 //! [`MAX_SEGMENT_SECONDS`], so `duration_seconds` is always within `1..=3600`.
 //!
-//! Only the application identifier and name are ever seen here — never window titles,
-//! document names or URLs.
+//! Only the application identifier and name are seen here, and for a browser (Pro, when
+//! the policy asks for it) the active tab's hostname; a change of domain starts a new
+//! segment. Never window titles, document names, paths or full URLs.
 
 use std::time::Duration;
 
@@ -23,6 +24,7 @@ pub const MAX_NAME_CHARS: usize = 255;
 #[derive(Debug, Clone)]
 struct Segment {
     app: ForegroundAppInfo,
+    domain: Option<String>,
     started_at: DateTime<Utc>,
     seconds: u32,
 }
@@ -58,6 +60,17 @@ impl AppTracker {
         elapsed: Duration,
         app: Option<ForegroundAppInfo>,
     ) -> Vec<AppUsage> {
+        self.record_with_domain(at, elapsed, app, None)
+    }
+
+    /// Like [`AppTracker::record`], with the browser tab's domain (already normalised).
+    pub fn record_with_domain(
+        &mut self,
+        at: DateTime<Utc>,
+        elapsed: Duration,
+        app: Option<ForegroundAppInfo>,
+        domain: Option<String>,
+    ) -> Vec<AppUsage> {
         let mut out = Vec::new();
         let app = app
             .map(|a| {
@@ -83,21 +96,28 @@ impl AppTracker {
             out.extend(self.flush());
             return out;
         };
-        if self.current.as_ref().is_some_and(|s| s.app != app) {
+        if self
+            .current
+            .as_ref()
+            .is_some_and(|s| s.app != app || s.domain != domain)
+        {
             out.extend(self.take_segment());
         }
         let seg = self.current.get_or_insert_with(|| Segment {
             started_at: at - TimeDelta::from_std(elapsed).unwrap_or(TimeDelta::zero()),
             app,
+            domain,
             seconds: 0,
         });
         seg.seconds = seg.seconds.saturating_add(secs);
         if seg.seconds >= MAX_SEGMENT_SECONDS {
             let next_start = seg.started_at + TimeDelta::seconds(i64::from(seg.seconds));
             let app = seg.app.clone();
+            let domain = seg.domain.clone();
             out.extend(self.take_segment());
             self.current = Some(Segment {
                 app,
+                domain,
                 started_at: next_start,
                 seconds: 0,
             });
@@ -119,7 +139,7 @@ impl AppTracker {
         Some(AppUsage {
             app_identifier: seg.app.app_identifier,
             app_name: seg.app.app_name,
-            domain: None,
+            domain: seg.domain,
             started_at: seg.started_at,
             duration_seconds: seg.seconds.min(3600),
         })
@@ -197,6 +217,29 @@ mod tests {
         // Sub-second tick only: no segment of zero length is ever emitted.
         tr.record(t0(), Duration::from_millis(400), app("x"));
         assert!(tr.flush().is_empty());
+    }
+
+    #[test]
+    fn a_new_domain_starts_a_new_segment() {
+        let mut tr = AppTracker::new();
+        let at = |s: i64| t0() + TimeDelta::seconds(s);
+        let sec = Duration::from_secs(1);
+        let d = |s: &str| Some(s.to_owned());
+        assert!(tr
+            .record_with_domain(at(1), sec * 20, app("chrome"), d("github.com"))
+            .is_empty());
+        let out = tr.record_with_domain(at(31), sec * 10, app("chrome"), d("docs.rs"));
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            (out[0].domain.as_deref(), out[0].duration_seconds),
+            (Some("github.com"), 20)
+        );
+        let out = tr.record_with_domain(at(36), sec * 5, app("chrome"), None);
+        assert_eq!(
+            (out[0].domain.as_deref(), out[0].duration_seconds),
+            (Some("docs.rs"), 10)
+        );
+        assert_eq!(tr.flush()[0].domain, None);
     }
 
     #[test]

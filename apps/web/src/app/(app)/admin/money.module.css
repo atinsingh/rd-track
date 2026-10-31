@@ -28,7 +28,7 @@
   min-height: var(--target-sm);
   padding: 4px 8px;
   border: 1px solid var(--control-border);
-  border-radius: 0;
+  border-radius: var(--radius-control);
   background: var(--surface);
   font: inherit;
   color: var(--text);

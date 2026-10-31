@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { uuid } from './events';
+import type { AppLocale } from './locale';
 
 /**
  * Stage 3 "Money": clients, pay and bill rates, project budgets, invoices and payroll
@@ -73,6 +74,8 @@ export interface ClientDTO {
   archived: boolean;
   created_at: string;
   projects: { id: string; name: string }[];
+  /** Client portal (F9): contacts see who worked on their projects, not just totals. */
+  portal_show_people: boolean;
 }
 /** `PUT /v1/admin/projects/{id}/client` */
 export const projectClientRequest = z.strictObject({ client_id: uuid.nullable() });
@@ -207,6 +210,8 @@ export const invoiceLineInput = z.strictObject({
   description: z.string().trim().min(1).max(500),
   hours: z.number().min(0).max(100_000).multipleOf(0.01),
   rate_cents: hourlyCents,
+  /** Kept when editing a line that came from an expense, so the expense stays billed. */
+  expense_id: uuid.nullable().optional(),
 });
 export type InvoiceLineInput = z.infer<typeof invoiceLineInput>;
 export const invoiceLinesRequest = z.strictObject({ lines: z.array(invoiceLineInput).max(500) });
@@ -224,6 +229,8 @@ export interface InvoiceLineDTO {
   hours: number;
   rate_cents: number;
   amount_cents: number;
+  /** The expense this line bills (F7), if any. */
+  expense_id: string | null;
 }
 export interface InvoiceSummaryDTO {
   id: string;
@@ -237,6 +244,10 @@ export interface InvoiceSummaryDTO {
   total_cents: number;
   issued_at: string | null;
   due_date: string | null;
+  /** Issued invoices: the day payment arrived (slice 4, G23). */
+  paid_on: string | null;
+  /** When it was last emailed to the client. */
+  sent_at: string | null;
   created_at: string;
 }
 export interface InvoiceDTO extends InvoiceSummaryDTO {
@@ -250,10 +261,27 @@ export interface InvoiceDTO extends InvoiceSummaryDTO {
   notes: string | null;
   voided_at: string | null;
   void_reason: string | null;
+  payment_note: string | null;
+  sent_to: string | null;
   lines: InvoiceLineDTO[];
+  /** The organization's logo for the printed invoice (G26), a short-lived link. */
+  organization_logo_url?: string | null;
+  /** The agency's language and formats, which its invoices are written in (G27). */
+  organization_locale?: AppLocale | null;
   /** Draft only: time in the period that had no bill rate in the invoice currency. */
   unrated_seconds: number;
 }
+
+/** `POST /v1/admin/invoices/{id}/paid` */
+export const invoicePaidRequest = z.strictObject({
+  paid_on: isoDate,
+  note: z.string().max(500).optional(),
+});
+/** `POST /v1/admin/invoices/{id}/send`: emails the invoice to the client's contact, or to `to`. */
+export const invoiceSendRequest = z.strictObject({
+  to: z.email().max(320).optional(),
+  message: z.string().max(2000).optional(),
+});
 
 // ───────────────────────── payroll ─────────────────────────
 
@@ -274,4 +302,42 @@ export interface PayrollExportDTO {
   created_at: string;
   expires_at: string | null;
   download_url: string | null;
+}
+
+// ───────────────────────── payroll adjustments (Stage 4 F8) ─────────────────────────
+
+export const PAYROLL_ADJUSTMENT_KINDS = ['bonus', 'deduction', 'reimbursement'] as const;
+export type PayrollAdjustmentKind = (typeof PAYROLL_ADJUSTMENT_KINDS)[number];
+export const PAYROLL_ADJUSTMENT_LABELS: Record<PayrollAdjustmentKind, string> = { bonus: 'Bonus', deduction: 'Deduction', reimbursement: 'Reimbursement' };
+
+/** Once: in the pay period containing `effective_from`. Every period: from then on, until `effective_to`. */
+export const payrollAdjustmentRequest = z
+  .strictObject({
+    user_id: uuid,
+    kind: z.enum(PAYROLL_ADJUSTMENT_KINDS),
+    amount_cents: z.number().int().min(1).max(10_000_000),
+    currency: currencyCode,
+    note: z.string().trim().min(1).max(300),
+    recurrence: z.enum(['once', 'every_period']),
+    effective_from: isoDate,
+    effective_to: isoDate.nullable().optional(),
+  })
+  .refine((a) => a.recurrence === 'every_period' || !a.effective_to, { message: 'Only a recurring adjustment has an end date', path: ['effective_to'] })
+  .refine((a) => !a.effective_to || a.effective_to >= a.effective_from, { message: 'The end date is before the start', path: ['effective_to'] });
+
+export const payrollAdjustmentEndRequest = z.strictObject({ effective_to: isoDate });
+
+export interface PayrollAdjustmentDTO {
+  id: string;
+  user_id: string;
+  user_name: string;
+  kind: PayrollAdjustmentKind;
+  amount_cents: number;
+  currency: string;
+  note: string;
+  recurrence: 'once' | 'every_period';
+  effective_from: string;
+  effective_to: string | null;
+  created_by_name: string | null;
+  created_at: string;
 }

@@ -8,6 +8,7 @@ import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { InlineSelect, SelectField, TextField } from '@/components/ui/Field';
 import { Card, PageHeader, TableBox, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { sched } from '@/lib/scheduling';
 import { formatDayLabel, todayInTz } from '@/lib/time';
@@ -29,18 +30,18 @@ function HolidayForm({ year, teams, onCreated }: { year: string; teams: TeamSumm
   };
   return (
     <form onSubmit={submit} className={s.inlineForm}>
-      <TextField label="Date" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-      <TextField label="Name" value={name} maxLength={200} onChange={(e) => setName(e.target.value)} required />
-      <SelectField label="Applies to" value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-        <option value="">Everyone</option>
-        {teams.map((t) => (
-          <option key={t.id} value={t.id}>
-            Team {t.name}
+      <TextField label={t('adm.common.date')} type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+      <TextField label={t('adm.common.name')} value={name} maxLength={200} onChange={(e) => setName(e.target.value)} required />
+      <SelectField label={t('adm.hol.appliesTo')} value={teamId} onChange={(e) => setTeamId(e.target.value)}>
+        <option value="">{t('adm.common.everyone')}</option>
+        {teams.map((team) => (
+          <option key={team.id} value={team.id}>
+            {t('adm.common.teamNamed', { name: team.name })}
           </option>
         ))}
       </SelectField>
       <Button type="submit" variant="primary" disabled={!name.trim() || action.busy}>
-        Add holiday
+        {t('adm.hol.add')}
       </Button>
       <ActionError error={action.error} />
     </form>
@@ -56,19 +57,19 @@ export default function HolidaysPage() {
   const teams = useApi(enabled ? 'admin:teams' : null, (signal) => rd.admin.teams(signal));
   const remove = useAction();
 
-  if (!access.isAdmin) return <NoAccess what="Holidays are managed by org admins." />;
-  if (!enabled) return <NoAccess what="Holidays come with schedules (Pro) or time off (Standard and Pro)." />;
+  if (!access.isAdmin) return <NoAccess what={t('adm.hol.noAccessAdmin')} />;
+  if (!enabled) return <NoAccess what={t('adm.hol.noAccessPlan')} />;
   const years = [Number(thisYear) - 1, Number(thisYear), Number(thisYear) + 1].map(String);
   const sortedTeams = [...(teams.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Holidays"
-        title="Holidays"
-        description="Days off for everyone or for one team. Nobody is expected on a holiday, and full-day time off doesn't use any balance on it."
+        eyebrow={t('adm.hol.eyebrow')}
+        title={t('adm.hol.title')}
+        description={t('adm.hol.description')}
         actions={
-          <InlineSelect label="Year" value={year} onChange={(e) => setYear(e.target.value)}>
+          <InlineSelect label={t('adm.common.year')} value={year} onChange={(e) => setYear(e.target.value)}>
             {years.map((y) => (
               <option key={y} value={y}>
                 {y}
@@ -77,25 +78,25 @@ export default function HolidaysPage() {
           </InlineSelect>
         }
       />
-      <Card title="Add a holiday">
+      <Card title={t('adm.hol.addTitle')}>
         <HolidayForm key={year} year={year} teams={sortedTeams} onCreated={(h) => (h.date.startsWith(year) ? holidays.reload() : setYear(h.date.slice(0, 4)))} />
       </Card>
-      <Card title={`Holidays in ${year}`}>
+      <Card title={t('adm.hol.inYear', { year })}>
         <ActionError error={remove.error} />
-        <Resource {...holidays} label="Loading holidays">
+        <Resource {...holidays} label={t('adm.hol.loading')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title={`No holidays in ${year} yet`} />
+              <Empty title={t('adm.hol.noneInYear', { year })} />
             ) : (
-              <TableBox label={`Holidays in ${year}`}>
+              <TableBox label={t('adm.hol.inYear', { year })}>
                 <table className={tableClass}>
                   <thead>
                     <tr>
-                      <th scope="col">Date</th>
-                      <th scope="col">Name</th>
-                      <th scope="col">Applies to</th>
+                      <th scope="col">{t('adm.common.date')}</th>
+                      <th scope="col">{t('adm.common.name')}</th>
+                      <th scope="col">{t('adm.hol.appliesTo')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -104,18 +105,18 @@ export default function HolidaysPage() {
                       <tr key={h.id}>
                         <td>{formatDayLabel(h.date)}</td>
                         <td>{h.name}</td>
-                        <td>{h.team_name ? `Team ${h.team_name}` : 'Everyone'}</td>
+                        <td>{h.team_name ? t('adm.common.teamNamed', { name: h.team_name }) : t('adm.common.everyone')}</td>
                         <td>
                           <Button
                             size="sm"
                             variant="danger"
                             disabled={remove.busy}
-                            aria-label={`Remove ${h.name}`}
+                            aria-label={t('adm.common.removeNamed', { name: h.name })}
                             onClick={async () => {
                               if (await remove.run(() => sched.admin.removeHoliday(h.id))) holidays.mutate((prev) => prev?.filter((x) => x.id !== h.id));
                             }}
                           >
-                            Remove
+                            {t('adm.common.remove')}
                           </Button>
                         </td>
                       </tr>

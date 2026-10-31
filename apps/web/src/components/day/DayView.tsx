@@ -7,6 +7,7 @@ import { ErrorState, Loading } from '@/components/ui/DataState';
 import { personBase, rd, type ApiError } from '@/lib/api';
 import { dayRange, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { AppBars } from './AppBars';
 import { CurrentSession } from './CurrentSession';
 import { ScreenshotStrip } from './ScreenshotStrip';
@@ -25,18 +26,14 @@ const notShared = (e: ApiError | undefined) => e?.code === 'forbidden';
 function NotShared({ title, what, name }: { title: string; what: string; name?: string }) {
   return (
     <Card title={title} className="grow">
-      <p className="secondary">
-        {what} {name ? `for ${name} ` : ''}isn&apos;t shared with you under the collection policy.
-      </p>
+      <p className="secondary">{name ? t('day.notSharedFor', { what, name }) : t('day.notShared', { what })}</p>
     </Card>
   );
 }
 
 function shotPolicy(settings: PolicySettings, scopeName: string, managerVisible: boolean): string {
   const sh = settings.screenshots;
-  return `${scopeName} · about one every ${sh.interval_minutes} min · kept ${settings.retention.screenshot_days} days · visible to you${
-    managerVisible ? ' and your team manager' : ' only'
-  }`;
+  return t(managerVisible ? 'day.shotPolicy' : 'day.shotPolicyOnlyYou', { scope: scopeName, minutes: sh.interval_minutes, days: settings.retention.screenshot_days });
 }
 
 /** Plain-language screenshot policy line and whether any policy turns screenshots on. */
@@ -44,10 +41,10 @@ export function screenshotPolicySummary(policy: MyPolicyResponse | undefined): {
   if (!policy) return { enabled: false };
   const lines: string[] = [];
   if (policy.base.settings.screenshots.enabled)
-    lines.push(shotPolicy(policy.base.settings, 'Your policy', policy.base.settings.viewers.manager_can_view_screenshots));
+    lines.push(shotPolicy(policy.base.settings, t('day.yourPolicy'), policy.base.settings.viewers.manager_can_view_screenshots));
   for (const p of policy.projects)
     if (p.settings.screenshots.enabled)
-      lines.push(shotPolicy(p.settings, `Project ${p.project_name} policy`, p.settings.viewers.manager_can_view_screenshots));
+      lines.push(shotPolicy(p.settings, t('day.projectPolicy', { name: p.project_name }), p.settings.viewers.manager_can_view_screenshots));
   return { enabled: lines.length > 0, text: lines.join(' — ') || undefined };
 }
 
@@ -97,7 +94,7 @@ export function DayView({
   const showShots = isSelf ? shotList.length > 0 || shotPolicyInfo.enabled : !!visibility?.screenshots && !notShared(shots.error);
 
   if (sessions.error && !sessions.data) return <ErrorState error={sessions.error} onRetry={sessions.reload} />;
-  if (!sessions.data || (activityVisible && !activity.data && !activity.error)) return <Loading label="Loading the day" />;
+  if (!sessions.data || (activityVisible && !activity.data && !activity.error)) return <Loading label={t('day.loading')} />;
 
   const live =
     date === todayInTz(tz) ? sessions.data.find((x) => x.state !== 'stopped' && x.ended_at === null) : undefined;
@@ -113,9 +110,9 @@ export function DayView({
       <SummaryTiles totals={activity.data?.totals ?? null} sessions={sessions.data} activityVisible={activityVisible} />
 
       {!activityVisible ? (
-        <NotShared title="Computer activity through the day" what="Computer activity" name={personName} />
+        <NotShared title={t('day.activityTitle')} what={t('day.activityWhat')} name={personName} />
       ) : activity.error ? (
-        <Card title="Computer activity through the day">
+        <Card title={t('day.activityTitle')}>
           <ErrorState error={activity.error} onRetry={activity.reload} />
         </Card>
       ) : activity.data ? (
@@ -132,15 +129,15 @@ export function DayView({
       <div className="row">
         <SessionsList sessions={sessions.data} tz={tz} action={sessionAction} />
         {(visibility && !visibility.apps) || notShared(apps.error) ? (
-          <NotShared title="Applications in front" what="App usage" name={personName} />
+          <NotShared title={t('day.appsTitle')} what={t('day.appsWhat')} name={personName} />
         ) : apps.error ? (
-          <Card title="Applications in front" className="grow">
+          <Card title={t('day.appsTitle')} className="grow">
             <ErrorState error={apps.error} onRetry={apps.reload} />
           </Card>
         ) : apps.data ? (
           <AppBars apps={apps.data.apps} />
         ) : (
-          <Card title="Applications in front" className="grow">
+          <Card title={t('day.appsTitle')} className="grow">
             <Loading />
           </Card>
         )}
@@ -148,7 +145,7 @@ export function DayView({
 
       {showShots ? (
         shots.error ? (
-          <Card title="Screenshots">
+          <Card title={t('day.screenshots')}>
             <ErrorState error={shots.error} onRetry={shots.reload} />
           </Card>
         ) : shots.data ? (
@@ -165,7 +162,7 @@ export function DayView({
             }
           />
         ) : (
-          <Card title="Screenshots">
+          <Card title={t('day.screenshots')}>
             <Loading />
           </Card>
         )

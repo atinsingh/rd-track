@@ -20,7 +20,7 @@ people more closely. Declined items are listed so sales can explain the choice.
 | Time tracking (desktop, offline, idle) | ✓ | ✓ (agent, offline outbox, idle) | — |
 | Activity levels, app usage | ✓ | ✓ (minute aggregates, app names) | — |
 | URLs | Full URLs | Domains only, opt-in | Keep stricter |
-| Screenshots | ✓ (incl. blur) | ✓ policy-governed, off by default | Blur/redaction later (SCR-12) |
+| Screenshots | ✓ (incl. blur) | ✓ policy-governed, off by default; blur on the computer before upload (SCR-12, done) | Redaction of chosen areas later |
 | Manual time with reason | ✓ | ✓ with approval | — |
 | **Timesheets & approvals** (weekly submit → approve, locked for payroll) | Grow+ | ✗ | **Adopt — Stage 3** |
 | **Daily/weekly limits, overtime** | ✓ | ✗ | **Adopt — Stage 3** (limits warn and stop tracking with notice) |
@@ -41,7 +41,7 @@ people more closely. Declined items are listed so sales can explain the choice.
 | Outbound webhooks / API | ✓ | REST API (Pro) | **Adopt — Stage 3** webhooks (INT-03) |
 | Mobile apps, GPS, geofencing | ✓ | ✗ | Out of scope (requirements non-goal); revisit for field teams |
 | Kanban task tool (Hubstaff Tasks) | Add-on | ✗ | Decline — integrate with existing tools instead |
-| SSO / SCIM | Enterprise | Planned | Stage 4 (IAM-06) |
+| SSO / SCIM | Enterprise | OIDC SSO + SCIM 2.0 (Pro) | **Done** — slice 6 (IAM-06, G26) |
 
 ## Stage 3 scope ("Workforce operations")
 
@@ -68,3 +68,20 @@ personal insights are on every plan (privacy and wellbeing are never an upsell).
 Implementation streams use separate migrations to avoid collisions: 004 timesheets & limits,
 005 rates/budgets/clients/invoices, 006 schedules/attendance/time off, 007 insights,
 app categories and webhooks.
+
+## Recon update (2026-10-28)
+
+A `/replica-recon` pass over Hubstaff's 2025–2026 changelog, help center and API docs is in
+[`replica/recon.md`](../../replica/recon.md), with the scored matrix in
+[`replica/features.csv`](../../replica/features.csv). Track's parity is 62.6/100, with 18 of 19
+must-haves done. New since this analysis:
+
+- **Batch approvals** for timesheets, manual time and corrections (Hubstaff 2025 and Q1 2026). Adopt.
+- **Utilization targets**: expected hours per person, under- and over-worked. Adapt: show it to the person first, with team views aggregate-only.
+- **Average start/stop time and average idle** widgets. Adapt: personal view.
+- **Expenses** per project, feeding invoices, and **payroll adjustments** (bonuses, deductions, reimbursements). Adopt.
+- **Public API tokens** (personal and organization). Adopt: the Pro plan already lists a REST API.
+- **PTO accrual timing** (1st of the month, anniversary, or last day of the month). Could.
+- **CLI or MCP server for AI agents** (Hubstaff Sept 2026). Could.
+- **AI unusual activity detection**. Decline, as for unusual activity.
+- **Remote-vs-office analytics**. Decline: it needs location tracking.

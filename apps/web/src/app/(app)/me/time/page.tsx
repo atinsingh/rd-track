@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import type { CorrectionDTO, CorrectionValues, SessionDTO } from '@rd/contracts';
 import { CorrectionSheet } from '@/components/CorrectionSheet';
@@ -25,10 +26,11 @@ import {
   todayInTz,
 } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 function sourceLabel(x: SessionDTO): string {
-  if (x.source === 'manual') return 'Manual';
-  return x.corrected ? 'Corrected' : 'Agent';
+  if (x.source === 'manual') return t('time.source.manual');
+  return x.corrected ? t('time.source.corrected') : t('time.source.agent');
 }
 
 function valuesText(v: CorrectionValues | null, tz: string): string {
@@ -43,7 +45,13 @@ const STATUS_TONE = { pending: 'outline', approved: 'solid', rejected: 'outline'
 export default function MyTimePage() {
   const { timezone } = useMe();
   const [tz, setTz] = useState(timezone);
-  const [day, setDay] = useState(() => todayInTz(timezone));
+  const params = useSearchParams();
+  // ?week=YYYY-MM-DD opens that week (links from to-dos and reminders).
+  const [day, setDay] = useState(() => {
+    const today = todayInTz(timezone);
+    const q = params.get('week');
+    return q && /^\d{4}-\d{2}-\d{2}$/.test(q) && q <= today ? q : today;
+  });
   const [sheet, setSheet] = useState<{ session: SessionDTO | null } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const week = startOfWeek(day);
@@ -56,16 +64,16 @@ export default function MyTimePage() {
 
   const submitted = (c: CorrectionDTO) => {
     setSheet(null);
-    setNotice(c.kind === 'manual_add' ? 'Manual time submitted for approval' : 'Correction submitted for approval');
+    setNotice(c.kind === 'manual_add' ? t('day.manualSubmitted') : t('time.correctionSubmitted'));
     corrections.mutate((prev) => [c, ...(prev ?? [])]);
   };
 
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Time records"
-        title="My time"
-        description="Your sessions for the week. If something is wrong, propose a correction — the original stays on record."
+        eyebrow={t('time.eyebrow')}
+        title={t('time.title')}
+        description={t('time.description')}
         actions={
           <>
             <DateSwitcher
@@ -78,38 +86,38 @@ export default function MyTimePage() {
               label={`${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
             />
             <Button variant="primary" onClick={() => setSheet({ session: null })}>
-              + Add manual time
+              {t('time.addManual')}
             </Button>
           </>
         }
       />
       <TimeTabs current="sessions" />
       {notice ? (
-        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>Dismiss</Button>}>
-          Your manager reviews it. You&apos;ll see the decision below.
+        <Banner role="status" title={notice} actions={<Button size="sm" variant="quiet" onClick={() => setNotice(null)}>{t('common.dismiss')}</Button>}>
+          {t('time.reviewNote')}
         </Banner>
       ) : null}
 
-      <Card title="Sessions this week">
-        <Resource {...sessions} label="Loading sessions">
+      <Card title={t('time.sessionsWeek')}>
+        <Resource {...sessions} label={t('time.loadingSessions')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No sessions this week">Add manual time for work you did away from the computer.</Empty>
+              <Empty title={t('time.noSessions')}>{t('time.noSessionsBody')}</Empty>
             ) : (
-              <TableBox label="Sessions this week">
+              <TableBox label={t('time.sessionsWeek')}>
                 <table className={tableClass} style={{ minWidth: 720 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Day</th>
-                      <th scope="col">Project</th>
-                      <th scope="col">Start</th>
-                      <th scope="col">End</th>
+                      <th scope="col">{t('time.col.day')}</th>
+                      <th scope="col">{t('time.col.project')}</th>
+                      <th scope="col">{t('time.col.start')}</th>
+                      <th scope="col">{t('time.col.end')}</th>
                       <th scope="col" className={numClass}>
-                        Tracked
+                        {t('time.col.tracked')}
                       </th>
-                      <th scope="col">Source</th>
+                      <th scope="col">{t('time.col.source')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('time.col.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -121,23 +129,23 @@ export default function MyTimePage() {
                           <td>{formatShortDay(dateInTz(Date.parse(x.started_at), tz))}</td>
                           <td style={{ fontWeight: 600 }}>{sessionTitle(x)}</td>
                           <td className="mono">{formatTime(x.started_at, tz)}</td>
-                          <td className="mono">{x.ended_at ? formatTime(x.ended_at, tz) : 'now'}</td>
+                          <td className="mono">{x.ended_at ? formatTime(x.ended_at, tz) : t('session.now')}</td>
                           <td className={numClass}>{formatDuration(x.tracked_seconds)}</td>
                           <td>
                             <Badge>{sourceLabel(x)}</Badge>
                           </td>
                           <td style={{ textAlign: 'right' }}>
                             {pendingFor.has(x.id) ? (
-                              <span className="small muted">Correction pending</span>
+                              <span className="small muted">{t('time.correctionPending')}</span>
                             ) : (
                               <Button
                                 size="sm"
                                 variant="quiet"
                                 disabled={x.state !== 'stopped'}
-                                title={x.state !== 'stopped' ? 'Stop the session before correcting it' : undefined}
+                                title={x.state !== 'stopped' ? t('time.stopFirst') : undefined}
                                 onClick={() => setSheet({ session: x })}
                               >
-                                Propose correction
+                                {t('time.propose')}
                               </Button>
                             )}
                           </td>
@@ -151,22 +159,22 @@ export default function MyTimePage() {
         </Resource>
       </Card>
 
-      <Card title="My corrections" subtitle="Pending, approved and rejected, with your manager's note">
-        <Resource {...corrections} label="Loading corrections">
+      <Card title={t('time.myCorrections')} subtitle={t('time.myCorrectionsSub')}>
+        <Resource {...corrections} label={t('time.loadingCorrections')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No corrections yet" />
+              <Empty title={t('time.noCorrections')} />
             ) : (
-              <TableBox label="My corrections">
+              <TableBox label={t('time.myCorrections')}>
                 <table className={tableClass} style={{ minWidth: 760 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Submitted</th>
-                      <th scope="col">Kind</th>
-                      <th scope="col">Original</th>
-                      <th scope="col">Requested</th>
-                      <th scope="col">Reason</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('time.col.submitted')}</th>
+                      <th scope="col">{t('time.col.kind')}</th>
+                      <th scope="col">{t('time.col.original')}</th>
+                      <th scope="col">{t('time.col.requested')}</th>
+                      <th scope="col">{t('time.col.reason')}</th>
+                      <th scope="col">{t('time.col.status')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -175,12 +183,12 @@ export default function MyTimePage() {
                       .map((c) => (
                         <tr key={c.id}>
                           <td className="mono small">{formatDateTime(c.created_at, tz)}</td>
-                          <td>{c.kind === 'manual_add' ? 'Manual time' : 'Edit'}</td>
+                          <td>{c.kind === 'manual_add' ? t('time.kind.manual') : c.kind === 'idle_reassign' ? t('time.kind.idle') : t('time.kind.edit')}</td>
                           <td className="mono small">{valuesText(c.original, tz)}</td>
                           <td className="mono small">{valuesText(c.requested, tz)}</td>
                           <td className="small secondary">{c.reason}</td>
                           <td>
-                            <Badge tone={STATUS_TONE[c.status]}>{c.status}</Badge>
+                            <Badge tone={STATUS_TONE[c.status]}>{t(`time.status.${c.status}`)}</Badge>
                             {c.review_note ? <div className="small secondary">“{c.review_note}”</div> : null}
                           </td>
                         </tr>

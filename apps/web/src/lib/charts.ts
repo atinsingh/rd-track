@@ -1,4 +1,5 @@
 import type { DailyProjectRow } from '@rd/contracts';
+import { t } from './i18n';
 
 /**
  * Stacked daily hours by project. Data colours are three lightness steps
@@ -36,19 +37,19 @@ export function stackDaily(daily: readonly DailyProjectRow[], maxSeries = 3): St
   for (const d of daily)
     for (const p of d.projects) {
       const id = idOf(p);
-      const t = totals.get(id) ?? { name: p.project_name || 'No project', seconds: 0 };
-      t.seconds += p.seconds;
-      totals.set(id, t);
+      const tot = totals.get(id) ?? { name: p.project_name || t('session.noProject'), seconds: 0 };
+      tot.seconds += p.seconds;
+      totals.set(id, tot);
     }
   const ranked = [...totals.entries()].sort((a, b) => b[1].seconds - a[1].seconds || a[1].name.localeCompare(b[1].name));
   const needOther = ranked.length > maxSeries;
   const keep = needOther ? ranked.slice(0, maxSeries - 1) : ranked;
   const kept = new Set(keep.map(([id]) => id));
 
-  const series: Series[] = keep.map(([id, t], i) => ({ id, name: t.name, fill: FILLS[i] ?? 'data-3', seconds: t.seconds }));
+  const series: Series[] = keep.map(([id, tot], i) => ({ id, name: tot.name, fill: FILLS[i] ?? 'data-3', seconds: tot.seconds }));
   if (needOther) {
-    const otherSeconds = ranked.filter(([id]) => !kept.has(id)).reduce((s, [, t]) => s + t.seconds, 0);
-    series.push({ id: OTHER, name: 'Other projects', fill: 'other', seconds: otherSeconds });
+    const otherSeconds = ranked.filter(([id]) => !kept.has(id)).reduce((s, [, tot]) => s + tot.seconds, 0);
+    series.push({ id: OTHER, name: t('mgr.chart.other'), fill: 'other', seconds: otherSeconds });
   }
 
   const days: StackedDay[] = daily.map((d) => {

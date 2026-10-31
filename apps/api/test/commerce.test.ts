@@ -1,12 +1,14 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TERMS_VERSION } from '@rd/contracts';
 import { encodeForm, signStripePayload } from '../src/billing/stripe';
 import { makeOrg, testEnv, type TestEnv } from './helpers';
 
 /** A tiny stand-in for the Stripe REST API that records requests. */
 function fakeStripe() {
   const calls: { method: string; path: string; body: URLSearchParams }[] = [];
+  let customers = 0;
   const server: Server = createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
@@ -18,7 +20,7 @@ function fakeStripe() {
         res.statusCode = 401;
         return res.end(JSON.stringify({ error: { message: 'bad key' } }));
       }
-      if (req.url === '/v1/customers') return res.end(JSON.stringify({ id: 'cus_1' }));
+      if (req.url === '/v1/customers') return res.end(JSON.stringify({ id: `cus_${++customers}` }));
       if (req.url === '/v1/checkout/sessions') return res.end(JSON.stringify({ id: 'cs_1', url: 'https://checkout.stripe.test/cs_1' }));
       if (req.url === '/v1/billing_portal/sessions') return res.end(JSON.stringify({ url: 'https://billing.stripe.test/p_1' }));
       if (req.url?.startsWith('/v1/subscriptions/')) return res.end(JSON.stringify({ id: 'sub_1' }));
@@ -45,7 +47,7 @@ beforeAll(async () => {
         secretKey: 'sk_test_123',
         webhookSecret: WEBHOOK_SECRET,
         apiBase: `http://127.0.0.1:${port}`,
-        prices: { standard: 'price_std', pro: 'price_pro' },
+        prices: { standard: { month: 'price_std', year: 'price_std_y' }, pro: { month: 'price_pro', year: 'price_pro_y' } },
       },
     },
   });
@@ -71,7 +73,7 @@ describe('self-serve signup', () => {
     const res = await env.app.inject({
       method: 'POST',
       url: '/v1/signup',
-      payload: { org_name: 'Acme Studio', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password' },
+      payload: { org_name: 'Acme Studio', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password', accept_terms: true },
     });
     expect(res.statusCode).toBe(202);
     expect(await env.deps.pool.query(`SELECT 1 FROM users WHERE email = 'ada@acme.test'`).then((r) => r.rowCount)).toBe(0);
@@ -94,11 +96,23 @@ describe('self-serve signup', () => {
     expect(JSON.parse(again.body).error.code).toBe('signup_link_invalid');
   });
 
+  it('needs the terms accepted, and records which version against the organization', async () => {
+    const without = await env.app.inject({
+      method: 'POST',
+      url: '/v1/signup',
+      payload: { org_name: 'No Terms', display_name: 'Bo', email: 'bo@noterms.test', password: 'a-long-enough-password' },
+    });
+    expect(without.statusCode).toBe(400);
+    const org = await env.deps.pool.query(`SELECT o.terms_version, o.terms_accepted_at IS NOT NULL AS accepted, u.email = 'ada@acme.test' AS by_signer
+      FROM organizations o JOIN users u ON u.id = o.terms_accepted_by WHERE o.name = 'Acme Studio'`);
+    expect(org.rows[0]).toEqual({ terms_version: TERMS_VERSION, accepted: true, by_signer: true });
+  });
+
   it("doesn't reveal whether an email already has an account", async () => {
     const res = await env.app.inject({
       method: 'POST',
       url: '/v1/signup',
-      payload: { org_name: 'Again', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password' },
+      payload: { org_name: 'Again', display_name: 'Ada', email: 'ada@acme.test', password: 'a-long-enough-password', accept_terms: true },
     });
     expect(res.statusCode).toBe(202);
     expect(env.email.sent.at(-1)!.subject).toMatch(/already have/);
@@ -137,7 +151,7 @@ describe('Stripe billing', () => {
     };
     expect((await webhook(sub)).statusCode).toBe(200);
     const after = await org.admin.get('/v1/billing/subscription');
-    expect(after.body).toMatchObject({ plan: 'pro', seats: 4, status: 'active', billing_provider: 'stripe', estimated_monthly_cents: 2000 });
+    expect(after.body).toMatchObject({ plan: 'pro', seats: 4, status: 'active', billing_provider: 'stripe', billing_interval: 'month', estimated_monthly_cents: 4000 });
 
     // Replays are ignored.
     expect((await webhook(sub)).statusCode).toBe(200);
@@ -154,6 +168,32 @@ describe('Stripe billing', () => {
 
     const portal = await org.admin.post('/v1/billing/portal');
     expect(portal.body.url).toBe('https://billing.stripe.test/p_1');
+  });
+
+  it('uses the annual price for an annual term and reads the term back from Stripe', async () => {
+    const org = await makeOrg(env, 'stripe3', 'free');
+    const res = await org.admin.post('/v1/billing/plan', { plan: 'standard', seats: 3, interval: 'year' });
+    expect(res.status).toBe(200);
+    const checkout = stripe.calls.filter((c) => c.path === '/v1/checkout/sessions').at(-1)!;
+    expect(checkout.body.get('line_items[0][price]')).toBe('price_std_y');
+    const created = {
+      id: 'evt_sub_annual',
+      type: 'customer.subscription.created',
+      created: 0,
+      data: {
+        object: {
+          id: 'sub_3',
+          customer: 'cus_3',
+          status: 'active',
+          cancel_at_period_end: false,
+          metadata: { organization_id: org.id },
+          items: { data: [{ id: 'si_3', quantity: 3, price: { id: 'price_std_y' }, current_period_end: 1820000000 }] },
+        },
+      },
+    };
+    expect((await webhook(created)).statusCode).toBe(200);
+    const after = await org.admin.get('/v1/billing/subscription');
+    expect(after.body).toMatchObject({ plan: 'standard', billing_interval: 'year', price_per_seat_cents: 250, estimated_invoice_cents: 9000 });
   });
 
   it('moves to grace on payment failure and back on payment', async () => {

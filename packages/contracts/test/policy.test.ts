@@ -35,6 +35,18 @@ describe('resolvePolicy', () => {
     expect(sources['screenshots.enabled']).toEqual([]);
   });
 
+  it('blurs screenshots when any scope asks, and treats unblurring as collecting more', () => {
+    const on = { screenshots: { enabled: true } };
+    expect(resolvePolicy([org(on)]).settings.screenshots.blur).toBe(false);
+    const { settings, sources } = resolvePolicy([org({ screenshots: { enabled: true, blur: false } }), team('t1', { screenshots: { blur: true } })]);
+    expect(settings.screenshots.blur).toBe(true);
+    expect(sources['screenshots.blur']?.map((s) => s.scope_type)).toEqual(['team']);
+    const blurred = resolvePolicy([org({ screenshots: { enabled: true, blur: true } })]).settings;
+    const sharp = resolvePolicy([org(on)]).settings;
+    expect(collectionExpansions(blurred, sharp)).toEqual([{ field: 'screenshots.blur', from: true, to: false }]);
+    expect(collectionExpansions(sharp, blurred)).toEqual([]);
+  });
+
   it('lets one project turn screenshots on without enabling them org-wide', () => {
     const { settings, sources } = resolvePolicy([org({}), project({ screenshots: { enabled: true } })]);
     expect(settings.screenshots.enabled).toBe(true);

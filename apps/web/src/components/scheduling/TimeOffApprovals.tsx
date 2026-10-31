@@ -3,16 +3,16 @@
 import { useState } from 'react';
 import type { TimeOffRequestDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
-import { ActionError, Empty, Resource } from '@/components/ui/DataState';
+import { ActionError } from '@/components/ui/DataState';
 import { TextArea } from '@/components/ui/Field';
 import { Card, dlClass, formActionsClass } from '@/components/ui/Layout';
-import { plural } from '@/lib/format';
 import { dateSpanLabel, formatHours, sched } from '@/lib/scheduling';
 import { formatDateTime } from '@/lib/time';
-import { useAction, useApi } from '@/lib/useApi';
+import { useAction } from '@/lib/useApi';
 import s from './scheduling.module.css';
 
-function Review({ r, tz, onDone }: { r: TimeOffRequestDTO; tz: string; onDone: (id: string) => void }) {
+/** One time-off request, reviewed on its own (detail panel of the approvals inbox). */
+export function TimeOffReviewCard({ r, tz, onDone }: { r: TimeOffRequestDTO; tz: string; onDone: (id: string) => void }) {
   const [note, setNote] = useState('');
   const action = useAction();
   const decide = async (approve: boolean) => {
@@ -55,31 +55,5 @@ function Review({ r, tz, onDone }: { r: TimeOffRequestDTO; tz: string; onDone: (
         </Button>
       </div>
     </Card>
-  );
-}
-
-/** Pending time-off requests the signed-in manager or org admin may review (never their own). */
-export function TimeOffApprovals({ tz }: { tz: string }) {
-  const pending = useApi('timeoff:pending', (signal) => sched.review.pending(signal));
-  return (
-    <section className="stack" aria-labelledby="time-off-approvals">
-      <h2 id="time-off-approvals">Time off</h2>
-      <Resource {...pending} label="Loading time-off requests">
-        {(list) =>
-          list.length === 0 ? (
-            <Card>
-              <Empty title="No time off to review">Requests from people in your teams show up here.</Empty>
-            </Card>
-          ) : (
-            <>
-              <p className="secondary">{plural(list.length, 'request')} waiting, oldest first. Approving deducts the hours from the person&apos;s balance.</p>
-              {list.map((r) => (
-                <Review key={r.id} r={r} tz={tz} onDone={(id) => pending.mutate((prev) => prev?.filter((x) => x.id !== id))} />
-              ))}
-            </>
-          )
-        }
-      </Resource>
-    </section>
   );
 }

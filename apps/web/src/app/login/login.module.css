@@ -2,7 +2,7 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  background: var(--canvas);
+  background: var(--backdrop);
 }
 .aside {
   background: var(--ink);
@@ -52,8 +52,12 @@
 }
 .card {
   width: min(420px, 100%);
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   padding: 32px;
   display: flex;
   flex-direction: column;
@@ -115,4 +119,37 @@
   .card {
     padding: 24px 20px;
   }
+}
+
+/* An inline text button that reads like a link. */
+.linkButton {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--link);
+  text-decoration: underline;
+  font: inherit;
+  cursor: pointer;
+}
+.linkButton:hover {
+  color: var(--link-hover);
+}
+
+/* A primary-looking link (e.g. "Sign in" after a finished flow). */
+.primaryLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--target);
+  padding: 0 18px;
+  border-radius: var(--radius-control);
+  background: var(--action-red);
+  color: #fff;
+  font-weight: 600;
+  text-decoration: none;
+  align-self: flex-start;
+}
+.primaryLink:hover {
+  background: var(--action-red-hover);
+  color: #fff;
 }

@@ -1,6 +1,8 @@
 import type { EventEnvelope } from '@rd/contracts';
 import type { Deps } from '../../context';
 import { many, one, withTx } from '../../db/pool';
+import { zeroRemovedIdle } from '../idle/apply';
+import { recordIdleDecision } from '../idle/service';
 import { resolveFor } from '../policy/service';
 
 interface PendingRow {
@@ -53,7 +55,7 @@ export async function processIngestJob(
              ON CONFLICT (session_id, bucket_start) DO UPDATE SET
                active_seconds = EXCLUDED.active_seconds, idle_seconds = EXCLUDED.idle_seconds,
                keyboard_count = EXCLUDED.keyboard_count, mouse_count = EXCLUDED.mouse_count,
-               data_quality = EXCLUDED.data_quality`,
+               data_quality = EXCLUDED.data_quality, idle_seconds_raw = NULL`,
             [
               r.session_id,
               s.organization_id,
@@ -66,6 +68,8 @@ export async function processIngestJob(
               p.data_quality,
             ],
           );
+          // A late bucket inside a span the person already removed stays removed.
+          await zeroRemovedIdle(tx, r.session_id, shifted(p.bucket_start, minuteShift));
           break;
         case 'app_usage.v1': {
           // Defence in depth: keep a domain only if the employee's policy allows domains.
@@ -99,6 +103,17 @@ export async function processIngestJob(
              VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (event_id) DO NOTHING`,
             [s.organization_id, r.session_id, s.user_id, r.event_id, shifted(p.gap_start), shifted(p.gap_end), p.reason],
           );
+          break;
+        case 'idle.decision.v1':
+          await recordIdleDecision(deps, tx, payload.device_id, {
+            eventId: r.event_id,
+            sessionId: r.session_id,
+            startedAt: shifted(p.idle_started_at),
+            endedAt: shifted(p.idle_ended_at),
+            decision: p.decision as 'keep' | 'discard' | 'reassign',
+            projectId: (p.project_id as string | undefined) ?? null,
+            taskId: (p.task_id as string | undefined) ?? null,
+          });
           break;
         default:
           break;
