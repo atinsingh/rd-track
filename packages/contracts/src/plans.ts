@@ -6,7 +6,8 @@ import type { PartialPolicySettings } from './policy';
  * so that plan limits flow through the same resolver as every other policy.
  */
 
-export const PLAN_IDS = ['free', 'standard', 'pro'] as const;
+/** `family` is the family product's plan (doc 08): not sold to businesses, never a trial target. */
+export const PLAN_IDS = ['free', 'standard', 'pro', 'family'] as const;
 export type PlanId = (typeof PLAN_IDS)[number];
 
 export const ENTITLEMENTS = [
@@ -87,6 +88,21 @@ export const PLANS: Record<PlanId, Plan> = {
     entitlements: [...ENTITLEMENTS],
     // Window titles stay off on every plan: the agent does not implement them.
     policyScope: { apps: { capture_window_titles: false } },
+  },
+  family: {
+    id: 'family',
+    name: 'Family',
+    // Families are billed per family, not per seat: Stripe prices for it are a later slice.
+    prices: { month: 0, year: 0 },
+    // Billable seats are the children (parents don't track); MAX_CHILDREN in family.ts.
+    max_billable_seats: 5,
+    allows_overage: false,
+    entitlements: [],
+    // Never on a child's device: no screenshots, no website domains, no window titles.
+    policyScope: {
+      screenshots: { enabled: false },
+      apps: { capture_domains: false, capture_window_titles: false },
+    },
   },
 };
 

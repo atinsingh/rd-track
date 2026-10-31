@@ -11,6 +11,21 @@ export interface EmailMessage {
   replyTo?: string;
 }
 
+/**
+ * Children in a family (doc 08) have an address on this reserved domain (RFC 2606): it is
+ * never delivered to, whichever code path asks.
+ */
+export const CHILD_EMAIL_DOMAIN = 'family.invalid';
+
+export function childEmail(userId: string): string {
+  return `child-${userId}@${CHILD_EMAIL_DOMAIN}`;
+}
+
+/** Whether an address may be sent to at all. */
+export function deliverable(to: string): boolean {
+  return !to.trim().toLowerCase().endsWith(`@${CHILD_EMAIL_DOMAIN}`);
+}
+
 /** Transactional email. Messages carry links, never tenant activity data. */
 export interface EmailSender {
   send(m: EmailMessage): Promise<void>;
@@ -19,6 +34,7 @@ export interface EmailSender {
 /** Development: prints the message so links can be followed locally. */
 export class ConsoleEmailSender implements EmailSender {
   async send(m: EmailMessage) {
+    if (!deliverable(m.to)) return;
     console.log(`\n── email to ${m.to}: ${m.subject}\n${m.text}\n──`);
   }
 }
@@ -27,6 +43,7 @@ export class ConsoleEmailSender implements EmailSender {
 export class MemoryEmailSender implements EmailSender {
   readonly sent: EmailMessage[] = [];
   async send(m: EmailMessage) {
+    if (!deliverable(m.to)) return;
     this.sent.push(m);
   }
 }
@@ -40,6 +57,7 @@ export class SesEmailSender implements EmailSender {
     this.client = new SESv2Client({ region });
   }
   async send(m: EmailMessage) {
+    if (!deliverable(m.to)) return;
     await this.client.send(
       new SendEmailCommand({
         FromEmailAddress: this.from,

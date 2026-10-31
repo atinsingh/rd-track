@@ -4,11 +4,13 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import type { LinkRequestView } from '@rd/contracts';
 import { Button, ButtonLink } from '@/components/ui/Button';
+import { ColorDot } from '@/components/family/ChildBits';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { Banner, Card, PageHeader } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
 import { t, type MessageKey } from '@/lib/i18n';
 import { formatCountdown } from '@/lib/time';
+import { useMe } from '@/lib/me';
 import { useAction, useApi } from '@/lib/useApi';
 import s from './connect.module.css';
 
@@ -24,8 +26,15 @@ const UNUSABLE: Record<Exclude<LinkRequestView['status'], 'pending'> | 'unknown'
 };
 
 function Unusable({ why }: { why: keyof typeof UNUSABLE }) {
+  const { me } = useMe();
+  const family = me.organization.kind === 'family';
   return (
-    <Banner tone="warn" title={t('connect.unusable')} role="alert" actions={<ButtonLink href="/me/computers">{t('connect.toComputers')}</ButtonLink>}>
+    <Banner
+      tone="warn"
+      title={t('connect.unusable')}
+      role="alert"
+      actions={<ButtonLink href={family ? '/family/connect' : '/me/computers'}>{family ? t('fam.nav.connect') : t('connect.toComputers')}</ButtonLink>}
+    >
       {t(UNUSABLE[why])}
     </Banner>
   );
@@ -85,9 +94,38 @@ function Device({ req }: { req: LinkRequestView }) {
   );
 }
 
+/** In a family, the parent says whose computer this is (doc 08). */
+function ChildPicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const children = useApi('family:children', (signal) => rd.family.children(signal));
+  if (children.error) return <ActionError error={children.error} />;
+  if (!children.data) return <Loading label={t('fam.today.loadingFamily')} />;
+  if (children.data.length === 0)
+    return (
+      <Banner title={t('fam.pick.none')} actions={<ButtonLink href="/family/children/new">{t('fam.today.addChild')}</ButtonLink>}>
+        {t('fam.pick.noneBody')}
+      </Banner>
+    );
+  return (
+    <fieldset className={s.picker}>
+      <legend className={s.pickerLegend}>{t('fam.pick.legend')}</legend>
+      {children.data.map((c) => (
+        <label key={c.id} className={s.pickOption} data-on={value === c.id || undefined}>
+          <input type="radio" name="child" value={c.id} checked={value === c.id} onChange={() => onChange(c.id)} />
+          <ColorDot color={c.color} size={14} />
+          <span className={s.pickName}>{c.display_name}</span>
+          <span className="small secondary">{t('fam.child.age', { age: String(c.age) })}</span>
+        </label>
+      ))}
+    </fieldset>
+  );
+}
+
 function Confirm({ req }: { req: LinkRequestView }) {
   const action = useAction();
   const [outcome, setOutcome] = useState<'approved' | 'denied' | null>(null);
+  const { me } = useMe();
+  const family = me.organization.kind === 'family';
+  const [childId, setChildId] = useState('');
 
   const act = async (fn: () => Promise<unknown>, done: 'approved' | 'denied') => {
     const r = await action.run(fn);
@@ -103,7 +141,7 @@ function Confirm({ req }: { req: LinkRequestView }) {
             <Check />
           </span>
           <h2 className={s.doneTitle}>{t('connect.doneTitle')}</h2>
-          <p className="secondary">{t('connect.doneBody', { device: req.device_name })}</p>
+          <p className="secondary">{family ? t('fam.pick.done', { device: req.device_name }) : t('connect.doneBody', { device: req.device_name })}</p>
           <p className="small muted">{t('connect.doneClose')}</p>
         </div>
       </Card>
@@ -127,7 +165,7 @@ function Confirm({ req }: { req: LinkRequestView }) {
       <Device req={req} />
       <div className={s.codeBlock}>
         <p className="secondary" style={{ margin: 0 }}>
-          {t('connect.codeCheck')}
+          {family ? t('fam.pick.codeCheck') : t('connect.codeCheck')}
         </p>
         <p className={s.tiles} role="text" aria-label={`${t('connect.codeLabel')}: ${req.user_code.split('').join(' ')}`}>
           {[...a].map((c, i) => (
@@ -143,11 +181,16 @@ function Confirm({ req }: { req: LinkRequestView }) {
           ))}
         </p>
       </div>
+      {family ? <ChildPicker value={childId} onChange={setChildId} /> : null}
       <Banner tone="warn" tag="NOTE">
-        {t('connect.warning')}
+        {family ? t('fam.pick.warning') : t('connect.warning')}
       </Banner>
       <div className={s.actions}>
-        <Button variant="primary" disabled={action.busy} onClick={() => act(() => rd.my.approveLink(req.request_id), 'approved')}>
+        <Button
+          variant="primary"
+          disabled={action.busy || (family && !childId)}
+          onClick={() => act(() => rd.my.approveLink(req.request_id, family ? childId : undefined), 'approved')}
+        >
           {action.busy ? t('connect.connecting') : t('connect.confirm')}
         </Button>
         <Button variant="quiet" disabled={action.busy} onClick={() => act(() => rd.my.denyLink(req.request_id), 'denied')}>
@@ -167,6 +210,7 @@ function Confirm({ req }: { req: LinkRequestView }) {
  * organization signs in) so the person can check the code and confirm the computer is theirs.
  */
 export default function ConnectPage() {
+  const kind = useMe().me.organization.kind;
   const id = useSearchParams().get('request') ?? '';
   const res = useApi(id ? `link:${id}` : null, (signal) => rd.my.linkRequest(id, signal));
 
@@ -179,7 +223,7 @@ export default function ConnectPage() {
 
   return (
     <>
-      <PageHeader eyebrow={t('connect.eyebrow')} title={t('connect.title')} description={t('connect.description')} />
+      <PageHeader eyebrow={kind === 'family' ? t('fam.pick.eyebrow') : t('connect.eyebrow')} title={t('connect.title')} description={t('connect.description')} />
       {body}
     </>
   );

@@ -7,11 +7,11 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { OrgLogo } from '@/components/OrgLogo';
 import { rd } from '@/lib/api';
 import { cx } from '@/lib/cx';
-import { onApprovalsChanged } from '@/lib/events';
+import { onApprovalsChanged, onFamilyChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { useT } from '@/lib/i18n';
-import { HOME_KEY, activeHref, can, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
+import { HOME_KEY, activeHref, can, familyNav, groupOf, homesFor, isFamilyPath, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
 import { useApi } from '@/lib/useApi';
 import { ClosingBanner } from './ClosingBanner';
 import { CommandPalette } from './CommandPalette';
@@ -48,7 +48,16 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const menuOpen = menuFor === pathname;
   const router = useRouter();
-  const groups = navFor(access);
+  const family = access.family;
+  const kids = useApi(family ? 'family:children' : null, (signal) => rd.family.children(signal));
+  const groups = family ? familyNav(kids.data ?? []) : navFor(access);
+  // A family organization only has the family app; workforce pages send it home.
+  const wrongApp = family && !isFamilyPath(pathname) && pathname !== '/';
+  useEffect(() => {
+    if (wrongApp) router.replace('/family');
+  }, [wrongApp, router]);
+  const { reload: reloadChildren } = kids;
+  useEffect(() => onFamilyChanged(reloadChildren), [reloadChildren]);
   const homes = homesFor(access);
   const current = activeHref(groups, pathname);
   const currentGroup = groupOf(groups, current);
@@ -89,7 +98,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   return (
-    <div className={s.app}>
+    <div className={s.app} data-org-kind={family ? 'family' : undefined}>
       <a className={s.skip} href="#main">
         {t('shell.skip')}
       </a>
@@ -98,7 +107,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <Link href="/" className={s.brand} aria-label={t('shell.home')}>
             <Image src="/brand/rd-logo-reversed.png" alt="" width={112} height={24} priority />
             <span className={s.product} aria-hidden="true">
-              TRACK
+              {family ? 'FAMILY' : 'TRACK'}
             </span>
           </Link>
           <div className={s.barActions}>
@@ -251,7 +260,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <main id="main" className={s.main} tabIndex={-1}>
         <LicenceBanner />
         <ClosingBanner />
-        {children}
+        {wrongApp ? null : children}
       </main>
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} groups={groups} />
     </div>

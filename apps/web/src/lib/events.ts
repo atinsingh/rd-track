@@ -24,3 +24,15 @@ export function onNotificationsChanged(fn: () => void): () => void {
   window.addEventListener(NOTIFICATIONS_CHANGED, fn);
   return () => window.removeEventListener(NOTIFICATIONS_CHANGED, fn);
 }
+
+export const FAMILY_CHANGED = 'rd:family-changed';
+
+/** A child was added, renamed or removed: the family navigation refreshes its list. */
+export function announceFamilyChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(FAMILY_CHANGED));
+}
+
+export function onFamilyChanged(fn: () => void): () => void {
+  window.addEventListener(FAMILY_CHANGED, fn);
+  return () => window.removeEventListener(FAMILY_CHANGED, fn);
+}

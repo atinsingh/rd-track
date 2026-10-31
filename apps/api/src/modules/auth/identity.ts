@@ -102,12 +102,14 @@ async function securityNotice(q: Queryable, orgId: string, userId: string, kind:
  * email for the caller to send after commit.
  */
 export async function inviteUser(deps: Deps, q: Queryable, p: { orgId: string; userId: string; invitedBy: UserActor | null; requestId?: string }): Promise<EmailMessage> {
-  const u = await one<{ email: string; display_name: string; password_hash: string | null; status: string }>(
+  const u = await one<{ email: string; display_name: string; password_hash: string | null; status: string; org_role: string }>(
     q,
-    'SELECT email, display_name, password_hash, status FROM users WHERE id = $1 AND organization_id = $2',
+    'SELECT email, display_name, password_hash, status, org_role FROM users WHERE id = $1 AND organization_id = $2',
     [p.userId, p.orgId],
   );
   if (!u) throw errors.notFound('User');
+  // Children in a family never sign in (doc 08).
+  if (u.org_role === 'child') throw errors.conflict('child_no_sign_in', 'Children don’t sign in to RoundDigital Family');
   if (u.status !== 'active') throw errors.conflict('user_deactivated', 'Reactivate this person before inviting them');
   if (u.password_hash) throw errors.conflict('already_joined', 'This person has already joined');
   const now = deps.now();
@@ -180,7 +182,7 @@ export async function acceptInvite(
 export async function requestPasswordReset(deps: Deps, q: Queryable, email: string, requestId?: string): Promise<EmailMessage | null> {
   const u = await one<{ id: string; organization_id: string; email: string; password_hash: string | null; org_role: string }>(
     q,
-    `SELECT id, organization_id, email, password_hash, org_role FROM users WHERE lower(email) = lower($1) AND status = 'active'`,
+    `SELECT id, organization_id, email, password_hash, org_role FROM users WHERE lower(email) = lower($1) AND status = 'active' AND org_role <> 'child'`,
     [email],
   );
   if (!u) return null;

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { TERMS_VERSION } from '@rd/contracts';
+import { TERMS_VERSION, type OrgKind } from '@rd/contracts';
 import type { Deps } from '../../context';
 import { one, type Queryable } from '../../db/pool';
 import { hashPassword, randomToken, sha256Hex } from '../../lib/crypto';
@@ -16,7 +16,7 @@ const TOKEN_TTL_MS = 24 * 3600_000;
 export async function requestSignup(
   deps: Deps,
   q: Queryable,
-  input: { org_name: string; display_name: string; email: string; password: string; accept_terms: true },
+  input: { org_name: string; display_name: string; email: string; password: string; accept_terms: true; kind?: OrgKind },
 ): Promise<{ to: string; subject: string; text: string }> {
   const existing = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
   if (existing) {
@@ -28,8 +28,8 @@ export async function requestSignup(
   }
   const token = randomToken(32);
   await q.query(
-    `INSERT INTO signup_requests (email, display_name, org_name, password_hash, token_hash, expires_at, created_at, terms_version)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    `INSERT INTO signup_requests (email, display_name, org_name, password_hash, token_hash, expires_at, created_at, terms_version, kind)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
     [
       input.email,
       input.display_name,
@@ -39,8 +39,16 @@ export async function requestSignup(
       new Date(deps.now().getTime() + TOKEN_TTL_MS).toISOString(),
       deps.now().toISOString(),
       TERMS_VERSION,
+      input.kind ?? 'business',
     ],
   );
+  if (input.kind === 'family') {
+    return {
+      to: input.email,
+      subject: 'Confirm your RoundDigital Family account',
+      text: `Welcome to RoundDigital Family.\n\nConfirm your email address to set up ${input.org_name}:\n${deps.config.webUrl}/signup/verify?token=${token}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.`,
+    };
+  }
   return {
     to: input.email,
     subject: 'Confirm your RoundDigital Track account',
@@ -60,11 +68,19 @@ function slugify(name: string): string {
 
 /** Verifies the token once and creates the organization (Pro trial) with its first admin. */
 export async function completeSignup(deps: Deps, q: Queryable, token: string): Promise<{ userId: string; organizationId: string }> {
-  const req = await one<{ id: string; email: string; display_name: string; org_name: string; password_hash: string; terms_version: string | null }>(
+  const req = await one<{
+    id: string;
+    email: string;
+    display_name: string;
+    org_name: string;
+    password_hash: string;
+    terms_version: string | null;
+    kind: OrgKind;
+  }>(
     q,
     `UPDATE signup_requests SET completed_at = $2
      WHERE token_hash = $1 AND completed_at IS NULL AND expires_at > $2
-     RETURNING id, email, display_name, org_name, password_hash, terms_version`,
+     RETURNING id, email, display_name, org_name, password_hash, terms_version, kind`,
     [sha256Hex(token), deps.now().toISOString()],
   );
   if (!req) throw new AppError(400, 'signup_link_invalid', 'This link is invalid, expired or already used. Sign up again to get a new one.');
@@ -77,7 +93,8 @@ export async function completeSignup(deps: Deps, q: Queryable, token: string): P
     { name: req.org_name, slug: slugify(req.org_name), region: 'ca-central-1', admin_email: req.email, admin_name: req.display_name, seats: 0 },
     { kind: 'system' },
     // The person signing up usually tracks their own time too; that's one of the two free seats.
-    { adminPasswordHash: req.password_hash, adminTracking: true },
+    // A parent never does: in a family, only children's devices are tracked.
+    { adminPasswordHash: req.password_hash, adminTracking: req.kind !== 'family', kind: req.kind },
   );
   await q.query('UPDATE signup_requests SET organization_id = $2 WHERE id = $1', [req.id, created.organization_id]);
   // The terms and DPA accepted when signing up, recorded against the organization.

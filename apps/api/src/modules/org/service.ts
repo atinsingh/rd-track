@@ -20,7 +20,8 @@ const USER_SELECT = `
   FROM users u`;
 
 export async function listUsers(q: Queryable, orgId: string): Promise<UserDTO[]> {
-  return many<UserDTO>(q, `${USER_SELECT} WHERE u.organization_id = $1 ORDER BY u.display_name`, [orgId]);
+  // Children (doc 08) are managed on the family pages, never as people.
+  return many<UserDTO>(q, `${USER_SELECT} WHERE u.organization_id = $1 AND u.org_role <> 'child' ORDER BY u.display_name`, [orgId]);
 }
 
 async function getUser(q: Queryable, orgId: string, id: string): Promise<UserDTO> {

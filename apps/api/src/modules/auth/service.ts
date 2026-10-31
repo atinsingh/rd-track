@@ -46,7 +46,8 @@ export async function login(
     throw new AppError(403, 'sso_required', "Sign in with your organization's single sign-on");
   }
   const ok = await verifyPassword(password, user?.password_hash ?? null);
-  if (!user || !ok || user.status !== 'active') {
+  // Children in a family never sign in (doc 08); they have no password either.
+  if (!user || !ok || user.status !== 'active' || user.org_role === 'child') {
     if (user) {
       // Outside the transaction: the throw below rolls it back, and failures must stay recorded.
       await audit(deps.pool, {

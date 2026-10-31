@@ -5,7 +5,7 @@ import { Suspense, useEffect, type ReactNode } from 'react';
 import { AppShell } from '@/components/shell/AppShell';
 import { ErrorState, Loading } from '@/components/ui/DataState';
 import { rd } from '@/lib/api';
-import { t } from '@/lib/i18n';
+import { useT } from '@/lib/i18n';
 import { MeProvider } from '@/lib/me';
 import { useApi } from '@/lib/useApi';
 import s from './gate.module.css';
@@ -14,6 +14,8 @@ const PRIVILEGED = new Set(['org_admin', 'super_admin', 'finance']);
 
 export default function SignedInLayout({ children }: { children: ReactNode }) {
   const router = useRouter();
+  // The hook, not the module `t`: it renders the server's language until hydrated (G27).
+  const t = useT();
   const me = useApi('me', (signal) => rd.me({ signal }));
   const needsMfa = !!me.data && PRIVILEGED.has(me.data.user.org_role) && !me.data.mfa_verified;
 

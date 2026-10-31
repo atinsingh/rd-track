@@ -18,3 +18,4 @@ export * from './developers';
 export * from './expenses';
 export * from './client-portal';
 export * from './locale';
+export * from './family';

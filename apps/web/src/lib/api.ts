@@ -1,5 +1,11 @@
 import type {
   AppLocale,
+  ChildDTO,
+  ChildTodayDTO,
+  ChildTransparencyDTO,
+  FamilyRulesDTO,
+  OrgKind,
+  PartialFamilyRules,
   AccountSecurity,
   InviteInfo,
   DataExportDTO,
@@ -258,6 +264,15 @@ const del = <T>(path: string, opts?: RequestOptions) => request<T>('DELETE', pat
 /** For endpoints whose body we don't use (may be 204): resolves to `true` on success. */
 const ok = (p: Promise<unknown>): Promise<true> => p.then(() => true as const);
 
+/** A child's profile as the parent enters it. */
+export interface ChildInput {
+  display_name: string;
+  birth_year: number;
+  birth_month: number;
+  region: ChildDTO['region'];
+  color: ChildDTO['color'];
+}
+
 export interface Range {
   from: string;
   to: string;
@@ -389,7 +404,7 @@ export const rd = {
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
-    signup: (body: { org_name: string; display_name: string; email: string; password: string; accept_terms: true }) =>
+    signup: (body: { org_name: string; display_name: string; email: string; password: string; accept_terms: true; kind?: OrgKind }) =>
       post<{ ok: true }>('/v1/signup', body, { redirectOnAuth: false }),
     verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
@@ -459,13 +474,28 @@ export const rd = {
     agentDownloads: (signal?: AbortSignal) => get<AgentDownloadsResponse>('/v1/agent/downloads', { signal }),
     /** Signing in to connect: the request the desktop app opened, to confirm or cancel. */
     linkRequest: (id: string, signal?: AbortSignal) => get<LinkRequestView>(`/v1/devices/link-requests/${enc(id)}`, { signal }),
-    approveLink: (id: string) => post<{ status: 'approved' }>(`/v1/devices/link-requests/${enc(id)}/approve`),
+    /** In a family organization, `childId` is the child the computer belongs to (required there). */
+    approveLink: (id: string, childId?: string) =>
+      post<{ status: 'approved' }>(`/v1/devices/link-requests/${enc(id)}/approve`, childId ? { child_id: childId } : {}),
     denyLink: (id: string) => post<{ status: 'denied' }>(`/v1/devices/link-requests/${enc(id)}/deny`),
     /** Everything Track holds about me, as a ZIP (G18). */
     dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/me/data-exports', { signal }),
     requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),
     erasureRequest: (signal?: AbortSignal) => get<{ request: ErasureRequestDTO | null }>('/v1/me/erasure-request', { signal }).then((r) => r.request),
     requestErasure: (reason?: string) => post<ErasureRequestDTO>('/v1/me/erasure-request', reason ? { reason } : {}),
+  },
+  /** Family (doc 08): children, rules, today, what each child can see. */
+  family: {
+    children: (signal?: AbortSignal) => list<ChildDTO>('/v1/family/children', { signal }),
+    addChild: (body: ChildInput) => post<ChildDTO>('/v1/family/children', body),
+    updateChild: (id: string, body: Partial<ChildInput>) => patch<ChildDTO>(`/v1/family/children/${enc(id)}`, body),
+    removeChild: (id: string) => ok(del(`/v1/family/children/${enc(id)}`)),
+    rules: (signal?: AbortSignal) => get<FamilyRulesDTO>('/v1/family/rules', { signal }),
+    setRules: (rules: PartialFamilyRules) => put<FamilyRulesDTO>('/v1/family/rules', { rules }),
+    childRules: (id: string, signal?: AbortSignal) => get<FamilyRulesDTO>(`/v1/family/children/${enc(id)}/rules`, { signal }),
+    setChildRules: (id: string, rules: PartialFamilyRules) => put<FamilyRulesDTO>(`/v1/family/children/${enc(id)}/rules`, { rules }),
+    today: (id: string, signal?: AbortSignal) => get<ChildTodayDTO>(`/v1/family/children/${enc(id)}/today`, { signal }),
+    transparency: (id: string, signal?: AbortSignal) => get<ChildTransparencyDTO>(`/v1/family/children/${enc(id)}/transparency`, { signal }),
   },
   /** Expenses (F7): claims, review, receipts. */
   expenses: {

@@ -1,6 +1,20 @@
 # 08: Family, transparent parental controls (research and plan)
 
-Status: **proposal**. Nothing here is built. Sources:
+Status: **Phase 1 built** (the family backend and parent web, §6); phases 2–4 are proposals.
+Phase 1 as built:
+- **Family organizations and children:** `organizations.kind = 'family'`, children as users with
+  `org_role = 'child'` (they never sign in and are never emailed), and `child_profiles`. Migration 030.
+- **Rules:** family rules with per-child overrides (`packages/contracts/src/family.ts`), and
+  `GET /v1/device/family-rules`, signed with the policy key.
+- **API:** `/v1/family/*` for children, rules, today and "what my child can see" (EN/FR).
+- **Connecting:** a parent connects a child's computer with sign in to connect, picking the child.
+- **Plan:** the `family` plan keeps screenshots, website domains and window titles off.
+- **Web:** the family shell at `/family` (Today, a page per child, Rules, Connect a computer) and
+  family signup at `/signup?kind=family`.
+- **Not yet:** the desktop app doesn't enforce the rules (phase 2), and families aren't billed
+  (the `family` plan has no Stripe price yet).
+
+Sources:
 - `replica/family/recon.md`: a Qustodio recon from public sources, each claim linked, with
   unverified points marked.
 - `replica/family/brand.md`: the name, palette, logo brief and voice.

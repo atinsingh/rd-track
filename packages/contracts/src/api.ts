@@ -5,6 +5,7 @@ import type { CollectionChange } from './policy';
 import { BILLING_INTERVALS, type BillingInterval, type Entitlement, type LicenseState, type PlanId, type SubscriptionStatus } from './plans';
 import type { AppLocale } from './locale';
 import type { BrowserFamily } from './agent-api';
+import { ORG_KINDS, type OrgKind } from './family';
 
 /**
  * Web/API request schemas and response shapes (system design §5.4).
@@ -15,8 +16,11 @@ export interface ApiErrorBody {
   error: { code: string; message: string; request_id: string; details?: unknown };
 }
 
-/** `finance` (slice 4, G21) runs Money: rates, invoices, budgets and payroll, without full admin. */
-export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin', 'finance'] as const;
+/**
+ * `finance` (slice 4, G21) runs Money: rates, invoices, budgets and payroll, without full admin.
+ * `child` (Family, doc 08) is a child in a family organization: never signs in, never emailed.
+ */
+export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin', 'finance', 'child'] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 // ───────────────────────── auth ─────────────────────────
@@ -53,6 +57,8 @@ export interface Me {
   organization: {
     id: string;
     name: string;
+    /** `family` organizations get the family app (doc 08) instead of the workforce one. */
+    kind: OrgKind;
     plan: PlanId;
     license: LicenseState;
     /** The organization's default language and formats; null follows each browser. */
@@ -582,6 +588,8 @@ export const signupRequest = z.strictObject({
   password: z.string().min(12).max(200),
   /** The subscription terms and data processing agreement (TERMS_VERSION). */
   accept_terms: z.literal(true, { error: 'Accept the terms and the data processing agreement to continue.' }),
+  /** `family` starts a family (doc 08) instead of a workforce organization. */
+  kind: z.enum(ORG_KINDS).default('business'),
 });
 export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).max(200) });
 export const changePlanRequest = z.strictObject({

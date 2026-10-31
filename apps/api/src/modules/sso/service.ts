@@ -512,7 +512,8 @@ async function signInAs(deps: Deps, q: Queryable, s: StateRow, c: ConnectionRow,
   const { sub, email } = who;
   let user = await one<{ id: string; status: string; sso_subject: string | null; erased_at: string | null }>(
     q,
-    `SELECT id, status, sso_subject, erased_at FROM users WHERE organization_id = $1 AND (sso_subject = $2 OR ($3::text IS NOT NULL AND lower(email) = $3))
+    `SELECT id, status, sso_subject, erased_at FROM users WHERE organization_id = $1 AND org_role <> 'child'
+       AND (sso_subject = $2 OR ($3::text IS NOT NULL AND lower(email) = $3))
      ORDER BY (sso_subject = $2) DESC NULLS LAST LIMIT 1`,
     [orgId, sub, email],
   );

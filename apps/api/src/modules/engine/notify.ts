@@ -40,8 +40,27 @@ function effective(category: NotificationCategory, row: Pref | undefined): Pref 
 
 /** Notifies active people of the organization; returns how many were notified. */
 export async function notify(q: Queryable, orgId: string, userIds: Iterable<string>, n: NotificationInput): Promise<number> {
-  const ids = [...new Set(userIds)];
+  let ids = [...new Set(userIds)];
   if (ids.length === 0) return 0;
+  // Children (doc 08) are never notified. A notice about a child's computer goes to the parents
+  // instead, linking to that child; anything else meant for a child is dropped.
+  const children = await many<{ id: string }>(q, `SELECT id FROM users WHERE organization_id = $1 AND id = ANY($2::uuid[]) AND org_role = 'child'`, [
+    orgId,
+    ids,
+  ]);
+  if (children.length > 0) {
+    const childIds = new Set(children.map((c) => c.id));
+    ids = ids.filter((id) => !childIds.has(id));
+    if (n.category === 'devices') {
+      const parents = await many<{ id: string }>(q, `SELECT id FROM users WHERE organization_id = $1 AND org_role = 'org_admin' AND status = 'active'`, [orgId]);
+      let sent = 0;
+      for (const childId of childIds)
+        sent += await notify(q, orgId, parents.map((p) => p.id), { ...n, link: `/family/children/${childId}` });
+      if (ids.length === 0) return sent;
+      return sent + (await notify(q, orgId, ids, n));
+    }
+    if (ids.length === 0) return 0;
+  }
   const people = await many<{ id: string; in_app: boolean | null; email: boolean | null }>(
     q,
     `SELECT u.id, p.in_app, p.email FROM users u

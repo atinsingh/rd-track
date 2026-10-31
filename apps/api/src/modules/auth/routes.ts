@@ -144,17 +144,18 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
       locale: AppLocale | null;
       org_name: string;
       org_locale: AppLocale | null;
+      org_kind: Me['organization']['kind'];
     }>(
       pool,
-      `SELECT u.id, u.email, u.display_name, u.org_role, u.timezone, u.tracking_enabled, u.mfa_enabled, u.locale, o.name AS org_name, o.locale AS org_locale
+      `SELECT u.id, u.email, u.display_name, u.org_role, u.timezone, u.tracking_enabled, u.mfa_enabled, u.locale, o.name AS org_name, o.locale AS org_locale, o.kind AS org_kind
        FROM users u JOIN organizations o ON o.id = u.organization_id WHERE u.id = $1`,
       [actor.userId],
     );
     const sub = await subscriptionDTO(pool, actor.organizationId, deps.now());
-    const { org_name, org_locale, ...user } = u!;
+    const { org_name, org_locale, org_kind, ...user } = u!;
     return {
       user,
-      organization: { id: actor.organizationId, name: org_name, locale: org_locale, plan: sub.plan, license: sub.license, logo_url: await logoUrl(deps, pool, actor.organizationId) },
+      organization: { id: actor.organizationId, name: org_name, kind: org_kind, locale: org_locale, plan: sub.plan, license: sub.license, logo_url: await logoUrl(deps, pool, actor.organizationId) },
       mfa_verified: actor.mfaVerified,
       managed_team_ids: await managedTeamIds(pool, actor.userId),
       managed_project_ids: await managedProjectIds(pool, actor.userId),

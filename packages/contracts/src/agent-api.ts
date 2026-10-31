@@ -145,6 +145,12 @@ export interface LinkRequestCreated {
   interval_seconds: number;
 }
 export type LinkRequestStatus = 'pending' | 'approved' | 'denied' | 'used' | 'expired';
+/**
+ * `POST /v1/devices/link-requests/:id/approve`. In a family organization the parent picks the
+ * child the computer belongs to (`child_id`, required there and refused elsewhere).
+ */
+export const linkApprove = z.strictObject({ child_id: z.uuid().optional() });
+
 /** `GET /v1/devices/link-requests/:id`, for the signed-in person's confirmation page. */
 export interface LinkRequestView {
   request_id: string;
