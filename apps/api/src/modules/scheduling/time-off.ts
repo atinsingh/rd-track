@@ -1,5 +1,6 @@
 import type {
   MyTimeOffResponse,
+  TimeOffAccrualDay,
   TimeOffAssignmentDTO,
   TimeOffBalanceDTO,
   TimeOffLedgerEntryDTO,
@@ -19,9 +20,11 @@ import { SYSTEM_SCOPE, withScope } from '../../db/tenant-scope';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
+import { publish, reviewersOf } from '../engine/events';
 import { leaveHoursOn } from './attendance';
 import { entitlementsOf, getSettings, loadCalendars, notify, todayFor } from './service';
 import { daysBetween, eachDate } from './tz';
+import type { Lang } from '../../i18n';
 
 /**
  * Time off: policies with accrual, per-person assignments, requests reviewed by the
@@ -34,7 +37,7 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 // ───────────── policies & assignments (admin) ─────────────
 
 const POLICY_SELECT = `
-  SELECT p.id, p.name, p.kind, p.accrual, p.accrual_hours, p.max_balance_hours, p.carryover_hours, p.allow_negative,
+  SELECT p.id, p.name, p.kind, p.accrual, p.accrual_hours, p.accrual_day, p.max_balance_hours, p.carryover_hours, p.allow_negative,
          p.archived_at IS NOT NULL AS archived,
          (SELECT count(*)::int FROM time_off_assignments a WHERE a.policy_id = p.id) AS assigned_count
   FROM time_off_policies p`;
@@ -54,9 +57,9 @@ export async function createPolicy(q: Queryable, actor: UserActor, input: z.infe
   if (dup) throw errors.conflict('policy_exists', 'A time-off policy with this name already exists');
   const r = await one<{ id: string }>(
     q,
-    `INSERT INTO time_off_policies (organization_id, name, kind, accrual, accrual_hours, max_balance_hours, carryover_hours, allow_negative)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
-    [actor.organizationId, input.name, input.kind, input.accrual, input.accrual_hours, input.max_balance_hours ?? null, input.carryover_hours ?? null, input.allow_negative],
+    `INSERT INTO time_off_policies (organization_id, name, kind, accrual, accrual_hours, max_balance_hours, carryover_hours, allow_negative, accrual_day)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
+    [actor.organizationId, input.name, input.kind, input.accrual, input.accrual_hours, input.max_balance_hours ?? null, input.carryover_hours ?? null, input.allow_negative, input.accrual_day],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'time_off_policy.create', targetType: 'time_off_policy', targetId: r!.id, requestId });
   return getPolicy(q, actor.organizationId, r!.id);
@@ -70,7 +73,7 @@ export async function updatePolicy(q: Queryable, actor: UserActor, id: string, p
   }
   await q.query(
     `UPDATE time_off_policies SET name = $2, accrual = $3, accrual_hours = $4, max_balance_hours = $5, carryover_hours = $6, allow_negative = $7,
-       archived_at = CASE WHEN $8::boolean IS NULL THEN archived_at WHEN $8 THEN COALESCE(archived_at, now()) ELSE NULL END
+       archived_at = CASE WHEN $8::boolean IS NULL THEN archived_at WHEN $8 THEN COALESCE(archived_at, now()) ELSE NULL END, accrual_day = $9
      WHERE id = $1`,
     [
       id,
@@ -81,6 +84,7 @@ export async function updatePolicy(q: Queryable, actor: UserActor, id: string, p
       patch.carryover_hours === undefined ? cur.carryover_hours : patch.carryover_hours,
       patch.allow_negative ?? cur.allow_negative,
       patch.archived ?? null,
+      patch.accrual_day ?? cur.accrual_day,
     ],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'time_off_policy.update', targetType: 'time_off_policy', targetId: id, requestId });
@@ -180,7 +184,10 @@ export async function adjustBalance(deps: Pick<Deps, 'now'>, q: Queryable, actor
     requestId,
     metadata: { hours: input.hours },
   });
-  await notify(q, actor.organizationId, input.user_id, 'time_off_adjustment', 'Your time-off balance changed', `${input.hours > 0 ? '+' : ''}${input.hours} h: ${input.note}`);
+  await notify(q, actor.organizationId, input.user_id, 'time_off_adjustment',
+    (l) => l.t('timeoff.balance.title'),
+    (l) => l.t('timeoff.balance.body', { hours: `${input.hours > 0 ? '+' : ''}${l.number(input.hours)}`, note: input.note }),
+  );
   return (await listAssignments(q, actor.organizationId, { policyId: input.policy_id, userId: input.user_id }))[0]!;
 }
 
@@ -283,17 +290,25 @@ export async function createRequest(q: Queryable, actor: UserActor, input: z.inf
     [actor.organizationId, actor.userId, input.policy_id, input.start_date, input.end_date, input.partial_hours ?? null, hours, input.reason?.trim() || null],
   );
   await audit(q, { organizationId: actor.organizationId, actor, action: 'time_off_request.create', targetType: 'time_off_request', targetId: r!.id, targetUserId: actor.userId, requestId });
-  // Tell the people who can approve it: the person's current team managers.
-  const managers = await many<{ user_id: string }>(
-    q,
-    `SELECT DISTINCT m.user_id FROM team_memberships m JOIN team_memberships t ON t.team_id = m.team_id
-     WHERE t.user_id = $1 AND t.valid_to IS NULL AND m.role = 'manager' AND m.valid_to IS NULL AND m.user_id <> $1`,
-    [actor.userId],
-  );
-  const span = input.start_date === input.end_date ? input.start_date : `${input.start_date} – ${input.end_date}`;
-  for (const m of managers) {
-    await notify(q, actor.organizationId, m.user_id, 'time_off_request', `Time off request from ${actor.displayName}`, `${span} · ${hours} h. Review it in Approvals.`);
+  // Tell the people who can approve it: the person's team managers, or the org admins when there are none.
+  const span = (l: Lang) => (input.start_date === input.end_date ? l.day(input.start_date) : `${l.day(input.start_date)} – ${l.day(input.end_date)}`);
+  for (const reviewer of await reviewersOf(q, actor.organizationId, actor.userId)) {
+    await notify(
+      q,
+      actor.organizationId,
+      reviewer,
+      'time_off_request',
+      (l) => l.t('timeoff.request.title', { name: actor.displayName }),
+      (l) => l.t('timeoff.request.body', { span: span(l), hours: l.number(hours) }),
+    );
   }
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'time_off.requested',
+    subjectUserId: actor.userId,
+    actorUserId: actor.userId,
+    data: { request_id: r!.id, start_date: input.start_date, end_date: input.end_date },
+  });
   return getRequest(q, r!.id);
 }
 
@@ -352,15 +367,22 @@ export async function reviewRequest(q: Queryable, actor: UserActor, id: string, 
     targetUserId: r.user_id,
     requestId,
   });
-  const span = r.start_date === r.end_date ? r.start_date : `${r.start_date} – ${r.end_date}`;
+  const span = (l: Lang) => (r.start_date === r.end_date ? l.day(r.start_date) : `${l.day(r.start_date)} – ${l.day(r.end_date)}`);
   await notify(
     q,
     actor.organizationId,
     r.user_id,
     'time_off_review',
-    approve ? 'Time off approved' : 'Time off not approved',
-    `${span}${note?.trim() ? ` · “${note.trim()}”` : ''}`,
+    (l) => (approve ? l.t('timeoff.approved.title') : l.t('timeoff.denied.title')),
+    (l) => (note?.trim() ? l.t('timeoff.note', { span: span(l), note: note.trim() }) : span(l)),
   );
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'time_off.decided',
+    subjectUserId: r.user_id,
+    actorUserId: actor.userId,
+    data: { request_id: id, start_date: r.start_date, end_date: r.end_date, approved: approve },
+  });
   return getRequest(q, id);
 }
 
@@ -409,9 +431,33 @@ interface AccrualRow {
   policy_id: string;
   start_date: string;
   accrual: 'per_month' | 'per_year';
+  accrual_day: TimeOffAccrualDay;
   accrual_hours: number;
   max_balance_hours: number | null;
   carryover_hours: number | null;
+}
+
+function lastDayOf(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+/**
+ * The period whose accrual falls due by `today` (Stage 4 F9), or null if it isn't due yet:
+ * on the 1st, on the last day, or on the day the assignment started (the last day of a
+ * shorter month for the 29th–31st). Each period is credited once, so a due period stays
+ * due for the rest of it and a late run still credits it.
+ */
+export function accrualDue(accrual: 'per_month' | 'per_year', day: TimeOffAccrualDay, startDate: string, today: string): string | null {
+  const [y, m, d] = today.split('-').map(Number) as [number, number, number];
+  const [, sm, sd] = startDate.split('-').map(Number) as [number, number, number];
+  const period = accrual === 'per_month' ? today.slice(0, 7) : today.slice(0, 4);
+  if (day === 'first') return period;
+  if (accrual === 'per_month') {
+    const due = day === 'last' ? lastDayOf(y, m) : Math.min(sd, lastDayOf(y, m));
+    return d >= due ? period : null;
+  }
+  const [dm, dd] = day === 'last' ? [12, 31] : [sm, Math.min(sd, lastDayOf(y, sm))];
+  return m > dm || (m === dm && d >= dd) ? period : null;
 }
 
 /**
@@ -440,7 +486,7 @@ export async function runAccruals(deps: Pick<Deps, 'now' | 'pool'>, now = deps.n
       await withTx(deps.pool, async (tx) => {
         const rows = await many<AccrualRow>(
           tx,
-          `SELECT a.user_id, a.policy_id, a.start_date, p.accrual, p.accrual_hours, p.max_balance_hours, p.carryover_hours
+          `SELECT a.user_id, a.policy_id, a.start_date, p.accrual, p.accrual_day, p.accrual_hours, p.max_balance_hours, p.carryover_hours
            FROM time_off_assignments a JOIN time_off_policies p ON p.id = a.policy_id JOIN users u ON u.id = a.user_id
            WHERE a.organization_id = $1 AND p.accrual <> 'none' AND p.archived_at IS NULL AND a.start_date <= $2 AND u.status = 'active'`,
           [orgId, today],
@@ -459,13 +505,14 @@ export async function runAccruals(deps: Pick<Deps, 'now' | 'pool'>, now = deps.n
               if (done) expired++;
             }
           }
+          const period = accrualDue(row.accrual, row.accrual_day, row.start_date, today);
+          if (!period) continue;
           let amount = Number(row.accrual_hours);
           if (row.max_balance_hours !== null) {
             const { balance } = await balanceOf(tx, row.user_id, row.policy_id);
             amount = Math.min(amount, Math.max(0, Number(row.max_balance_hours) - balance));
           }
           if (amount <= 0) continue;
-          const period = row.accrual === 'per_month' ? today.slice(0, 7) : year;
           const done = await ledgerInsert(tx, { ...base, kind: 'accrual', hours: amount, date: today, period });
           if (done) accrued++;
         }

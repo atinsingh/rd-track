@@ -8,7 +8,8 @@ import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { InlineSelect, Segmented, TextArea, inputClass } from '@/components/ui/Field';
 import { Badge, Banner, PageHeader, formActionsClass } from '@/components/ui/Layout';
 import { rd, toApiError, type ApiError } from '@/lib/api';
-import { plural } from '@/lib/format';
+import { t, tPlural } from '@/lib/i18n';
+import { currentLocale } from '@/lib/locale';
 import { useMe } from '@/lib/me';
 import {
   POLICY_FIELDS,
@@ -19,11 +20,12 @@ import {
   formatFieldValue,
   partialFromForm,
   readField,
+  scopeLabel,
   type FieldInput,
   type FieldMeta,
   type PolicyForm,
 } from '@/lib/policyForm';
-import { WEEKDAY_SHORT, formatDateTime, timeZoneOptions } from '@/lib/time';
+import { formatDateTime, timeZoneOptions, weekdaysShort } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 import s from './policies.module.css';
@@ -34,7 +36,6 @@ interface ScopeRef {
   name: string;
 }
 
-const TYPE_LABEL: Record<ScopeType, string> = { organization: 'Organization', team: 'Team', project: 'Project', device: 'Device' };
 
 function countSet(settings: unknown): number {
   return POLICY_FIELDS.filter((f) => readField(settings as never, f.key) !== undefined).length;
@@ -73,19 +74,19 @@ function ScopeTree({
   const orgScope = list.scopes.find((x) => x.scope_type === 'organization');
   const groups: { label: string; type: ScopeType; items: ScopeRef[]; empty: string }[] = [
     {
-      label: 'Organization',
+      label: t('adm.pol.treeOrg'),
       type: 'organization',
       items: [{ type: 'organization', id: orgScope?.scope_id ?? orgId, name: orgScope?.scope_name ?? orgName }],
       empty: '',
     },
-    { label: 'Teams', type: 'team', items: merge('team', teams), empty: 'No teams' },
-    { label: 'Projects', type: 'project', items: merge('project', projects), empty: 'No projects' },
-    { label: 'Devices', type: 'device', items: merge('device', []), empty: 'No device overrides' },
+    { label: t('adm.pol.treeTeams'), type: 'team', items: merge('team', teams), empty: t('adm.pol.noTeams') },
+    { label: t('adm.pol.treeProjects'), type: 'project', items: merge('project', projects), empty: t('adm.pol.noProjects') },
+    { label: t('adm.pol.treeDevices'), type: 'device', items: merge('device', []), empty: t('adm.pol.noDevices') },
   ];
   const deviceChoices = devices.filter((d) => !byKey.has(`device:${d.id}`));
 
   return (
-    <nav className={s.tree} aria-label="Policy scopes">
+    <nav className={s.tree} aria-label={t('adm.pol.scopes')}>
       {groups.map((g) => (
         <div key={g.label} className={s.treeGroup}>
           <span className={s.treeLabel} id={`scope-${g.type}`}>
@@ -104,7 +105,7 @@ function ScopeTree({
                   <li key={it.id}>
                     <button type="button" className={s.treeItem} aria-current={isSel ? 'true' : undefined} onClick={() => onSelect(it)}>
                       <span>{it.name}</span>
-                      <span className={s.treeMeta}>{n > 0 ? plural(n, 'setting') : 'Nothing set'}</span>
+                      <span className={s.treeMeta}>{n > 0 ? tPlural(n, 'adm.pol.settings.one', 'adm.pol.settings.other') : t('adm.pol.nothingSet')}</span>
                     </button>
                   </li>
                 );
@@ -114,14 +115,14 @@ function ScopeTree({
           {g.type === 'device' && scopedAllowed && deviceChoices.length > 0 ? (
             <div style={{ padding: '6px 16px 0' }}>
               <InlineSelect
-                label="Add override"
+                label={t('adm.pol.addOverride')}
                 value=""
                 onChange={(e) => {
                   const d = devices.find((x) => x.id === e.target.value);
                   if (d) onSelect({ type: 'device', id: d.id, name: d.name });
                 }}
               >
-                <option value="">Choose a device…</option>
+                <option value="">{t('adm.pol.chooseDevice')}</option>
                 {deviceChoices.map((d) => (
                   <option key={d.id} value={d.id}>
                     {d.name}
@@ -172,9 +173,9 @@ function FieldControl({
         value={v}
         disabled={disabled}
         options={[
-          { value: 'unset', label: 'Not set' },
-          { value: 'on', label: 'On' },
-          { value: 'off', label: 'Off' },
+          { value: 'unset', label: t('adm.pol.notSet') },
+          { value: 'on', label: t('adm.pol.on') },
+          { value: 'off', label: t('adm.pol.off') },
         ]}
         onChange={(x) => set({ set: x !== 'unset', bool: x === 'on' })}
       />
@@ -187,7 +188,7 @@ function FieldControl({
         name={name}
         value={v}
         disabled={disabled}
-        options={[{ value: 'unset', label: 'Not set' }, ...(f.options ?? [])]}
+        options={[{ value: 'unset', label: t('adm.pol.notSet') }, ...(f.options ?? [])]}
         onChange={(x) => (x === 'unset' ? set({ set: false }) : set({ set: true, text: x }))}
       />
     );
@@ -200,8 +201,8 @@ function FieldControl({
         value={v}
         disabled={disabled}
         options={[
-          { value: 'unset', label: 'Not set', disabled: lockedUnset },
-          { value: 'set', label: 'Set' },
+          { value: 'unset', label: t('adm.pol.notSet'), disabled: lockedUnset },
+          { value: 'set', label: t('adm.pol.set') },
         ]}
         onChange={(x) => set({ set: x === 'set' })}
       />
@@ -219,7 +220,7 @@ function FieldControl({
             step={1}
             value={input.text}
             disabled={disabled}
-            aria-label={`${f.label}${f.unit ? ` in ${f.unit}` : ''}`}
+            aria-label={f.unit ? t('adm.pol.inUnit', { label: f.label, unit: f.unit }) : f.label}
             aria-invalid={error ? true : undefined}
             aria-describedby={error ? errId : undefined}
             onChange={(e) => set({ text: e.target.value })}
@@ -236,7 +237,7 @@ function FieldControl({
           rows={3}
           value={input.text}
           disabled={disabled}
-          aria-label={`${f.label}, one per line`}
+          aria-label={t('adm.pol.onePerLine', { label: f.label })}
           aria-describedby={error ? errId : undefined}
           onChange={(e) => set({ text: e.target.value })}
         />
@@ -247,8 +248,8 @@ function FieldControl({
       editor = (
         <>
           <fieldset className={s.days} disabled={disabled} style={{ border: 0, padding: 0, margin: 0 }}>
-            <legend className="visually-hidden">Work days</legend>
-            {WEEKDAY_SHORT.map((label, i) => {
+            <legend className="visually-hidden">{t('adm.pol.workDays')}</legend>
+            {weekdaysShort().map((label, i) => {
               const d = i + 1;
               return (
                 <label key={label}>
@@ -263,9 +264,9 @@ function FieldControl({
             })}
           </fieldset>
           <span className={s.whRow}>
-            <input className={inputClass} type="time" aria-label="Work hours start" value={wh.start} disabled={disabled} onChange={(e) => setWh({ start: e.target.value })} />
-            <input className={inputClass} type="time" aria-label="Work hours end" value={wh.end} disabled={disabled} onChange={(e) => setWh({ end: e.target.value })} />
-            <select className={inputClass} aria-label="Work hours time zone" value={wh.timezone} disabled={disabled} onChange={(e) => setWh({ timezone: e.target.value })}>
+            <input className={inputClass} type="time" aria-label={t('adm.pol.whStart')} value={wh.start} disabled={disabled} onChange={(e) => setWh({ start: e.target.value })} />
+            <input className={inputClass} type="time" aria-label={t('adm.pol.whEnd')} value={wh.end} disabled={disabled} onChange={(e) => setWh({ end: e.target.value })} />
+            <select className={inputClass} aria-label={t('adm.pol.whTz')} value={wh.timezone} disabled={disabled} onChange={(e) => setWh({ timezone: e.target.value })}>
               {zones.map((z) => (
                 <option key={z} value={z}>
                   {z}
@@ -364,24 +365,24 @@ function ScopeEditor({
     <section className={s.editor} aria-labelledby="scope-h">
       <div className={s.editorHead}>
         <h2 id="scope-h">
-          {TYPE_LABEL[scope.type]} · {detail.scope.scope_name || scope.name}
+          {scopeLabel(scope.type)} · {detail.scope.scope_name || scope.name}
         </h2>
         <span className="small secondary">
           {scope.type === 'project'
-            ? `Applies to ${plural(detail.affected_users, 'person', 'people')} while they track time on this project`
-            : `Applies to ${plural(detail.affected_users, 'person', 'people')}`}
+            ? tPlural(detail.affected_users, 'adm.pol.appliesProject.one', 'adm.pol.appliesProject.other')
+            : tPlural(detail.affected_users, 'adm.pol.applies.one', 'adm.pol.applies.other')}
         </span>
       </div>
       {scopeLocked ? (
-        <Banner tone="warn" title="Team, project and device policies are in Pro" actions={<Link href="/admin/billing">Compare plans →</Link>}>
-          On your plan only the organization policy applies. You can look at this scope, but not publish it.
+        <Banner tone="warn" title={t('adm.pol.proTitle')} actions={<Link href="/admin/billing">{t('adm.pol.comparePlans')}</Link>}>
+          {t('adm.pol.proBody')}
         </Banner>
       ) : null}
 
       <div className={s.cols} aria-hidden="true">
-        <span>Setting</span>
-        <span>This scope</span>
-        <span>Effective for members</span>
+        <span>{t('adm.pol.colSetting')}</span>
+        <span>{t('adm.pol.colScope')}</span>
+        <span>{t('adm.pol.colEffective')}</span>
       </div>
       {groups.map((g) => (
         <div key={g} role="group" aria-labelledby={`grp-${g}`}>
@@ -399,7 +400,7 @@ function ScopeEditor({
                   <span className={s.fieldHelp}>{f.help}</span>
                   {planLocked ? (
                     <span>
-                      <Badge tone="warn">Not in your plan</Badge>
+                      <Badge tone="warn">{t('adm.pol.notInPlan')}</Badge>
                     </span>
                   ) : null}
                 </div>
@@ -415,7 +416,7 @@ function ScopeEditor({
                 <div className={s.effective}>
                   <span className={s.effValue}>{formatFieldValue(f.key, eff)}</span>
                   <span className={s.because}>
-                    {planLocked ? 'Your plan keeps this off' : describeSources(detail.effective.sources[f.key], current)}
+                    {planLocked ? t('adm.pol.planKeepsOff') : describeSources(detail.effective.sources[f.key], current)}
                   </span>
                 </div>
               </div>
@@ -426,31 +427,31 @@ function ScopeEditor({
 
       {conflict ? (
         <div className={s.expansion} role="alertdialog" aria-labelledby="exp-h" aria-describedby="exp-d">
-          <span className={s.expEyebrow}>Collection increases</span>
+          <span className={s.expEyebrow}>{t('adm.pol.increases')}</span>
           <span id="exp-h" className={s.expTitle}>
-            This change collects more for {plural(conflict.affected_users, 'person', 'people')}
+            {tPlural(conflict.affected_users, 'adm.pol.collectsMore.one', 'adm.pol.collectsMore.other')}
           </span>
           <ul id="exp-d" className={s.diff}>
             {conflict.changes.map((c) => (
               <li key={`${c.field}`}>{describeChange(c)}</li>
             ))}
           </ul>
-          <p className="secondary">Each person is notified and sees the change in “What&apos;s collected” before the agent applies it.</p>
+          <p className="secondary">{t('adm.pol.notified')}</p>
           <p className="small">
-            Change note: <em>{note.trim()}</em>
+            {t('adm.pol.changeNoteIs')} <em>{note.trim()}</em>
           </p>
           <div className={formActionsClass}>
             <Button onClick={() => setConflict(null)} disabled={busy}>
-              Keep editing
+              {t('adm.pol.keepEditing')}
             </Button>
             <Button variant="primary" onClick={() => publish(true)} disabled={busy} autoFocus>
-              {busy ? 'Publishing…' : `Publish and notify ${plural(conflict.affected_users, 'person', 'people')} →`}
+              {busy ? t('adm.pol.publishing') : tPlural(conflict.affected_users, 'adm.pol.publishNotify.one', 'adm.pol.publishNotify.other')}
             </Button>
           </div>
         </div>
       ) : (
         <div className={s.publish}>
-          <span className="label-mono">{diff.length === 0 ? 'No changes' : `${plural(diff.length, 'change')} in this scope`}</span>
+          <span className="label-mono">{diff.length === 0 ? t('adm.pol.noChanges') : tPlural(diff.length, 'adm.pol.changes.one', 'adm.pol.changes.other')}</span>
           {diff.length > 0 ? (
             <ul className={s.diff}>
               {diff.map((d) => (
@@ -461,34 +462,34 @@ function ScopeEditor({
             </ul>
           ) : null}
           <TextArea
-            label="Change note (required)"
+            label={t('adm.pol.note')}
             rows={2}
             maxLength={2000}
             value={note}
             disabled={scopeLocked}
-            placeholder="Why this change, who approved it"
-            error={showErrors && note.trim().length < 3 ? 'Explain the change in at least 3 characters.' : null}
-            hint="Shown in the audit log and to employees when collection increases."
+            placeholder={t('adm.pol.notePlaceholder')}
+            error={showErrors && note.trim().length < 3 ? t('adm.pol.noteShort') : null}
+            hint={t('adm.pol.noteHint')}
             onChange={(e) => setNote(e.target.value)}
           />
           {showErrors && hasErrors ? (
             <p role="alert" style={{ color: 'var(--danger-text)', fontWeight: 500 }}>
-              Fix the highlighted settings first.
+              {t('adm.pol.fixFirst')}
             </p>
           ) : null}
           {error?.code === 'plan_upgrade_required' ? (
-            <Banner tone="warn" role="alert" title="Your plan doesn't include this" actions={<Link href="/admin/billing">Compare plans →</Link>}>
-              Screenshots, website domains and team, project or device policies need Pro.
+            <Banner tone="warn" role="alert" title={t('adm.pol.planTitle')} actions={<Link href="/admin/billing">{t('adm.pol.comparePlans')}</Link>}>
+              {t('adm.pol.planBody')}
             </Banner>
           ) : (
             <ActionError error={error} />
           )}
           <div className={formActionsClass}>
             <Button onClick={reset} disabled={busy || diff.length === 0}>
-              Discard changes
+              {t('adm.pol.discard')}
             </Button>
             <Button variant="primary" onClick={() => publish(false)} disabled={busy || scopeLocked || diff.length === 0}>
-              {busy ? 'Publishing…' : 'Publish →'}
+              {busy ? t('adm.pol.publishing') : t('adm.pol.publish')}
             </Button>
           </div>
         </div>
@@ -497,7 +498,7 @@ function ScopeEditor({
       {detail.history.length > 0 ? (
         <details style={{ marginTop: 18 }}>
           <summary style={{ cursor: 'pointer', minHeight: 44, display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-            History ({detail.history.length} versions)
+            {t('adm.pol.history', { n: detail.history.length })}
           </summary>
           <ul className={s.history}>
             {[...detail.history]
@@ -507,10 +508,10 @@ function ScopeEditor({
                   <span className="mono">v{v.version}</span>
                   <span>
                     <span className="small muted">
-                      Org revision {v.org_revision} · {formatDateTime(v.published_at, defaultTz)} · {v.published_by}
+                      {t('adm.pol.orgRevision', { n: v.org_revision })} · {formatDateTime(v.published_at, defaultTz)} · {v.published_by}
                     </span>
                     <br />
-                    {v.change_note} {v.expands_collection ? <Badge tone="warn">Collected more</Badge> : null}
+                    {v.change_note} {v.expands_collection ? <Badge tone="warn">{t('adm.pol.collectedMore')}</Badge> : null}
                   </span>
                 </li>
               ))}
@@ -542,32 +543,36 @@ export default function PoliciesPage() {
   };
   const detail = useApi(enabled ? `policy|${scope.type}|${scope.id}` : null, (signal) => rd.policies.detail(scope.type, scope.id, signal));
 
-  if (!enabled) return <NoAccess what="Collection policies are managed by org admins." />;
+  if (!enabled) return <NoAccess what={t('adm.pol.noAccess')} />;
 
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Collection policy"
-        title="Policies"
-        description="Each scope sets only what it needs. When scopes disagree, the more private setting wins."
+        eyebrow={t('adm.pol.eyebrow')}
+        title={t('adm.pol.title')}
+        description={t('adm.pol.description')}
         actions={
           list.data ? (
             <Badge>
-              Org revision {list.data.org_revision}
-              {orgScope?.current ? ` · published ${formatDateTime(orgScope.current.published_at, timezone).replace(/, \d\d:\d\d$/, '')}` : ''}
+              {t('adm.pol.orgRevision', { n: list.data.org_revision })}
+              {orgScope?.current ? t('adm.pol.publishedOn', {
+                    date: new Intl.DateTimeFormat(currentLocale(), { day: 'numeric', month: 'short', year: 'numeric', timeZone: timezone }).format(
+                      new Date(orgScope.current.published_at),
+                    ),
+                  }) : ''}
             </Badge>
           ) : undefined
         }
       />
       {published ? (
-        <Banner role="status" title={published} actions={<Button size="sm" variant="quiet" onClick={() => setPublished(null)}>Dismiss</Button>}>
-          Agents pick it up at their next policy check. Devices that haven&apos;t applied it show as “behind” in Devices.
+        <Banner role="status" title={published} actions={<Button size="sm" variant="quiet" onClick={() => setPublished(null)}>{t('common.dismiss')}</Button>}>
+          {t('adm.pol.agentsPick')}
         </Banner>
       ) : null}
       {list.error ? (
         <ErrorState error={list.error} onRetry={list.reload} />
       ) : !list.data ? (
-        <Loading label="Loading policies" />
+        <Loading label={t('adm.pol.loading')} />
       ) : (
         <div className={s.layout}>
           <ScopeTree
@@ -590,7 +595,7 @@ export default function PoliciesPage() {
             </section>
           ) : !detail.data ? (
             <section className={s.editor}>
-              <Loading label="Loading scope" />
+              <Loading label={t('adm.pol.loadingScope')} />
             </section>
           ) : (
             <ScopeEditor
@@ -602,7 +607,9 @@ export default function PoliciesPage() {
               onPublished={(d) => {
                 detail.mutate(() => d);
                 list.reload();
-                setPublished(`Published version ${d.scope.current?.version ?? ''} of ${TYPE_LABEL[scope.type].toLowerCase()} ${d.scope.scope_name || scope.name}`);
+                setPublished(
+                  t('adm.pol.publishedVersion', { version: d.scope.current?.version ?? '', scope: scopeLabel(scope.type).toLowerCase(), name: d.scope.scope_name || scope.name }),
+                );
               }}
             />
           )}

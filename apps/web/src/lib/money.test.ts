@@ -41,8 +41,8 @@ describe('money inputs', () => {
 
 describe('money navigation', () => {
   const me = (role: Me['user']['org_role'], entitlements: Me['entitlements']): Me => ({
-    user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: true, mfa_enabled: true },
-    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active' },
+    user: { id: 'u', email: 'e', display_name: 'D', org_role: role, timezone: 'UTC', tracking_enabled: true, mfa_enabled: true, locale: null },
+    organization: { id: 'o', name: 'Org', plan: 'pro', license: 'active', locale: null, logo_url: null },
     mfa_verified: true,
     managed_team_ids: [],
     managed_project_ids: [],

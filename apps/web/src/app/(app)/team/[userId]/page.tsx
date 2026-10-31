@@ -11,6 +11,7 @@ import { rd } from '@/lib/api';
 import { useMe } from '@/lib/me';
 import { daysRange, formatDayLabel, startOfWeek, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { NoAccess } from '../../NoAccess';
 
 export default function MemberDayPage() {
@@ -30,14 +31,14 @@ export default function MemberDayPage() {
     rd.teams.report(teamId!, { from: week.from, to: week.to }, tz, signal),
   );
   const member = report.data?.members.find((m) => m.user_id === userId);
-  const name = member?.display_name ?? search.get('name') ?? 'Team member';
+  const name = member?.display_name ?? search.get('name') ?? t('mgr.member.fallback');
   // What policy shares with this manager about this one person (not the team as a whole).
   const vis = useApi(access.managesTeams && userId ? `visibility|${userId}` : null, (signal) => rd.person.visibility(userId, signal));
   const visibility: Visibility | undefined = vis.data
     ? { activity: vis.data.activity, apps: vis.data.apps, screenshots: vis.data.screenshots }
     : undefined;
 
-  if (!access.managesTeams) return <NoAccess what="Member pages are for team managers." />;
+  if (!access.managesTeams) return <NoAccess what={t('mgr.member.noAccess')} />;
 
   return (
     <>
@@ -45,23 +46,23 @@ export default function MemberDayPage() {
         eyebrow={
           <>
             <Link href="/team" style={{ color: 'inherit' }}>
-              Team{report.data ? ` · ${report.data.team.name}` : ''}
+              {t('nav.team')}
+              {report.data ? ` · ${report.data.team.name}` : ''}
             </Link>
             &nbsp;· {formatDayLabel(date)}
           </>
         }
         title={name}
-        description={`The same day ${name} sees on their own page, limited to what policy shares with you.`}
+        description={t('mgr.member.description', { name })}
         actions={<DateSwitcher date={date} onDate={setDate} tz={tz} onTz={setTz} max={todayInTz(tz)} />}
       />
       <Banner tag="NOTE">
-        Your view of {name}&apos;s data is recorded and listed on their “What&apos;s collected” page. Computer activity
-        can&apos;t see meetings, calls, reading or thinking.
+        {t('mgr.member.note', { name })}
       </Banner>
       {vis.error ? (
-        <Banner tag="NOTE">You can&apos;t view this person&apos;s data. Only their team managers can.</Banner>
+        <Banner tag="NOTE">{t('mgr.member.cantView')}</Banner>
       ) : !vis.data ? (
-        <Loading label="Checking what policy shares with you" />
+        <Loading label={t('mgr.member.checking')} />
       ) : (
         <DayView
           userId={userId}

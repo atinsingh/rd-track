@@ -170,6 +170,8 @@ pub struct ScreenshotJob {
     pub max_width: u32,
     /// `screenshots.primary_monitor_only`.
     pub primary_monitor_only: bool,
+    /// `screenshots.blur`.
+    pub blur: bool,
     /// Closed if the session leaves `Active` before capture.
     pub gate: CaptureGate,
 }
@@ -227,7 +229,7 @@ impl ScreenshotApi for ApiClient {
     }
 }
 
-/// Runs one job: intent → capture → downscale → encode → upload → complete.
+/// Runs one job: intent → capture → downscale → (blur) → encode → upload → complete.
 pub fn run_job(
     job: &ScreenshotJob,
     api: &dyn ScreenshotApi,
@@ -267,6 +269,16 @@ pub fn run_job(
         Ok(f) => f,
         Err(e) => return ScreenshotOutcome::Failed(e),
     };
+    // Blurred here, before encoding: the sharp image never leaves this computer.
+    let blurred = job.blur || intent.blur;
+    let frame = if blurred {
+        match blur(&frame) {
+            Ok(f) => f,
+            Err(e) => return ScreenshotOutcome::Failed(e),
+        }
+    } else {
+        frame
+    };
     let bytes = match encode_jpeg(&frame, JPEG_QUALITY) {
         Ok(b) => b,
         Err(e) => return ScreenshotOutcome::Failed(e),
@@ -283,6 +295,7 @@ pub fn run_job(
         bytes: len,
         width: frame.width,
         height: frame.height,
+        blurred,
     };
     match api.complete(&req) {
         Ok(()) => ScreenshotOutcome::Completed {
@@ -328,9 +341,68 @@ pub fn downscale(frame: &RawFrame, max_width: u32) -> Result<RawFrame, String> {
     if frame.width <= max_width {
         return Ok(frame.clone());
     }
-    let (sw, sh) = (u64::from(frame.width), u64::from(frame.height));
     let (dw, dh) = scaled_size(frame.width, frame.height, max_width);
-    let (dw, dh) = (u64::from(dw), u64::from(dh));
+    area_resample(frame, dw, dh)
+}
+
+/// The smallest blur cell, in pixels: wider than a line of ordinary text.
+pub const BLUR_MIN_CELL: u32 = 16;
+
+/// Blurs a frame so text can't be read but windows and colours can still be told apart:
+/// each cell of about 1/80 of the width (at least [`BLUR_MIN_CELL`] px) is averaged, then
+/// the cells are blended smoothly back to full size. The result has the frame's size.
+pub fn blur(frame: &RawFrame) -> Result<RawFrame, String> {
+    validate(frame)?;
+    let cell = (frame.width / 80).max(BLUR_MIN_CELL);
+    let small = area_resample(
+        frame,
+        (frame.width / cell).max(1),
+        (frame.height / cell).max(1),
+    )?;
+    upscale_bilinear(&small, frame.width, frame.height)
+}
+
+/// Bilinear resize of a small frame up to `dw × dh`, sampling at pixel centres.
+fn upscale_bilinear(src: &RawFrame, dw: u32, dh: u32) -> Result<RawFrame, String> {
+    let (sw, sh) = (src.width as usize, src.height as usize);
+    let mut out = vec![
+        0u8;
+        usize::try_from(u64::from(dw) * u64::from(dh) * 4)
+            .map_err(|_| "frame too large")?
+    ];
+    let axis = |d: u32, dsize: u32, ssize: usize| {
+        let f = ((f64::from(d) + 0.5) * ssize as f64 / f64::from(dsize) - 0.5)
+            .clamp(0.0, (ssize - 1) as f64);
+        let i = f.floor() as usize;
+        (i, (i + 1).min(ssize - 1), f - i as f64)
+    };
+    for y in 0..dh {
+        let (y0, y1, fy) = axis(y, dh, sh);
+        for x in 0..dw {
+            let (x0, x1, fx) = axis(x, dw, sw);
+            let px = |xx: usize, yy: usize, c: usize| f64::from(src.rgba[(yy * sw + xx) * 4 + c]);
+            let o = (y as usize * dw as usize + x as usize) * 4;
+            for c in 0..4 {
+                let top = px(x0, y0, c) * (1.0 - fx) + px(x1, y0, c) * fx;
+                let bottom = px(x0, y1, c) * (1.0 - fx) + px(x1, y1, c) * fx;
+                out[o + c] = (top * (1.0 - fy) + bottom * fy).round().clamp(0.0, 255.0) as u8;
+            }
+        }
+    }
+    Ok(RawFrame {
+        width: dw,
+        height: dh,
+        rgba: out,
+    })
+}
+
+/// Area-average resample to exactly `dw × dh` (no larger than the frame).
+fn area_resample(frame: &RawFrame, dw: u32, dh: u32) -> Result<RawFrame, String> {
+    let (sw, sh) = (u64::from(frame.width), u64::from(frame.height));
+    let (dw, dh) = (
+        u64::from(dw.min(frame.width).max(1)),
+        u64::from(dh.min(frame.height).max(1)),
+    );
     let mut out = vec![0u8; usize::try_from(dw * dh * 4).map_err(|_| "frame too large")?];
     for dy in 0..dh {
         let (y0, y1) = (dy * sh / dh, ((dy + 1) * sh / dh).max(dy * sh / dh + 1));
@@ -491,6 +563,7 @@ mod tests {
         on_intent: Option<GateController>,
         uploaded: RefCell<Vec<u8>>,
         completed: RefCell<Option<CompleteRequest>>,
+        blur: bool,
     }
 
     impl ScreenshotApi for FakeApi {
@@ -510,6 +583,7 @@ mod tests {
                 upload_url: "http://minio/x".into(),
                 upload_headers: Default::default(),
                 expires_at: None,
+                blur: self.blur,
             })
         }
         fn upload(&self, _i: &UploadIntentResponse, bytes: Vec<u8>) -> Result<(), ApiError> {
@@ -529,8 +603,95 @@ mod tests {
             session_id: Uuid::nil(),
             max_width: 640,
             primary_monitor_only: true,
+            blur: false,
             gate: gates.gate(),
         }
+    }
+
+    /// Black-on-white "text": one-pixel strokes every few pixels, like a page of writing.
+    fn text_like(w: u32, h: u32) -> RawFrame {
+        let mut rgba = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let ink = (y % 6 < 4) && (x % 3 == 0 || (x + y) % 5 == 0);
+                let v = if ink { 0 } else { 255 };
+                rgba.extend_from_slice(&[v, v, v, 255]);
+            }
+        }
+        RawFrame {
+            width: w,
+            height: h,
+            rgba,
+        }
+    }
+
+    /// Largest difference between horizontally neighbouring pixels (sharp edges = text).
+    fn sharpest_edge(f: &RawFrame) -> u8 {
+        let mut max = 0;
+        for y in 0..f.height as usize {
+            for x in 1..f.width as usize {
+                let i = (y * f.width as usize + x) * 4;
+                max = max.max(f.rgba[i].abs_diff(f.rgba[i - 4]));
+            }
+        }
+        max
+    }
+
+    #[test]
+    fn blur_leaves_no_readable_edges_but_keeps_the_layout() {
+        let page = text_like(640, 360);
+        assert_eq!(sharpest_edge(&page), 255);
+        let b = blur(&page).unwrap();
+        assert_eq!((b.width, b.height), (640, 360));
+        assert!(sharpest_edge(&b) < 24, "edges left: {}", sharpest_edge(&b));
+
+        // A red window on the left and a blue one on the right stay red and blue.
+        let mut two = RawFrame {
+            width: 640,
+            height: 360,
+            rgba: Vec::new(),
+        };
+        for _ in 0..360 {
+            for x in 0..640 {
+                two.rgba.extend_from_slice(if x < 320 {
+                    &[220, 30, 30, 255]
+                } else {
+                    &[30, 30, 220, 255]
+                });
+            }
+        }
+        let b = blur(&two).unwrap();
+        let at = |x: usize, y: usize| &b.rgba[(y * 640 + x) * 4..(y * 640 + x) * 4 + 3];
+        assert_eq!(at(10, 180), &[220, 30, 30]);
+        assert_eq!(at(630, 180), &[30, 30, 220]);
+        // Tiny frames still work.
+        assert_eq!(blur(&text_like(5, 3)).unwrap().width, 5);
+    }
+
+    #[test]
+    fn blurs_before_encoding_when_the_policy_or_the_server_says_so() {
+        let gates = GateController::new();
+        let cap = FakeCapturer::new(1280, 720);
+        let clock = FakeClock::new(t0());
+        let api = FakeApi::default();
+        run_job(&job(&gates), &api, cap.as_ref(), &clock);
+        assert!(!api.completed.borrow().clone().unwrap().blurred);
+
+        let mut j = job(&gates);
+        j.blur = true;
+        let api = FakeApi::default();
+        run_job(&j, &api, cap.as_ref(), &clock);
+        assert!(api.completed.borrow().clone().unwrap().blurred);
+
+        // The server's word counts even when this computer's policy copy is older.
+        let api = FakeApi {
+            blur: true,
+            ..Default::default()
+        };
+        run_job(&job(&gates), &api, cap.as_ref(), &clock);
+        let done = api.completed.borrow().clone().unwrap();
+        assert!(done.blurred);
+        assert_eq!((done.width, done.height), (640, 360));
     }
 
     #[test]

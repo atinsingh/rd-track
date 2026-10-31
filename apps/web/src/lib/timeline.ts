@@ -1,4 +1,6 @@
 import type { ActivityBucketDTO, IntervalDTO } from '@rd/contracts';
+import { formatPercent } from './format';
+import { t } from './i18n';
 
 /**
  * Builds the "My day" activity timeline (UX §3.1): one column per N minutes
@@ -177,25 +179,20 @@ export function timelineRuns(cols: readonly TimelineColumn[]): TimelineRun[] {
   return runs;
 }
 
-export const KIND_LABEL: Record<ColumnKind, string> = {
-  activity: 'In a session',
-  paused: 'Paused',
-  offline: 'Asleep or offline',
-  permission: 'No permission to measure',
-  none: 'No session',
-};
+/** How each kind of column reads, in the current language. */
+export const kindLabel = (k: ColumnKind): string => t(`timeline.kind.${k}`);
 
 /** Plain-language text alternative for the whole chart. */
 export function describeTimeline(runs: readonly TimelineRun[], fmtTime: (ms: number) => string): string {
-  if (runs.length === 0) return 'No sessions in this period.';
+  if (runs.length === 0) return t('timeline.none');
   const parts = runs.map((r) => {
-    const span = `${fmtTime(r.start)} to ${fmtTime(r.end)}`;
+    const span = t('timeline.span', { from: fmtTime(r.start), to: fmtTime(r.end) });
     if (r.kind === 'activity') {
       const m = r.activeSeconds + r.idleSeconds;
       const pct = m > 0 ? Math.round((r.activeSeconds / m) * 100) : null;
-      return `${span} in a session${pct === null ? '' : `, ${pct}% computer activity`}`;
+      return pct === null ? t('timeline.inSession', { span }) : t('timeline.inSessionPct', { span, pct: formatPercent(pct) });
     }
-    return `${span} ${KIND_LABEL[r.kind].toLowerCase()}`;
+    return `${span} ${kindLabel(r.kind).toLowerCase()}`;
   });
-  return `Activity timeline: ${parts.join('; ')}.`;
+  return t('timeline.summary', { parts: parts.join('; ') });
 }

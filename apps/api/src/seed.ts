@@ -11,6 +11,7 @@ import { migrate } from './db/migrate';
 import { hashPassword, randomToken, sha256Hex } from './lib/crypto';
 import { createOrganization } from './modules/platform/routes';
 import { MemoryObjectStore } from './storage/object-store';
+import { recordIdleDecision } from './modules/idle/service';
 import { ConsoleEmailSender } from './email/sender';
 
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'track-demo-2026';
@@ -52,7 +53,7 @@ async function publish(q: Queryable, orgId: string, by: string, scopeType: strin
   );
 }
 
-async function demoDay(q: Queryable, orgId: string, userId: string, deviceId: string, projectId: string, day: Date, quality: string) {
+async function demoDay(q: Queryable, orgId: string, userId: string, deviceId: string, projectId: string, day: Date, quality: string, domains = false) {
   const blocks: [number, number][] = [
     [9 * 60 + Math.floor(rand() * 20), 12 * 60 + Math.floor(rand() * 10)],
     [13 * 60 + Math.floor(rand() * 10), 17 * 60 + Math.floor(rand() * 40)],
@@ -98,16 +99,20 @@ async function demoDay(q: Queryable, orgId: string, userId: string, deviceId: st
       ['com.tinyspeck.slackmacgap', 'Slack', 0.1],
       ['us.zoom.xos', 'Zoom', 0.05],
     ] as const;
+    // Website domains (Pro), where the project's policy records them: the browser's time by site.
+    const sites = ['github.com', 'docs.google.com', 'stackoverflow.com', 'developer.mozilla.org'];
     let cursor = start.getTime();
     const total = (end.getTime() - start.getTime()) / 1000;
     for (const [id, name, share] of apps) {
       let left = Math.round(total * share);
+      let n = 0;
       while (left > 0) {
-        const d = Math.min(3600, left);
+        const domain = domains && id === 'com.google.Chrome' ? sites[n++ % sites.length]! : null;
+        const d = Math.min(domain ? 900 : 3600, left);
         await q.query(
-          `INSERT INTO app_usage (organization_id, session_id, user_id, event_id, app_identifier, app_name, started_at, duration_seconds)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-          [orgId, sid, userId, randomUUID(), id, name, new Date(cursor).toISOString(), d],
+          `INSERT INTO app_usage (organization_id, session_id, user_id, event_id, app_identifier, app_name, domain, started_at, duration_seconds)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+          [orgId, sid, userId, randomUUID(), id, name, domain, new Date(cursor).toISOString(), d],
         );
         cursor += d * 1000;
         left -= d;
@@ -147,6 +152,7 @@ async function main() {
       sara: await addUser(q, orgId, 'sara@rounddigital.example', 'Sara Lindqvist'),
     };
     await addUser(q, orgId, 'audit@rounddigital.example', 'Robin Auditor', 'auditor', false);
+    await addUser(q, orgId, 'finance@rounddigital.example', 'Morgan Ellis', 'finance', false);
 
     const team = async (name: string) => (await one<{ id: string }>(q, `INSERT INTO teams (organization_id, name) VALUES ($1, $2) RETURNING id`, [orgId, name]))!.id;
     const platform = await team('Platform');
@@ -184,6 +190,15 @@ async function main() {
       { screenshots: { enabled: true, interval_minutes: 15 }, viewers: { manager_can_view_screenshots: true } },
       'Client contract §7 requires visual evidence of work on deliverables. Approved by HR and Legal.',
     );
+    await publish(
+      q,
+      orgId,
+      adminId,
+      'project',
+      clientB,
+      { apps: { capture_domains: true } },
+      'Client B is billed per research source: record website domains (the domain only) on its sessions.',
+    );
 
     // Synthetic history for the last 5 weekdays.
     const today = new Date();
@@ -191,8 +206,8 @@ async function main() {
     for (const [name, uid] of Object.entries({ priya, ...people })) {
       const dev = await one<{ id: string }>(
         q,
-        `INSERT INTO devices (organization_id, user_id, name, os, os_version, agent_version, credential_hash, last_seen_at, last_sync_at, applied_policy_revision, permissions)
-         VALUES ($1, $2, $3, $4, $5, '0.1.0', $6, now(), now(), 3, $7) RETURNING id`,
+        `INSERT INTO devices (organization_id, user_id, name, os, os_version, agent_version, credential_hash, last_seen_at, last_sync_at, applied_policy_revision, permissions, browser_extensions)
+         VALUES ($1, $2, $3, $4, $5, '0.1.0', $6, now(), now(), 4, $7, $8) RETURNING id`,
         [
           orgId,
           uid,
@@ -201,14 +216,29 @@ async function main() {
           name === 'alex' || name === 'sara' ? '11 24H2' : '15.6',
           sha256Hex(randomToken()),
           { input_monitoring: 'granted', screen_recording: name === 'tom' ? 'denied' : 'granted', accessibility: 'granted' },
+          name === 'tom' ? [] : name === 'sara' ? ['chromium', 'firefox'] : ['chromium'],
         ],
       );
       for (let d = 1; d <= 7; d++) {
         const day = new Date(today.getTime() - d * 86_400_000);
         if ([0, 6].includes(day.getUTCDay())) continue;
         const proj = name === 'sara' ? internal : rand() < 0.65 ? clientA : clientB;
-        await demoDay(q, orgId, uid, dev!.id, proj, day, name === 'tom' && d === 2 ? 'permission_missing' : 'ok');
+        await demoDay(q, orgId, uid, dev!.id, proj, day, name === 'tom' && d === 2 ? 'permission_missing' : 'ok', proj === clientB && name !== 'tom');
       }
+    }
+    // Stage 4 F1: on her latest day Priya removed one idle run and asked to move another.
+    const last = await one<{ id: string; device_id: string; started_at: string; ended_at: string }>(
+      q,
+      `SELECT id, device_id, started_at, ended_at FROM work_sessions WHERE user_id = $1 AND source = 'agent' ORDER BY started_at DESC LIMIT 1`,
+      [priya],
+    );
+    if (last) {
+      const t0 = new Date(last.started_at).getTime();
+      const span = (fromMin: number, len: number) => [new Date(t0 + fromMin * 60_000).toISOString(), new Date(t0 + (fromMin + len) * 60_000).toISOString()] as const;
+      const [a1, a2] = span(52, 18);
+      const [b1, b2] = span(118, 25);
+      await recordIdleDecision(deps, q, last.device_id, { eventId: randomUUID(), sessionId: last.id, startedAt: a1, endedAt: a2, decision: 'discard', projectId: null, taskId: null });
+      await recordIdleDecision(deps, q, last.device_id, { eventId: randomUUID(), sessionId: last.id, startedAt: b1, endedAt: b2, decision: 'reassign', projectId: internal, taskId: null });
     }
     console.log(`Seeded organization "RoundDigital" (${orgId}).`);
   });

@@ -18,3 +18,12 @@ export function currentScope(): string {
 export function withScope<T>(org: string, fn: () => Promise<T>): Promise<T> {
   return tenantScope.run({ org }, fn);
 }
+
+/**
+ * Whether any organization has a matching row: for global uniqueness (email addresses,
+ * verified domains) checked from inside one tenant's scope. Returns nothing else.
+ */
+export async function existsAnywhere(pool: { query(text: string, values?: unknown[]): Promise<{ rowCount: number | null }> }, sql: string, args: unknown[]): Promise<boolean> {
+  const r = await withScope(SYSTEM_SCOPE, () => pool.query(sql, args));
+  return Boolean(r.rowCount);
+}

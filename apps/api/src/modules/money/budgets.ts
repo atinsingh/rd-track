@@ -13,9 +13,11 @@ import { many, one, withTx, type Queryable } from '../../db/pool';
 import { withScope } from '../../db/tenant-scope';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { notify } from '../engine/notify';
 import { managedProjectIds } from '../authz';
 import { assertInOrg } from '../org/service';
 import { assertMoneyPlan, groupSeconds, hasMoneyPlan, timeWithBillRates } from './time';
+import type { Lang } from '../../i18n';
 
 /**
  * Project budgets (hours or amount), alert thresholds and stop-at-budget.
@@ -186,19 +188,18 @@ export async function checkBudget(deps: Pick<Deps, 'now'>, q: Queryable, b: Budg
   const u = await usage(q, b, deps.now());
   const due = b.alert_thresholds.filter((t) => u.used_percent >= t);
   if (due.length === 0) return 0;
-  const recipients = (
-    await many<{ id: string }>(
-      q,
-      `SELECT id FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin')
-       UNION
-       SELECT pm.user_id FROM project_memberships pm JOIN users u ON u.id = pm.user_id
-       WHERE pm.organization_id = $1 AND pm.project_id = $2 AND pm.role = 'manager' AND pm.valid_to IS NULL AND u.status = 'active'`,
-      [b.organization_id, b.project_id],
-    )
-  ).map((r) => r.id);
-  const used = b.kind === 'hours' ? formatDuration(u.used_seconds) : amountText(b, u.used_cents!);
-  const limit = b.kind === 'hours' ? formatDuration(b.limit_value) : amountText(b, b.limit_value);
-  const when = b.resets === 'monthly' ? ' this month' : '';
+  // Project managers open the project report; admins who don't manage it open Rates and budgets.
+  const recipients = await many<{ id: string; manages: boolean }>(
+    q,
+    `SELECT pm.user_id AS id, true AS manages FROM project_memberships pm JOIN users u ON u.id = pm.user_id
+     WHERE pm.organization_id = $1 AND pm.project_id = $2 AND pm.role = 'manager' AND pm.valid_to IS NULL AND u.status = 'active'
+     UNION
+     SELECT id, false FROM users WHERE organization_id = $1 AND status = 'active' AND org_role IN ('org_admin', 'super_admin', 'finance')
+       AND id NOT IN (SELECT user_id FROM project_memberships WHERE project_id = $2 AND role = 'manager' AND valid_to IS NULL)`,
+    [b.organization_id, b.project_id],
+  );
+  const used = (l: Lang) => (b.kind === 'hours' ? formatDuration(u.used_seconds) : l.money(u.used_cents!, b.currency ?? 'USD'));
+  const limit = (l: Lang) => (b.kind === 'hours' ? formatDuration(b.limit_value) : l.money(b.limit_value, b.currency ?? 'USD'));
   let sent = 0;
   // Only the highest newly crossed threshold produces a notification; lower ones are marked sent too.
   const fresh: number[] = [];
@@ -212,20 +213,17 @@ export async function checkBudget(deps: Pick<Deps, 'now'>, q: Queryable, b: Budg
   }
   if (fresh.length === 0) return 0;
   const top = Math.max(...fresh);
-  const title = top >= 100 ? `${b.project_name} has reached its budget` : `${b.project_name} has used ${top}% of its budget`;
-  let body = `${used} of ${limit} used${when}.`;
-  if (b.stop_at_budget && top >= 100) {
-    body += " New sessions on this project can't be started until the budget is raised or resets. Sessions already running are not stopped.";
-  }
-  for (const userId of recipients) {
-    await q.query(`INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'project_budget', $3, $4)`, [
-      b.organization_id,
-      userId,
-      title,
-      body,
-    ]);
-    sent++;
-  }
+  const title = (l: Lang) =>
+    top >= 100
+      ? l.t('budget.reached', { project: b.project_name })
+      : l.t('budget.used', { project: b.project_name, pct: new Intl.NumberFormat(l.locale, { style: 'percent' }).format(top / 100) });
+  const body = (l: Lang) => {
+    const text = l.t(b.resets === 'monthly' ? 'budget.bodyMonth' : 'budget.body', { used: used(l), limit: limit(l) });
+    return b.stop_at_budget && top >= 100 ? `${text} ${l.t('budget.stopped')}` : text;
+  };
+  const note = { kind: 'project_budget', category: 'budgets' as const, title, body };
+  sent += await notify(q, b.organization_id, recipients.filter((r) => r.manages).map((r) => r.id), { ...note, link: `/projects?project=${b.project_id}` });
+  sent += await notify(q, b.organization_id, recipients.filter((r) => !r.manages).map((r) => r.id), { ...note, link: '/admin/rates' });
   return sent;
 }
 

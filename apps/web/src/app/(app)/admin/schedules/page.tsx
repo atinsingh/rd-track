@@ -9,9 +9,10 @@ import { SelectField, TextField } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, TableBox, formActionsClass, formGridClass, tableClass } from '@/components/ui/Layout';
 import { byName } from '@/lib/format';
 import { rd } from '@/lib/api';
+import { t } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 import { sched, shiftTimesLabel, weekdaysLabel } from '@/lib/scheduling';
-import { WEEKDAY_SHORT, addDays, formatShortDay, timeZoneOptions, todayInTz } from '@/lib/time';
+import { addDays, formatShortDay, timeZoneOptions, todayInTz, weekdaysShort } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
 import { NoAccess } from '../../NoAccess';
 
@@ -35,19 +36,19 @@ function SettingsForm({ settings, onSaved }: { settings: SchedulingSettingsDTO; 
   return (
     <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
       <div className={formGridClass}>
-        <TextField label="Late after (minutes)" hint="Grace after the shift start" type="number" min={0} max={240} value={late} onChange={(e) => setLate(e.target.value)} required />
-        <TextField label="Left early before (minutes)" hint="Grace before the shift end" type="number" min={0} max={240} value={early} onChange={(e) => setEarly(e.target.value)} required />
-        <TextField label="Default day (hours)" hint="What a full day of leave costs, Mon–Fri, for people without a shift" type="number" min={0.5} max={24} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} required />
+        <TextField label={t('adm.sch.lateAfter')} hint={t('adm.sch.lateHint')} type="number" min={0} max={240} value={late} onChange={(e) => setLate(e.target.value)} required />
+        <TextField label={t('adm.sch.earlyBefore')} hint={t('adm.sch.earlyHint')} type="number" min={0} max={240} value={early} onChange={(e) => setEarly(e.target.value)} required />
+        <TextField label={t('adm.sch.defaultDay')} hint={t('adm.sch.defaultDayHint')} type="number" min={0.5} max={24} step={0.5} value={hours} onChange={(e) => setHours(e.target.value)} required />
       </div>
       <ActionError error={action.error} />
       {saved ? (
         <p role="status" className="small">
-          Saved. Attendance is worked out when it&apos;s viewed, so past days use the new settings too.
+          {t('adm.sch.savedNote')}
         </p>
       ) : null}
       <div className={formActionsClass}>
         <Button type="submit" disabled={action.busy}>
-          Save settings
+          {t('adm.sch.saveSettings')}
         </Button>
       </div>
     </form>
@@ -85,41 +86,41 @@ function ShiftForm({ users, onCreated }: { users: UserDTO[]; onCreated: (s: Shif
   return (
     <form onSubmit={submit} className="stack" style={{ gap: 14 }}>
       <div className={formGridClass}>
-        <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)} required>
-          <option value="">Choose a person…</option>
+        <SelectField label={t('adm.common.person')} value={userId} onChange={(e) => setUserId(e.target.value)} required>
+          <option value="">{t('adm.common.choosePerson')}</option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
               {u.display_name}
             </option>
           ))}
         </SelectField>
-        <TextField label="Starts" type="time" value={start} onChange={(e) => setStart(e.target.value)} required />
-        <TextField label="Ends" type="time" value={end} onChange={(e) => setEnd(e.target.value)} hint={end <= start ? 'Ends the next day (overnight)' : undefined} required />
-        <SelectField label="Time zone" value={tz} onChange={(e) => setTz(e.target.value)}>
-          <option value="">Person&apos;s time zone{person ? ` (${person.timezone})` : ''}</option>
+        <TextField label={t('adm.common.starts')} type="time" value={start} onChange={(e) => setStart(e.target.value)} required />
+        <TextField label={t('adm.common.ends')} type="time" value={end} onChange={(e) => setEnd(e.target.value)} hint={end <= start ? t('adm.sch.overnight') : undefined} required />
+        <SelectField label={t('date.timeZone')} value={tz} onChange={(e) => setTz(e.target.value)}>
+          <option value="">{person ? t('adm.sch.personTzOf', { tz: person.timezone }) : t('adm.sch.personTz')}</option>
           {zones.map((z) => (
             <option key={z} value={z}>
               {z}
             </option>
           ))}
         </SelectField>
-        <TextField label="From" type="date" value={from} onChange={(e) => setFrom(e.target.value)} required />
-        <TextField label="Until (optional)" type="date" min={from} value={to} onChange={(e) => setTo(e.target.value)} />
+        <TextField label={t('adm.common.from')} type="date" value={from} onChange={(e) => setFrom(e.target.value)} required />
+        <TextField label={t('adm.common.untilOptional')} type="date" min={from} value={to} onChange={(e) => setTo(e.target.value)} />
       </div>
       <fieldset className={s.weekdayPicks}>
-        <legend>Days</legend>
-        {WEEKDAY_SHORT.map((label, i) => (
+        <legend>{t('adm.common.days')}</legend>
+        {weekdaysShort().map((label, i) => (
           <label key={label}>
             <input type="checkbox" checked={days.includes(i + 1)} onChange={() => toggle(i + 1)} />
             {label}
           </label>
         ))}
       </fieldset>
-      <p className="small muted">The person is notified when their schedule changes. An overnight shift belongs to the day it starts.</p>
+      <p className="small muted">{t('adm.sch.notifyNote')}</p>
       <ActionError error={action.error} />
       <div className={formActionsClass}>
         <Button type="submit" variant="primary" disabled={!userId || days.length === 0 || start === end || action.busy}>
-          Assign shift
+          {t('adm.sch.assign')}
         </Button>
       </div>
     </form>
@@ -147,28 +148,28 @@ function OverrideForm({ users, onSaved }: { users: UserDTO[]; onSaved: () => voi
   };
   return (
     <form onSubmit={submit} className={s.inlineForm}>
-      <SelectField label="Person" value={userId} onChange={(e) => setUserId(e.target.value)} required>
-        <option value="">Choose a person…</option>
+      <SelectField label={t('adm.common.person')} value={userId} onChange={(e) => setUserId(e.target.value)} required>
+        <option value="">{t('adm.common.choosePerson')}</option>
         {users.map((u) => (
           <option key={u.id} value={u.id}>
             {u.display_name}
           </option>
         ))}
       </SelectField>
-      <TextField label="Day" type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
-      <SelectField label="Change" value={kind} onChange={(e) => setKind(e.target.value as 'change' | 'cancel')}>
-        <option value="cancel">No shift that day</option>
-        <option value="change">Different hours</option>
+      <TextField label={t('adm.common.day')} type="date" value={date} onChange={(e) => setDate(e.target.value)} required />
+      <SelectField label={t('adm.sch.change')} value={kind} onChange={(e) => setKind(e.target.value as 'change' | 'cancel')}>
+        <option value="cancel">{t('adm.sch.noShiftThatDay')}</option>
+        <option value="change">{t('adm.sch.differentHours')}</option>
       </SelectField>
       {kind === 'change' ? (
         <>
-          <TextField label="Starts" type="time" value={start} onChange={(e) => setStart(e.target.value)} required />
-          <TextField label="Ends" type="time" value={end} onChange={(e) => setEnd(e.target.value)} required />
+          <TextField label={t('adm.common.starts')} type="time" value={start} onChange={(e) => setStart(e.target.value)} required />
+          <TextField label={t('adm.common.ends')} type="time" value={end} onChange={(e) => setEnd(e.target.value)} required />
         </>
       ) : null}
-      <TextField label="Note (optional)" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
+      <TextField label={t('adm.common.noteOptional')} value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
       <Button type="submit" disabled={!userId || action.busy}>
-        Save change
+        {t('adm.sch.saveChange')}
       </Button>
       <ActionError error={action.error} />
     </form>
@@ -186,15 +187,15 @@ export default function SchedulesAdminPage() {
   const remove = useAction();
   const [ended, setEnded] = useState<string | null>(null);
 
-  if (!access.isAdmin) return <NoAccess what="Schedules are managed by org admins." />;
-  if (!enabled) return <NoAccess what="Schedules and attendance are part of the Pro plan. An org admin can change the plan in Billing." />;
+  if (!access.isAdmin) return <NoAccess what={t('adm.sch.noAccessAdmin')} />;
+  if (!enabled) return <NoAccess what={t('adm.sch.noAccessPlan')} />;
   const people = [...(users.data ?? [])].filter((u) => u.status === 'active').sort(byName);
 
   const removeShift = async (x: ShiftDTO) => {
     setEnded(null);
     const r = await remove.run(() => sched.admin.removeShift(x.id));
     if (r) {
-      setEnded(r.ended ? `${x.user_name}'s shift ends yesterday; past attendance keeps it.` : `${x.user_name}'s future shift was removed.`);
+      setEnded(r.ended ? t('adm.sch.endedPast', { name: x.user_name }) : t('adm.sch.removedFuture', { name: x.user_name }));
       shifts.reload();
     }
   };
@@ -202,37 +203,37 @@ export default function SchedulesAdminPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Schedules"
-        title="Schedules"
-        description="Recurring shifts per person, one-off changes and how attendance is worked out. Attendance is about the schedule, never a score."
+        eyebrow={t('adm.sch.eyebrow')}
+        title={t('adm.sch.title')}
+        description={t('adm.sch.description')}
       />
-      <Card title="Attendance settings">
-        <Resource {...settings} label="Loading settings">
+      <Card title={t('adm.sch.settings')}>
+        <Resource {...settings} label={t('adm.sch.loadingSettings')}>
           {(data) => <SettingsForm key={JSON.stringify(data)} settings={data} onSaved={(x) => settings.mutate(() => x)} />}
         </Resource>
       </Card>
-      <Card title="Assign a recurring shift">
+      <Card title={t('adm.sch.assignTitle')}>
         <ShiftForm users={people} onCreated={(x) => shifts.mutate((prev) => [...(prev ?? []), x])} />
       </Card>
-      <Card title="Shifts">
+      <Card title={t('adm.sch.shifts')}>
         {ended ? <Banner role="status" title={ended} /> : null}
         <ActionError error={remove.error} />
-        <Resource {...shifts} label="Loading shifts">
+        <Resource {...shifts} label={t('adm.sch.loadingShifts')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No shifts yet" />
+              <Empty title={t('adm.sch.noShifts')} />
             ) : (
-              <TableBox label="Shifts">
+              <TableBox label={t('adm.sch.shifts')}>
                 <table className={tableClass} style={{ minWidth: 720 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Person</th>
-                      <th scope="col">Days</th>
-                      <th scope="col">Hours</th>
-                      <th scope="col">Time zone</th>
-                      <th scope="col">In effect</th>
+                      <th scope="col">{t('adm.common.person')}</th>
+                      <th scope="col">{t('adm.common.days')}</th>
+                      <th scope="col">{t('adm.common.hours')}</th>
+                      <th scope="col">{t('date.timeZone')}</th>
+                      <th scope="col">{t('adm.sch.inEffect')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -246,12 +247,12 @@ export default function SchedulesAdminPage() {
                           <td className="mono">{shiftTimesLabel(x)}</td>
                           <td className="small">{x.timezone}</td>
                           <td className="small">
-                            {formatShortDay(x.effective_from)} – {x.effective_to ? formatShortDay(x.effective_to) : 'ongoing'}
+                            {formatShortDay(x.effective_from)} – {x.effective_to ? formatShortDay(x.effective_to) : t('adm.sch.ongoing')}
                           </td>
                           <td>
                             {!x.effective_to || x.effective_to >= today ? (
-                              <Button size="sm" variant="danger" disabled={remove.busy} onClick={() => removeShift(x)} aria-label={`End ${x.user_name}'s shift`}>
-                                {x.effective_from >= today ? 'Remove' : 'End'}
+                              <Button size="sm" variant="danger" disabled={remove.busy} onClick={() => removeShift(x)} aria-label={t('adm.sch.endLabel', { name: x.user_name })}>
+                                {x.effective_from >= today ? t('adm.common.remove') : t('adm.sch.end')}
                               </Button>
                             ) : null}
                           </td>
@@ -264,23 +265,23 @@ export default function SchedulesAdminPage() {
           }
         </Resource>
       </Card>
-      <Card title="One-off changes" subtitle="Last week and the next 90 days">
+      <Card title={t('adm.sch.oneOff')} subtitle={t('adm.sch.oneOffSub')}>
         <OverrideForm users={people} onSaved={overrides.reload} />
-        <Resource {...overrides} label="Loading changes">
+        <Resource {...overrides} label={t('adm.sch.loadingChanges')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No one-off changes" />
+              <Empty title={t('adm.sch.noOneOff')} />
             ) : (
-              <TableBox label="One-off changes">
+              <TableBox label={t('adm.sch.oneOff')}>
                 <table className={tableClass}>
                   <thead>
                     <tr>
-                      <th scope="col">Day</th>
-                      <th scope="col">Person</th>
-                      <th scope="col">Change</th>
-                      <th scope="col">Note</th>
+                      <th scope="col">{t('adm.common.day')}</th>
+                      <th scope="col">{t('adm.common.person')}</th>
+                      <th scope="col">{t('adm.sch.change')}</th>
+                      <th scope="col">{t('adm.common.note')}</th>
                       <th scope="col">
-                        <span className="visually-hidden">Actions</span>
+                        <span className="visually-hidden">{t('adm.common.actions')}</span>
                       </th>
                     </tr>
                   </thead>
@@ -289,7 +290,7 @@ export default function SchedulesAdminPage() {
                       <tr key={o.id}>
                         <td>{formatShortDay(o.date)}</td>
                         <td>{o.user_name}</td>
-                        <td className="mono">{o.kind === 'cancel' ? 'No shift' : shiftTimesLabel({ start_time: o.start_time!, end_time: o.end_time! })}</td>
+                        <td className="mono">{o.kind === 'cancel' ? t('adm.sch.noShift') : shiftTimesLabel({ start_time: o.start_time!, end_time: o.end_time! })}</td>
                         <td className="small secondary">{o.note ?? '—'}</td>
                         <td>
                           <Button
@@ -300,7 +301,7 @@ export default function SchedulesAdminPage() {
                               if (await remove.run(() => sched.admin.removeOverride(o.id))) overrides.reload();
                             }}
                           >
-                            Undo
+                            {t('adm.common.undo')}
                           </Button>
                         </td>
                       </tr>

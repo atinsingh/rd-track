@@ -37,6 +37,7 @@ jobs:
       - run: pnpm --filter @rd/contracts test
       - run: pnpm --filter @rd/api test
       - run: pnpm --filter @rd/api build
+      - run: node --test agent/browser-extension/test/*.test.mjs
       - run: pnpm --filter @rd/web lint
       - run: pnpm --filter @rd/web test
       - run: pnpm --filter @rd/web build
@@ -93,3 +94,12 @@ jobs:
       - run: ./scripts/e2e-agent.sh
         env:
           E2E_DURATION: "130"
+      # Website domains: the extension in a real Chromium, the agent as its native host.
+      - name: Install Playwright's Chromium
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.55.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+      - run: ./scripts/e2e-browser.sh
+        env:
+          E2E_DATABASE_URL: postgres://rd:rd@localhost:5432/rd_track_e2e_browser
+          PLAYWRIGHT_NODE_PATH: ${{ runner.temp }}/pw/node_modules

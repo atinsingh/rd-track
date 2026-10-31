@@ -1,7 +1,6 @@
 .app {
   min-height: 100vh;
   display: flex;
-  background: var(--canvas);
 }
 .skip {
   position: absolute;
@@ -19,19 +18,33 @@
 }
 
 /* ───── Rail ───── */
+/* Floating dark glass (Stage 4 design direction). */
 .rail {
   flex: 0 0 var(--rail-width);
   width: var(--rail-width);
-  background: var(--ink);
+  margin: 12px 0 12px 12px;
+  background: var(--ink-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--ink-glass-edge);
+  box-shadow: var(--ink-glass-shadow);
+  border-radius: var(--radius-panel);
   color: var(--ink-text);
   padding: 22px 0;
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 16px;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 12px;
+  height: calc(100vh - 24px);
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-border) transparent;
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .rail {
+    background: var(--ink);
+  }
 }
 .rail :focus-visible {
   outline-color: #fff;
@@ -41,7 +54,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 0 20px;
+  padding: 0 0 0 20px;
   text-decoration: none;
   min-height: 32px;
 }
@@ -50,59 +63,178 @@
   height: 24px;
   width: auto;
 }
+/* The organization's own logo (G26), under the product mark. */
+.orgLogo {
+  align-self: flex-start;
+  margin: 0 20px 12px;
+}
 .product {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.12em;
   color: var(--ink-text);
   border: 1px solid var(--ink-border);
+  border-radius: var(--radius-badge);
   padding: 1px 6px;
+}
+.view {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 16px 0;
+}
+.viewLabel {
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.viewSelect {
+  flex: 1;
+  min-width: 0;
+  min-height: 36px;
+  padding: 0 10px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: var(--radius-control);
+  background: var(--ink-hover);
+  color: #fff;
+  font-size: 13px;
+}
+.viewSelect option {
+  color: var(--text);
+}
+.search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 16px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid rgb(255 255 255 / 0.1);
+  border-radius: var(--radius-control);
+  background: var(--ink-hover);
+  color: var(--ink-muted);
+  font-size: 13px;
+  text-align: left;
+}
+.search:hover {
+  color: #fff;
+  border-color: rgb(255 255 255 / 0.2);
+}
+.searchText {
+  flex: 1;
+  min-width: 0;
+}
+.kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-text);
+  border: 1px solid var(--ink-border);
+  border-radius: var(--radius-badge);
+  padding: 0 5px;
+  white-space: nowrap;
 }
 .menuBtn {
   display: none;
 }
+.barActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 10px;
   flex: 1;
 }
 .group {
   display: flex;
   flex-direction: column;
 }
-.groupLabel {
+.groupBtn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  margin: 0 8px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: none;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--ink-muted);
-  padding: 0 20px 8px;
+  text-align: left;
+}
+.groupBtn:hover:not([aria-disabled='true']) {
+  color: #fff;
+  background: var(--ink-hover);
+}
+.groupBtn[aria-disabled='true'] {
+  cursor: default;
+}
+.groupMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.groupCount {
+  letter-spacing: 0;
+  color: var(--ink-text);
+}
+/* Folded group with approvals waiting: the number stays in view, boxed like the item badge. */
+.groupCountAlert {
+  color: #fff;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--radius-badge);
+  padding: 0 6px;
+}
+.chev {
+  transition: transform 120ms ease-out;
+}
+.chevOpen {
+  transform: rotate(90deg);
+}
+.items {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 0;
 }
 .link {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  min-height: var(--target);
-  padding: 10px 20px;
+  min-height: 40px;
+  margin: 0 8px;
+  padding: 9px 12px;
+  border-radius: var(--radius-control);
   text-decoration: none;
   color: var(--ink-text);
 }
 .link:hover {
   color: #fff;
-  background: #121418;
+  background: var(--ink-hover);
 }
 .link[aria-current='page'] {
   color: #fff;
-  background: var(--ink-raised);
+  background: var(--ink-current);
   box-shadow: inset 3px 0 0 var(--brand-red);
   font-weight: 600;
+}
+@media (forced-colors: active) {
+  .link[aria-current='page'] {
+    outline: 2px solid LinkText;
+  }
 }
 .count {
   font-family: var(--font-mono);
   font-size: 12px;
   color: #fff;
   border: 1px solid var(--ink-border);
+  border-radius: var(--radius-badge);
   padding: 0 7px;
 }
 .user {
@@ -117,6 +249,7 @@
   flex: none;
   width: 32px;
   height: 32px;
+  border-radius: var(--radius-control);
   background: var(--ink-avatar);
   color: #fff;
   font-weight: 600;
@@ -144,7 +277,9 @@
 }
 .signOut {
   margin: 10px 20px 0;
+  width: calc(100% - 40px);
   min-height: var(--target-sm);
+  border-radius: var(--radius-control);
   background: transparent;
   border: 1px solid var(--ink-border);
   color: var(--ink-text);
@@ -176,12 +311,13 @@
   }
   .rail {
     position: sticky;
-    top: 0;
+    top: 8px;
     z-index: 20;
-    width: 100%;
+    width: auto;
     flex: none;
     height: auto;
-    max-height: 100vh;
+    max-height: calc(100vh - 16px);
+    margin: 8px 8px 0;
     padding: 0;
     gap: 0;
   }
@@ -204,6 +340,7 @@
     padding: 0 14px;
     background: transparent;
     border: 1px solid var(--ink-border);
+    border-radius: var(--radius-control);
     color: #fff;
     font-family: var(--font-mono);
     font-size: 12px;
@@ -215,11 +352,15 @@
     padding: 12px 0 20px;
     border-top: 1px solid var(--ink-rule);
     flex-direction: column;
-    gap: 24px;
+    gap: 16px;
     overflow-y: auto;
   }
   .drawerOpen {
     display: flex;
+  }
+  /* Phones and tablets rarely have a keyboard: keep the button, drop the hint. */
+  .kbd {
+    display: none;
   }
   .user {
     margin-top: 0;
@@ -228,7 +369,11 @@
 
 @media (min-width: 901px) {
   .bar {
-    display: contents;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding-right: 12px;
   }
   .drawer {
     display: contents;

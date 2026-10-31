@@ -1,6 +1,9 @@
 # Copy to terraform.tfvars (git-ignored by infra/terraform/.gitignore). Nothing here is
 # secret, but it names your account and domain.
 
+# Lowest-cost shape for an account running on credits (runbook §1.0).
+# lean = true
+
 aws_account_id = "111111111111"
 region         = "ca-central-1"
 
@@ -15,6 +18,10 @@ policy_signing_key_id = "staging-1"
 billing_provider      = "manual"
 # stripe_price_standard = "price_..."
 # stripe_price_pro      = "price_..."
+# stripe_price_standard_annual = "price_..."
+# stripe_price_pro_annual      = "price_..."
+# agent_download_base_url      = "https://github.com/<org>/<repo>/releases/download/agent-v0.2.0"
+# agent_version                = "0.2.0"
 
 alarm_emails = ["ops@rounddigital.example"]
 # alarm_topic_arn = "arn:aws:sns:ca-central-1:111111111111:existing-topic"

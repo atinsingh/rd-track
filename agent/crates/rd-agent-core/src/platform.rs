@@ -2,9 +2,11 @@
 //!
 //! These traits are deliberately narrow: an [`InputCounter`] can only report *counts*
 //! and the time since the last input, a [`ForegroundApp`] only an application identifier
-//! and name. There is no way to hand the core a key code, typed text, clipboard content,
-//! a window title or a URL.
+//! and name, plus (Pro, when the policy asks for it) the hostname of the active browser
+//! tab from the approved browser extension. There is no way to hand the core a key code,
+//! typed text, clipboard content, a window title or a URL.
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -67,6 +69,40 @@ pub trait ForegroundApp {
     /// Accessibility permission status (where the platform needs one).
     fn permission(&self) -> PermissionStatus {
         PermissionStatus::NotRequired
+    }
+    /// Website domains are wanted at `now` (called every capture tick while the policy
+    /// collects them) or no longer (`None`). See [`crate::browser`].
+    fn want_domains(&mut self, now: Option<DateTime<Utc>>) {
+        let _ = now;
+    }
+    /// The hostname of the active tab, when `app` is a supported browser whose extension
+    /// reported one. Only asked while domains are wanted.
+    fn active_domain(&mut self, app: &ForegroundAppInfo, now: DateTime<Utc>) -> Option<String> {
+        let _ = (app, now);
+        None
+    }
+    /// Browsers whose Track extension was heard from lately (reported in heartbeats).
+    fn browser_extensions(&mut self, now: DateTime<Utc>) -> Vec<crate::browser::BrowserFamily> {
+        let _ = now;
+        Vec::new()
+    }
+}
+
+impl<T: ForegroundApp + ?Sized> ForegroundApp for Box<T> {
+    fn current(&mut self) -> Option<ForegroundAppInfo> {
+        (**self).current()
+    }
+    fn permission(&self) -> PermissionStatus {
+        (**self).permission()
+    }
+    fn want_domains(&mut self, now: Option<DateTime<Utc>>) {
+        (**self).want_domains(now);
+    }
+    fn active_domain(&mut self, app: &ForegroundAppInfo, now: DateTime<Utc>) -> Option<String> {
+        (**self).active_domain(app, now)
+    }
+    fn browser_extensions(&mut self, now: DateTime<Utc>) -> Vec<crate::browser::BrowserFamily> {
+        (**self).browser_extensions(now)
     }
 }
 

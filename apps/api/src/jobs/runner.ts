@@ -1,9 +1,16 @@
 import type { Deps } from '../context';
+import { remindExpiringTokens } from '../modules/api-tokens/service';
 import { withTx } from '../db/pool';
 import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
-import { snapshotSeats } from '../modules/billing/service';
+import { certificateEmail } from '../email/templates';
+import { runBillingLifecycle, snapshotSeats } from '../modules/billing/service';
+import { publish } from '../modules/engine/events';
+import { sendNotificationEmail } from '../modules/engine/notify';
+import { runDeviceHealth, runTimesheetRules } from '../modules/engine/work';
 import { generateExport } from '../modules/exports/service';
 import { processIngestJob } from '../modules/ingestion/processor';
+import { erasePerson } from '../modules/lifecycle/person';
+import { certificateText, dueForDeletion, generateDataExport, purgeOrganization } from '../modules/lifecycle/service';
 import { checkAllBudgets } from '../modules/money/budgets';
 import { generatePayrollExport } from '../modules/money/payroll';
 import { runRetention } from '../modules/retention/service';
@@ -30,7 +37,13 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
       await withTx(deps.pool, async (tx) => {
         await deleteScreenshot(deps, tx, p.screenshot_id!, 'employee_request');
         if (p.request_id) {
-          await tx.query(`UPDATE deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1`, [p.request_id]);
+          const done = await tx.query<{ organization_id: string; requester_id: string }>(
+            `UPDATE deletion_requests SET status = 'completed', completed_at = now() WHERE id = $1 AND status <> 'completed'
+             RETURNING organization_id, requester_id`,
+            [p.request_id],
+          );
+          const r = done.rows[0];
+          if (r) await publish(tx, { organizationId: r.organization_id, type: 'deletion_request.completed', subjectUserId: r.requester_id, data: { request_id: p.request_id } });
         }
       });
       return;
@@ -61,9 +74,45 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'time_off.accrue':
       await runAccruals(deps);
       return;
+    case 'notification.email':
+      await withTx(deps.pool, (tx) => sendNotificationEmail(deps, tx, p.notification_id!));
+      return;
+    case 'billing.lifecycle':
+      await runBillingLifecycle(deps);
+      return;
+    case 'data_export.generate':
+      await withTx(deps.pool, (tx) => generateDataExport(deps, tx, p.data_export_id!));
+      return;
+    case 'person.erase': {
+      // The confirmation goes to the address captured before it was replaced, after commit.
+      const mail = await withTx(deps.pool, (tx) => erasePerson(deps, tx, p.erasure_request_id!));
+      if (mail) await deps.email.send(mail);
+      return;
+    }
+    case 'organizations.purge':
+      await purgeDue(deps);
+      return;
+    case 'rules.run':
+      await runTimesheetRules(deps);
+      await runDeviceHealth(deps);
+      await remindExpiringTokens(deps);
+      return;
     default:
       throw new Error(`Unknown job kind ${job.kind}`);
   }
+}
+
+/**
+ * Deletes organizations whose closing date has come (slice 5b), each in its own
+ * transaction, then emails the certificate to the admins captured before deletion.
+ */
+export async function purgeDue(deps: Deps): Promise<number> {
+  const due = await withScope(SYSTEM_SCOPE, () => dueForDeletion(deps, deps.pool));
+  for (const orgId of due) {
+    const { certificate, recipients } = await withScope(SYSTEM_SCOPE, () => withTx(deps.pool, (tx) => purgeOrganization(deps, tx, orgId)));
+    for (const to of recipients) await deps.email.send(certificateEmail(to, certificate, certificateText(certificate)));
+  }
+  return due.length;
 }
 
 /** Runs every ready job until the queue is empty. Returns how many ran (tests use this). */
@@ -90,6 +139,9 @@ export async function scheduleRecurring(deps: Deps): Promise<void> {
     // Idempotent per period, so running it often only makes the monthly accrual timely.
     ['time_off.accrue', 6 * 3600_000],
     ['budgets.check', 600_000],
+    ['billing.lifecycle', 3600_000],
+    ['rules.run', 3600_000],
+    ['organizations.purge', 3600_000],
   ];
   for (const [kind, everyMs] of schedule) {
     const r = await deps.pool.query(`SELECT 1 FROM jobs WHERE kind = $1 AND status IN ('queued', 'running') LIMIT 1`, [kind]);

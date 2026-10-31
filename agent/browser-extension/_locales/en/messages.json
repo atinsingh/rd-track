@@ -1,0 +1,9 @@
+{
+  "name": { "message": "RoundDigital Track" },
+  "description": { "message": "Tells the RoundDigital Track desktop app which website you are on during a work session — the domain only, and only if your organization's policy records it." },
+  "popupTitle": { "message": "RoundDigital Track" },
+  "stateSharing": { "message": "A work session is recording website domains: the site in front (e.g. github.com) is shared with the desktop app." },
+  "stateIdle": { "message": "Nothing is shared right now. Domains are shared only during a work session whose policy records them." },
+  "stateNoApp": { "message": "The RoundDigital Track desktop app isn't installed or running on this computer, so nothing is shared." },
+  "popupPrivacy": { "message": "Only the domain ever leaves this browser — never the page, its address, its content or what you type. Private windows are never looked at." }
+}

@@ -8,6 +8,7 @@ import { stackDaily } from '@/lib/charts';
 import { cx } from '@/lib/cx';
 import { formatDuration, formatHoursShort } from '@/lib/format';
 import { formatShortDay, todayInTz } from '@/lib/time';
+import { t } from '@/lib/i18n';
 import s from './chart.module.css';
 
 /** Daily hours stacked by project, with a table alternative (UX §3.4). */
@@ -30,17 +31,18 @@ export function StackedDailyChart({
   const H = 196;
   const summary =
     chart.days.length === 0
-      ? 'No tracked time in this period.'
-      : `Daily tracked hours: ${chart.days
-          .map((d) => `${formatShortDay(d.date)} ${formatHoursShort(d.total)}`)
-          .join(', ')}. Largest project overall: ${chart.series[0]?.name ?? 'none'}.`;
+      ? t('mgr.chart.none')
+      : t('mgr.chart.summary', {
+          days: chart.days.map((d) => `${formatShortDay(d.date)} ${formatHoursShort(d.total)}`).join(', '),
+          largest: chart.series[0]?.name ?? t('mgr.chart.noneWord'),
+        });
 
   return (
     <Card
       title={title}
       actions={
         <button type="button" className={s.toggle} aria-expanded={table} aria-controls={id} onClick={() => setTable((v) => !v)}>
-          {table ? 'View as chart →' : 'View as table →'}
+          {table ? t('timeline.viewChart') : t('timeline.viewTable')}
         </button>
       }
     >
@@ -55,21 +57,21 @@ export function StackedDailyChart({
         </div>
       ) : null}
       {chart.max === 0 ? (
-        <Empty title="No tracked time in this period" />
+        <Empty title={t('mgr.chart.noneTitle')} />
       ) : table ? (
         <div id={id}>
           <TableBox label={title}>
             <table className={tableClass} style={{ minWidth: 480 }}>
               <thead>
                 <tr>
-                  <th scope="col">Day</th>
+                  <th scope="col">{t('mgr.chart.day')}</th>
                   {chart.series.map((x) => (
                     <th key={x.id} scope="col" className={numClass}>
                       {x.name}
                     </th>
                   ))}
                   <th scope="col" className={numClass}>
-                    Total
+                    {t('mgr.chart.total')}
                   </th>
                 </tr>
               </thead>
@@ -117,7 +119,7 @@ export function StackedDailyChart({
             {chart.days.map((d) => (
               <span key={d.date}>
                 {formatShortDay(d.date).replace(/ \w+$/, '')}
-                {d.date === today ? ' · so far' : ''}
+                {d.date === today ? t('mgr.chart.soFar') : ''}
               </span>
             ))}
           </div>

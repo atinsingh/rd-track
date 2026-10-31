@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { TERMS_VERSION } from '@rd/contracts';
 import type { Deps } from '../../context';
 import { one, type Queryable } from '../../db/pool';
 import { hashPassword, randomToken, sha256Hex } from '../../lib/crypto';
@@ -15,7 +16,7 @@ const TOKEN_TTL_MS = 24 * 3600_000;
 export async function requestSignup(
   deps: Deps,
   q: Queryable,
-  input: { org_name: string; display_name: string; email: string; password: string },
+  input: { org_name: string; display_name: string; email: string; password: string; accept_terms: true },
 ): Promise<{ to: string; subject: string; text: string }> {
   const existing = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
   if (existing) {
@@ -27,8 +28,8 @@ export async function requestSignup(
   }
   const token = randomToken(32);
   await q.query(
-    `INSERT INTO signup_requests (email, display_name, org_name, password_hash, token_hash, expires_at, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    `INSERT INTO signup_requests (email, display_name, org_name, password_hash, token_hash, expires_at, created_at, terms_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       input.email,
       input.display_name,
@@ -37,6 +38,7 @@ export async function requestSignup(
       sha256Hex(token),
       new Date(deps.now().getTime() + TOKEN_TTL_MS).toISOString(),
       deps.now().toISOString(),
+      TERMS_VERSION,
     ],
   );
   return {
@@ -58,11 +60,11 @@ function slugify(name: string): string {
 
 /** Verifies the token once and creates the organization (Pro trial) with its first admin. */
 export async function completeSignup(deps: Deps, q: Queryable, token: string): Promise<{ userId: string; organizationId: string }> {
-  const req = await one<{ id: string; email: string; display_name: string; org_name: string; password_hash: string }>(
+  const req = await one<{ id: string; email: string; display_name: string; org_name: string; password_hash: string; terms_version: string | null }>(
     q,
     `UPDATE signup_requests SET completed_at = $2
      WHERE token_hash = $1 AND completed_at IS NULL AND expires_at > $2
-     RETURNING id, email, display_name, org_name, password_hash`,
+     RETURNING id, email, display_name, org_name, password_hash, terms_version`,
     [sha256Hex(token), deps.now().toISOString()],
   );
   if (!req) throw new AppError(400, 'signup_link_invalid', 'This link is invalid, expired or already used. Sign up again to get a new one.');
@@ -78,6 +80,13 @@ export async function completeSignup(deps: Deps, q: Queryable, token: string): P
     { adminPasswordHash: req.password_hash, adminTracking: true },
   );
   await q.query('UPDATE signup_requests SET organization_id = $2 WHERE id = $1', [req.id, created.organization_id]);
+  // The terms and DPA accepted when signing up, recorded against the organization.
+  await q.query('UPDATE organizations SET terms_version = $2, terms_accepted_at = $3, terms_accepted_by = $4 WHERE id = $1', [
+    created.organization_id,
+    req.terms_version ?? TERMS_VERSION,
+    deps.now().toISOString(),
+    created.admin_user_id,
+  ]);
   return { userId: created.admin_user_id, organizationId: created.organization_id };
 }
 

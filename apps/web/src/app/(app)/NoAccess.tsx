@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { PageHeader } from '@/components/ui/Layout';
+import { t } from '@/lib/i18n';
 
 export function NoAccess({ what }: { what: string }) {
   return (
     <>
-      <PageHeader eyebrow="No access" title="This page isn't available to you" description={what} />
+      <PageHeader eyebrow={t('common.noAccess')} title={t('common.noAccessTitle')} description={what} />
       <p>
-        <Link href="/me">Go to My day</Link>
+        <Link href="/">{t('common.goHome')}</Link>
       </p>
     </>
   );

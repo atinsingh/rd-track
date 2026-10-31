@@ -12,7 +12,8 @@ html {
 
 body {
   margin: 0;
-  background: var(--canvas);
+  background: var(--backdrop);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--font-ui);
   font-size: 14px;
@@ -148,6 +149,29 @@ dialog {
 .grow {
   flex: 1 1 380px;
   min-width: 0;
+}
+
+/* A frosted panel. Browsers without backdrop-filter get the nearly opaque fill instead. */
+.glass {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass {
+    background: var(--glass-strong);
+  }
+}
+
+/* Forced colours (Windows high contrast): drop the effects, keep the edges. */
+@media (forced-colors: active) {
+  .glass {
+    backdrop-filter: none;
+    border-color: CanvasText;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

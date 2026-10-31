@@ -4,7 +4,7 @@
 **Inputs:** `RoundDigital Workforce Activity & Time Platform` requirements (2026-10-28) and the architecture diagram.
 **Requirement IDs** (`TIME-04`, `SCR-07`, …) refer to that document.
 **Commercial model:** Track is sold as multi-tenant SaaS (Free up to 2 users, Standard
-$2.50, Pro $5 per user per month) — see [03-commercial-model.md](03-commercial-model.md)
+$2.50 / Pro $5 per user per month on an annual term, $5 / $10 month to month) — see [03-commercial-model.md](03-commercial-model.md)
 and [ADR-0004](../adr/0004-multi-tenant-saas.md). RoundDigital is the first tenant.
 
 This document turns the requirements into a buildable design: module boundaries, data
@@ -100,7 +100,8 @@ memberships.
 | Team manager | `team_memberships.role = 'manager'` (current rows) | Members of managed teams: time and activity summaries; apps if `viewers.manager_can_view_apps`; screenshots only if the resolved policy for that employee grants `viewers.manager_can_view_screenshots`. Approves members' corrections. |
 | Project manager | `project_memberships.role = 'manager'` | Time per member **on managed projects only**; no activity detail, no screenshots. |
 | Org admin | `users.org_role = 'org_admin'` | Users, teams, projects, devices, policies, deletion requests, exports. **No screenshot access by default** — an admin who also manages a team gets that team's manager access, nothing more. |
-| Auditor | `users.org_role = 'auditor'` | Audit log and access records. No activity detail, no screenshots. |
+| Auditor | `users.org_role = 'auditor'` | Audit log and access records, filtered by who acted or whose data it was, and CSV export (itself audited). Names only, no emails; no activity detail, no screenshots. |
+| Finance | `users.org_role = 'finance'` | Money (Pro): clients, pay and bill rates, budgets, invoices (issue, send to the client, record payment) and payroll export; reads the people and project lists those are set against. No people admin, policies, devices, activity, apps or screenshots. MFA required like admins. |
 | Super admin | `users.org_role = 'super_admin'` | Break-glass org administration; MFA mandatory; every action audited with `actor_role = 'super_admin'`. |
 | Platform operator | `platform_admins` (separate realm and login) | RoundDigital staff running the SaaS: tenants, plans, seats, billing health. **No** tenant activity, apps or screenshots; support access needs a time-boxed grant approved by the tenant's org admin. |
 
@@ -172,6 +173,7 @@ Every response carries `x-request-id`.
 | `POST /v1/screenshots/upload-intents` | `{session_id, content_type: "image/webp"\|"image/jpeg"}` | `201 {screenshot_id, upload_url, upload_headers, expires_at}` or `403 {code}` |
 | `POST /v1/screenshots/complete` | `{screenshot_id, captured_at, sha256, bytes, width, height}` | `200 {status: "verifying"}` |
 | `POST /v1/sessions`, `POST /v1/sessions/{id}/pause\|resume\|stop` | same fields as the lifecycle events | Session object. Equivalent to sending the event; provided for online clients. |
+| `GET /v1/device/update?target&arch&current_version` (G10) | — | `200 {version, url, signature, notes, pub_date, mode: "prompt"\|"auto"}` (Tauri's dynamic update format) or `204` when there is nothing to install or the organization holds updates. Admins set the mode with `GET\|PUT /v1/admin/agent-updates` `{mode: "prompt"\|"auto"\|"hold"}`. |
 
 ### 5.3 Event envelope
 
@@ -197,7 +199,7 @@ Every response carries `x-request-id`.
 | `session.resumed.v1` | `{}` |
 | `session.stopped.v1` | `{reason: "user"\|"logout"\|"shutdown"\|"revoked"\|"policy"\|"overlap"}` |
 | `activity_bucket.v1` | `{bucket_start (minute-aligned), active_seconds 0..60, idle_seconds 0..60, keyboard_count, mouse_count, data_quality: "ok"\|"partial"\|"permission_missing"}` with `active + idle ≤ 60` |
-| `app_usage.v1` | `{app_identifier, app_name, domain?, started_at, duration_seconds 1..3600}` — `domain` is dropped server-side unless the resolved policy has `apps.capture_domains` |
+| `app_usage.v1` | `{app_identifier, app_name, domain?, started_at, duration_seconds 1..3600}` — `domain` is a bare hostname from the Track browser extension (Pro), set only while the session's policy has `apps.capture_domains` and dropped server-side otherwise (see agent/README.md, *Website domains*) |
 | `data_gap.v1` | `{gap_start, gap_end, reason: "suspended"\|"offline_agent_stopped"\|"permission_missing"\|"clock_change"}` |
 
 Ingestion processing (in one transaction):
@@ -234,7 +236,21 @@ Response and request types live in `packages/contracts/src/api.ts`. Lists return
 | Admin | `GET/POST /v1/admin/users` (`POST` → `{user, initial_password?}`) · `PATCH /v1/admin/users/{id}` · `POST /v1/admin/users/{id}/deactivate` · `GET/POST /v1/admin/teams` · `POST /v1/admin/teams/{id}/members` · `DELETE /v1/admin/teams/{id}/members/{user_id}` · `GET/POST /v1/admin/projects` · `POST /v1/admin/projects/{id}/tasks` · `POST /v1/admin/projects/{id}/members` · `POST /v1/admin/enrollment-codes` → `EnrollmentCodeResponse` · `GET /v1/admin/devices` → `DeviceDTO[]` · `POST /v1/admin/devices/{id}/revoke` · `GET /v1/admin/deletion-requests` · `POST /v1/admin/deletion-requests/{id}/approve\|reject` · `POST /v1/admin/legal-holds` |
 | Policies | `GET /v1/policies` → `PolicyListResponse` · `GET /v1/policies/{scope_type}/{scope_id}` → `PolicyScopeDetail` · `PUT /v1/policies/{scope_type}/{scope_id}` `{settings, change_note, confirm_expansion}` → `PolicyScopeDetail`, or `409 expansion_requires_confirmation` (details: `ExpansionConflict`), or `402 plan_upgrade_required` |
 | Billing | `GET /v1/billing/subscription` → `SubscriptionDTO` · `POST /v1/billing/plan` `{plan, seats}` → `SubscriptionDTO` |
-| Audit | `GET /v1/audit-events?from&to&action&actor_id&cursor` → `Page<AuditEventDTO>` (auditor, org admin) |
+| People and structure | `PATCH /v1/admin/users/{id}`, `POST /v1/admin/users/{id}/reactivate`, `POST /v1/admin/users/import` (`dry_run`), `PATCH /v1/admin/teams/{id}`, `POST /v1/admin/teams/{id}/archive`, `PATCH /v1/admin/projects/{id}`, `PATCH /v1/admin/projects/{id}/tasks/{taskId}`, `DELETE /v1/admin/projects/{id}/members/{userId}` (org admin) |
+| Organization data | `GET /v1/admin/organization`, `POST /v1/admin/organization/close` (`confirm_name`), `POST …/close/cancel`, `GET|POST /v1/admin/data-exports` (org admin); `GET /platform/v1/deletion-certificates` (operator) |
+| Your data and erasure | `GET|POST /v1/me/data-exports` (a ZIP of everything about me), `GET|POST /v1/me/erasure-request` (`reason?`; `409 erasure_pending`); `GET /v1/admin/erasure-requests`, `POST …/{id}/approve`, `POST …/{id}/decline` (`reason`) (org admin, never their own) |
+| API tokens | `GET|POST /v1/api-tokens` (`name`, `kind`, `scopes`, `expires_in_days`; the secret is returned once), `POST /v1/api-tokens/{id}/revoke`; `GET /v1/docs` (reference), `GET /v1/docs/openapi.json`. Calls with `Authorization: Bearer rdt_…` reach only the endpoints in the reference: `401 invalid_token`, `403 insufficient_scope`, `403 not_in_api` |
+| Expenses (Pro) | `POST /v1/me/expenses/receipt-uploads` (`content_type`, `size_bytes` ≤ 10 MB) → `ReceiptUploadResponse` (presigned PUT, 10 min), `GET /v1/me/expenses?from` → `MyExpensesResponse`, `POST /v1/me/expenses` (`amount_cents`, `currency`, `spent_on`, `category`, `project_id?`, `billable`, `note`, `receipt_upload_id?`), `POST /v1/me/expenses/{id}/cancel`; reviewers: `GET /v1/expenses/pending`, `POST /v1/expenses/{id}/approve` (`note?`), `POST /v1/expenses/{id}/reject` (`note`, required), `GET /v1/expenses/{id}/receipt-url` (audited `expense.receipt_view` for anyone but the claimant); `GET /v1/admin/expenses?from` (admin, finance); approvals batch takes `type: "expense"` |
+| Payroll adjustments (Pro) | `GET|POST /v1/admin/payroll-adjustments` (`user_id`, `kind`: bonus/deduction/reimbursement, `amount_cents`, `currency`, `note`, `recurrence`: once/every_period, `effective_from`, `effective_to?`; listing writes `payroll_adjustment.view` per person), `POST /v1/admin/payroll-adjustments/{id}/end` (`effective_to`; `409 not_recurring`), `DELETE /v1/admin/payroll-adjustments/{id}`; `GET /v1/me/payroll-adjustments` |
+| Client portal (F9, Pro) | Agency (admin, finance): `GET|POST /v1/admin/clients/{id}/contacts` (`email`, `display_name`; the contact is emailed a sign-in link), `POST /v1/admin/client-contacts/{id}/send-link`, `POST /v1/admin/client-contacts/{id}/revoke`, `PUT /v1/admin/clients/{id}/portal` (`show_people`). Public: `POST /v1/client-portal/auth/login`, `GET|POST /v1/client-portal/auth/link` (`token`, `password`). Contact (cookie `rd_client`): `GET /v1/client-portal/me`, `GET /v1/client-portal/report?from&to&tz` → `ClientPortalReport` (audits `client_portal.view_hours` per person shown), `GET /v1/client-portal/invoices`, `GET /v1/client-portal/invoices/{id}` (issued and void only), `POST /v1/client-portal/auth/logout` |
+| Logo (G26) | `GET /v1/admin/branding`, `POST /v1/admin/branding/logo-uploads` (`content_type` PNG/JPEG/WebP, `size_bytes` ≤ 512 KB) → presigned PUT, `PUT /v1/admin/branding/logo` (`upload_id`), `DELETE /v1/admin/branding/logo`; `Me.organization.logo_url`, `ClientPortalMe.organization.logo_url` and `InvoiceDTO.organization_logo_url` are short-lived links |
+| Language and formats (G27) | `PATCH /v1/me` (`locale`: one of `LOCALES` or `null` to follow the organization), `PUT /v1/admin/branding/locale` (`locale` or `null` to follow each browser); `BrandingDTO.locale`, `Me.user.locale`, `Me.organization.locale`, `ClientPortalMe.organization.locale` and `InvoiceDTO.organization_locale`. Supported: en-US, en-CA, en-GB, en-AU, en-IN, fr-CA, fr-FR ; the device heartbeat answers `locale` (the person's, else the organization's, else `null`) for the desktop app |
+| MDM deployment (G26, Pro) | `GET\|POST /v1/admin/deployment-keys` (`name`; the key is returned once with `server_url`), `POST /v1/admin/deployment-keys/{id}/revoke`; public `POST /v1/devices/enrollment-requests` (`deployment_key`, `email`) → `202` always for a valid key (`401 invalid_deployment_key` otherwise); the person is emailed an ordinary enrolment code |
+| Work-app presets (F9) | `POST /v1/admin/app-categories/presets` (`preset`, `category`, `team_id?`, `identifiers?`) → `{applied}` |
+| Single sign-on | Public: `POST /v1/auth/sso/discover` (`email`) → `SsoDiscoverResponse`, `POST /v1/auth/sso/start` (`email`, `return_to?`) → `{redirect_url}`, `GET /v1/auth/sso/callback` (OpenID Connect). SAML: `GET /v1/auth/sso/saml/{org}` (Track's metadata; also its entity ID), `POST /v1/auth/sso/saml/{org}/acs` (the provider's form post), `GET /v1/auth/sso/saml/finish`. Org admin: `GET /v1/admin/sso` → `SsoSettings`, `PUT|DELETE /v1/admin/sso/connection` (`protocol` `oidc` or `saml`), `PATCH /v1/admin/sso` (`active`, `enforced`, `jit_provisioning`), `POST /v1/admin/sso/test`, `POST /v1/admin/sso/domains`, `POST …/domains/{id}/verify`, `DELETE …/domains/{id}`, `POST /v1/admin/scim-tokens`, `DELETE /v1/admin/scim-tokens/{id}`. Login with a password returns `403 sso_required` when single sign-on is required |
+| Directory (SCIM 2.0) | `Authorization: Bearer rdscim_…`: `GET /scim/v2/ServiceProviderConfig|ResourceTypes|Schemas`, `GET|POST /scim/v2/Users` (`filter=userName eq "…"`), `GET|PUT|PATCH|DELETE /scim/v2/Users/{id}`, `GET|POST /scim/v2/Groups`, `GET|PUT|PATCH|DELETE /scim/v2/Groups/{id}`; RFC 7644 errors |
+| Support access | Operator: `POST /platform/v1/organizations/{id}/support-grants`, `POST /platform/v1/support-grants/{id}/end`, `GET /platform/v1/organizations/{id}/support/{people,teams,devices,policies,audit}` (active grant only, audited). Tenant: `GET /v1/admin/support-grants`, `POST …/{id}/approve|deny|end` (org admin) |
+| Audit | `GET /v1/audit-events?from&to&action&actor_id&subject_id&cursor` → `Page<AuditEventDTO>`; `GET /v1/audit-events/export` (CSV, up to 10,000 rows, audited); `GET /v1/audit-events/people` (auditor, org admin) |
 
 Error codes the UI must handle: `unauthenticated` (401), `mfa_required` (403),
 `forbidden` (403), `not_found` (404), `validation_failed` (400),
@@ -318,6 +334,7 @@ declared strategy:
 | `screenshots.max_width_px` (640–1920) | `1280` | minimum |
 | `screenshots.excluded_apps` | `[]` | union |
 | `screenshots.employee_deletion` | `"self_service"` | `"self_service"` wins over `"review"` |
+| `screenshots.blur` | `false` | any `true` wins (blurring is the more private choice); turning it off is a collection expansion |
 | `viewers.manager_can_view_activity` | `true` | restrictive boolean |
 | `viewers.manager_can_view_apps` | `true` | restrictive boolean |
 | `viewers.manager_can_view_screenshots` | `false` | restrictive boolean |
@@ -376,6 +393,12 @@ Agent                              API                               Object stor
   offline** — there is no upload intent to authorize them; this removes the hardest
   privacy edge case from the outbox.
 * Excluded apps: if the foreground app is on `excluded_apps` at capture time, skip.
+* Blur (`SCR-12`): with `screenshots.blur` the agent blurs the frame after downscaling and
+  before encoding (cells of about 1/80 of the width, at least 16 px, blended back to full
+  size), so a sharp image never leaves the computer. The upload intent carries `blur`
+  from the resolved policy and the row records it; `complete` must report
+  `blurred: true` or the object is deleted (`deletion_reason = not_blurred`,
+  `403 blur_required`), so an older agent can't store a sharp image.
 * Bytes never pass through the API process, logs, or analytics (`SCR-11`).
 * Employee deletion (`SCR-09/10`): with `employee_deletion = self_service` and no legal
   hold, the request is approved automatically and the worker deletes the object and
@@ -498,7 +521,7 @@ exports, retention, audit), worker, web dashboards (employee, manager, admin), a
 with simulated platform, CI.
 
 **Next increments:** native Windows/macOS collectors and the Tauri UI shell; signed
-installers and staged auto-update (`DEV-02`); SSO/SCIM (`IAM-06`); app/domain categories
+installers and staged auto-update (`DEV-02`); SSO/SCIM (`IAM-06`, done in slice 6); app/domain categories
 (`ACT-07`); scheduled reports and PDF (`RPT-06`); aggregate-only executive views with
 minimum group size (`RPT-07`); SQS adapter if/when the Postgres queue is outgrown;
 Terraform for AWS (ECS/Fargate, RDS, S3, KMS).

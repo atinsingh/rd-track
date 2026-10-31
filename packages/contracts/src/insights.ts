@@ -35,7 +35,58 @@ export interface DayInsight {
   weekend: boolean;
   longest_stretch_seconds: number;
   long_day: boolean;
+  /** First and last tracked minute that day, local "HH:MM" (the stop is the end of the last minute). */
+  first_start: string;
+  last_stop: string;
+  /** Tracked minutes without input (Stage 4 F9). */
+  idle_seconds: number;
 }
+
+/** Your typical day (Stage 4 F9): averages over the days with at least half an hour tracked. */
+export interface TypicalDay {
+  /** Days the averages are over; the rest are null when there are none. */
+  days: number;
+  start: string | null;
+  stop: string | null;
+  idle_seconds: number | null;
+}
+export const TYPICAL_DAY_MIN_SECONDS = 30 * 60;
+
+/**
+ * Where expected hours come from (Stage 4 F6): the person's schedule, else their work
+ * limits, else the organization's standard day (Mon–Fri). Holidays expect nothing and
+ * approved time off is taken off. Never a target: over and under are shown in blue and
+ * orange, never red.
+ */
+export type ExpectedSource = 'schedule' | 'work_limits' | 'default';
+
+export interface ExpectedDay {
+  date: string;
+  expected_seconds: number;
+  tracked_seconds: number;
+  focus_seconds: number;
+  source: ExpectedSource;
+  holiday: string | null;
+  /** Approved time off taken off this day's expected hours. */
+  leave_seconds: number;
+}
+
+export interface ExpectedHours {
+  expected_seconds: number;
+  tracked_seconds: number;
+  /** tracked ÷ expected, or null when nothing was expected. */
+  percent: number | null;
+  /** The source used on most days. */
+  source: ExpectedSource;
+  /** e.g. "Mon–Fri 09:00–17:30", when the schedule is the source. */
+  schedule: string | null;
+  /** The standard or work-limit day in hours, when that is the source. */
+  day_hours: number | null;
+  days: ExpectedDay[];
+}
+
+/** Within ±10 % of expected counts as "about as expected" in team counts. */
+export const UTILIZATION_BAND_PERCENT = 10;
 
 export interface PersonalInsights {
   from: string;
@@ -51,6 +102,8 @@ export interface PersonalInsights {
   longest_stretch_seconds: number;
   work_apps: { category: AppCategory | 'uncategorized'; seconds: number }[];
   days: DayInsight[];
+  expected: ExpectedHours;
+  typical_day: TypicalDay;
 }
 
 export interface TeamInsights {
@@ -69,6 +122,17 @@ export interface TeamInsights {
   people_with_long_days: number;
   people_with_after_hours: number;
   focus_share_percent: number | null;
+  /** Tracked against expected hours: averages, and counts of people — never names. */
+  utilization: {
+    expected_seconds: number;
+    tracked_seconds: number;
+    percent: number | null;
+    under: number;
+    about: number;
+    over: number;
+    /** People with nothing expected in the period (all leave, holidays). */
+    none: number;
+  };
 }
 
 export const appCategoryRequest = z.strictObject({
@@ -85,9 +149,55 @@ export interface AppCategoryDTO {
   created_at: string;
 }
 
+/**
+ * Ready-made sets of rules (Stage 4 F9). Identifiers are what the agent reports: the
+ * bundle id on macOS, the program file on Windows. An admin picks the category and can
+ * leave any identifier out.
+ */
+export const APP_PRESETS = {
+  ai_tools: {
+    label: 'AI tools',
+    description: 'Assistants and AI code editors people use for their work.',
+    apps: [
+      { name: 'ChatGPT', identifiers: ['com.openai.chat', 'ChatGPT.exe'] },
+      { name: 'Claude', identifiers: ['com.anthropic.claudefordesktop', 'Claude.exe'] },
+      { name: 'Cursor', identifiers: ['com.todesktop.230313mzl4w4u92', 'Cursor.exe'] },
+      { name: 'Windsurf', identifiers: ['com.exafunction.windsurf', 'Windsurf.exe'] },
+      { name: 'Perplexity', identifiers: ['ai.perplexity.mac', 'Perplexity.exe'] },
+      { name: 'LM Studio', identifiers: ['ai.elementlabs.lmstudio', 'LM Studio.exe'] },
+    ],
+  },
+} as const satisfies Record<string, { label: string; description: string; apps: readonly { name: string; identifiers: readonly string[] }[] }>;
+export type AppPresetId = keyof typeof APP_PRESETS;
+export const APP_PRESET_IDS = Object.keys(APP_PRESETS) as [AppPresetId, ...AppPresetId[]];
+
+export const appPresetRequest = z.strictObject({
+  preset: z.enum(APP_PRESET_IDS),
+  category: z.enum(APP_CATEGORIES),
+  team_id: uuid.nullable().optional(),
+  /** Only these identifiers from the preset; all of them when left out. */
+  identifiers: z.array(z.string().min(1).max(255)).min(1).max(100).optional(),
+});
+
 // ───────────── outbound webhooks (INT-03) ─────────────
 
-export const WEBHOOK_EVENTS = ['session.started', 'session.stopped', 'time_correction.approved', 'export.ready'] as const;
+export const WEBHOOK_EVENTS = [
+  'session.started',
+  'session.stopped',
+  'time_correction.submitted',
+  'time_correction.approved',
+  'time_correction.rejected',
+  'timesheet.submitted',
+  'timesheet.approved',
+  'timesheet.rejected',
+  'time_off.requested',
+  'time_off.approved',
+  'time_off.rejected',
+  'user.invited',
+  'user.deactivated',
+  'device.revoked',
+  'export.ready',
+] as const;
 export type WebhookEventType = (typeof WEBHOOK_EVENTS)[number];
 
 export const webhookCreateRequest = z.strictObject({

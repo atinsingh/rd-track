@@ -17,6 +17,8 @@ agent/
     │       ├── apps.rs        foreground samples → app_usage segments
     │       ├── screenshot.rs  random slot per interval, capture gates, capture pipeline
     │       ├── policy.rs      Ed25519 signed policy, typed settings, work hours, cache
+    │       ├── limits.rs      work-limit warnings at 80% / 100% (pure, local only)
+    │       ├── reminders.rs   start / stop / "still tracking?" reminders (pure, local only)
     │       ├── outbox.rs      SQLite outbox sealed with ChaCha20-Poly1305, sequence counter
     │       ├── sync.rs        batching, per-event results, backoff, bisection
     │       ├── clock.rs       Clock trait (wall + monotonic), suspend / clock-change detection
@@ -133,14 +135,55 @@ slot within the first second when the project policy enables screenshots).
   resolves. A bucket is never emitted twice for the same minute (pause/resume within a
   minute continues the "parked" bucket; seconds that would land in an already-emitted
   minute after a backwards clock change are dropped).
+* **Idle return** (Stage 4 F1). When input resumes after an idle run while the session is
+  `Active`, the runtime publishes `Notice::IdleReturn` and keeps one pending `IdlePrompt`
+  in `LiveStatus` (span = the run's first second → the first second with input, the same
+  seconds the buckets count as idle). Pause, stop, suspend and clock changes end a run
+  without a return, so they never prompt. A newer run replaces an unanswered prompt (the
+  older span is kept; nothing is sent); so does a restart (prompts are not persisted).
+  `Command::ResolveIdle` queues `idle.decision.v1` in the outbox for the session the run
+  happened in. `idle.prompt_on_return = false` never prompts and never sends. The CLI
+  never prompts, so its idle time is always kept.
 * **Outbox.** Each envelope is sealed whole with ChaCha20-Poly1305 (AAD binds it to its
   `event_id`); the key is a 32-byte secret in the credential store. `sequence` is allocated
   in the same SQLite transaction as the insert. Over the cap (50 000 droppable events or
   `offline.metadata_buffer_days`), the oldest `activity_bucket`/`app_usage` events are
-  dropped; `session.*` and `data_gap` events never are.
+  dropped; `session.*`, `data_gap` and `idle.decision` events never are.
 * **Crash recovery.** The open session is snapshotted every 10 s. On restart within 10
   minutes it is resumed with `data_gap {reason: offline_agent_stopped}`; otherwise it is
   closed with `session.stopped {reason: shutdown}` at the last time the agent was seen.
+* **Work-limit warnings** (Stage 4 F4, `limits.rs`). While a session is `Active` the
+  network thread fetches `GET /v1/device/work-limits?exclude_session_id=<running>` at
+  start / resume and every 5 minutes. The server leaves the running session out; the
+  agent adds its own count of it (active + idle seconds of its emitted buckets plus the
+  open, not-yet-emitted minute — the same definition as the uploaded buckets) and of any
+  session started after the copy was computed. Like the server, a session counts on the
+  local day and ISO week it **started** on. At 80% and 100% of a daily or weekly limit
+  the runtime raises `Notice::LimitWarning` once per threshold and period (daily keyed
+  by `today.date`, weekly by `week.period_start`; when 100% is already reached only that
+  one shows). Offline, the last good copy is kept until its `today.date` is no longer
+  today in its `timezone`. A limit never stops or pauses anything, and nothing is
+  checked while paused. `LiveStatus::limits` carries today's / this week's progress.
+* **Reminders** (Stage 4 F3, `reminders.rs`). Employee-controlled settings (all on by
+  default; "my hours" Mon–Fri 09:00–17:30 device-local time) are changed with
+  `Command::SetReminderSettings`. `GET /v1/device/schedule-today` is fetched at startup,
+  hourly and when the local date changes. Today's window: `day_off` → none; scheduled
+  with a shift → the shift; scheduled without one → none (not a working day); not
+  scheduled, never fetched, or `404` from an older server → my hours on my workdays.
+  Reminders (`Notice::Reminder` + `LiveStatus::reminder`, at most one, answered with
+  `Command::ResolveReminder`): **start** at window start + 10 min while inside the
+  window, nothing tracking and no time tracked today ("Not today" suppresses it for the
+  day); **stop** at window end + 10 min, the first `Active` moment from then on (a
+  session started after that gets no stop reminder, its hourly check counts from its
+  start); **still tracking?** every 60 min after that while the same session stays
+  active (it follows the session past midnight). "Stop tracking" is the person's own
+  stop (`reason: user`). A paused session gets nothing, and a reminder whose condition
+  no longer holds (session started, paused or stopped; window over) is withdrawn.
+* **Local nudge state.** Outbox metadata (sealed like the rest): `work_limits` (last good
+  copy, uncounted sessions, highest warning shown per period) and `reminders` (settings,
+  today's schedule, what was shown today and the "still tracking?" cadence), so a
+  restart repeats nothing. Neither adds an event, a heartbeat field or any other request
+  body: both endpoints are plain GETs.
 * **Revocation** (`401 device_revoked` anywhere, or heartbeat `credential_status:
   "revoked"`): stop locally without an event, wipe the outbox, delete the credential and
   outbox key, mark `device.json` revoked, exit 3.
@@ -157,11 +200,16 @@ slot within the first second when the project policy enables screenshots).
 ## Privacy guarantees enforced in code
 
 * `InputCounter` can only return counts and seconds-since-last-input; `ForegroundApp`
-  only an identifier and a name. There is no API through which a key code, typed text,
-  clipboard, window title or URL could reach the core.
-* Payload structs are closed (`deny_unknown_fields`, no free-form maps). `domain` is never
-  collected (always omitted); `apps.capture_app_name = false` disables app usage entirely;
-  `apps.capture_window_titles` is ignored.
+  only an identifier and a name, plus a hostname from the browser extension (below). There
+  is no API through which a key code, typed text, clipboard, window title, page or URL
+  could reach the core.
+* Payload structs are closed (`deny_unknown_fields`, no free-form maps). `domain` is set
+  only as described in *Website domains*; `apps.capture_app_name = false` disables app
+  usage entirely; `apps.capture_window_titles` is ignored.
+* Screenshots are blurred on the computer, before encoding, when the policy has
+  `screenshots.blur` (or the upload intent says so): `screenshot::blur` averages cells of
+  about 1/80 of the width (at least 16 px) and blends them back to full size, so text
+  can't be read but windows and colours can be told apart.
 * Screenshots: only when the signed policy for the session's project enables them, only
   in `Active`, inside work hours, with no excluded app in front, and only after the server
   issued an upload intent — so never offline. Bytes go straight to the presigned URL (no
@@ -172,9 +220,73 @@ slot within the first second when the project policy enables screenshots).
   bundle id and display name — no API that returns a window title or URL is called.
   macOS capture refuses to run without Screen Recording rather than upload a
   wallpaper-only frame.
+* Work limits and reminders are local nudges: no event, no telemetry, nothing about
+  them is sent; the agent only reads its own user's limits and schedule.
 * Tray app: the session-start notice is generated from the verified policy with the
   web's wording; the web view cannot reach the network, filesystem or shell (command
   allowlist + CSP); permission prompts are shown at most once per install.
+
+## Website domains (Pro): the browser extension
+
+Websites are a browser's business, not the operating system's, so the agent never reads a
+URL itself. The Track extension (`browser-extension/`: Chrome, Edge, Brave and Chromium
+from one build, Firefox from another) tells the app the hostname of the active tab, and
+only when the app asks:
+
+```text
+extension ──native messaging──▶ host (the app's own binary, started by the browser)
+                                   │ writes <data-dir>/browser/<family>.json  {domain, at, instance}
+agent ── writes <data-dir>/browser/wanted (renewed every minute) ──▶ read by the host
+```
+
+* **Asked for, never pushed.** The agent writes `wanted` only while a session is `Active`
+  and its signed policy has `apps.capture_domains` (Pro); the mark expires after two
+  minutes unless renewed, and is deleted (with any stored domain) on pause, stop, or a
+  policy without domains. Without it the host stores no domain and answers the
+  extension `{"collect": false}`, so the extension sends none, only a check-in every 30
+  seconds; a session therefore starts getting domains within about 30 seconds.
+* **Only a hostname.** `domainOf` (`browser-extension/src/domain.js`) keeps the
+  lowercased hostname of `http(s)` pages, without `www.`; browser pages, files,
+  extension pages and IP-v6 literals give nothing. The host and the agent normalise it
+  again (`[a-z0-9.-]`, ≤ 253), and the server refuses anything else.
+* **Only the window in front.** A report is used only when the foreground app is a
+  supported browser of that family (bundle ids / executables in `browser.rs`) and is at
+  most 90 s old. Private windows are never looked at (`"incognito": "not_allowed"`, and
+  an unfocused or private window counts as no site). Each browser profile is its own
+  `instance`; one profile losing focus never clears another's report.
+* **Segments split by domain**, so `app_usage` reads "Chrome · github.com 12 min".
+* **Heartbeats** report which families were heard from in the last 5 minutes
+  (`browser_extensions`), shown on Admin › Devices and My computers; the app shows a
+  banner during a session that wants domains when no browser has the extension.
+
+**Host registration.** The browser launches the host from a manifest naming the app's
+executable (`digital.round.track`). The desktop app writes it at every start for the
+current user, for each installed browser: `~/Library/Application Support/<browser>/NativeMessagingHosts/`
+on macOS, `~/.config/<browser>/NativeMessagingHosts/` and `~/.mozilla/native-messaging-hosts/`
+on Linux, and `HKCU\Software\{Google\Chrome,Microsoft\Edge,Chromium,Mozilla}\NativeMessagingHosts`
+pointing at manifests in the data folder on Windows. Started with `chrome-extension://<id>/`
+(or Firefox's manifest path and add-on ID), the binary runs as the host and nothing else.
+
+**IDs.** Chromium: `gagmoddppfppofnboknnmkiakhjmacln`, fixed by the public `key` in
+`manifest.chromium.json` (store builds get their own IDs: add them at build time with
+`RD_CHROMIUM_EXTENSION_IDS=id1,id2` so the host accepts them). Firefox:
+`browser@track.round.digital`.
+
+**Deploying it.** Publish the zips CI builds (`browser-extension` artifact) to the Chrome
+Web Store, Edge Add-ons and addons.mozilla.org, and set `BROWSER_EXTENSION_CHROME_URL`,
+`BROWSER_EXTENSION_EDGE_URL`, `BROWSER_EXTENSION_FIREFOX_URL` on the API so My computers
+links to them. Organizations force-install it with their browser policies
+(`ExtensionInstallForcelist` for Chrome and Edge, `ExtensionSettings` for Firefox), using the
+IDs shown on Admin › Devices.
+
+```sh
+cd browser-extension && node build.mjs     # dist/chromium, dist/firefox (load unpacked to try)
+node --test test/*.test.mjs                 # domain extraction and the extension's logic
+../../scripts/e2e-browser.sh                # real Chromium + extension + host + agent + API
+```
+
+On Linux (simulated collectors) `rd-agent run --simulate --foreground-app org.chromium.Chromium`
+keeps a browser in front, so the whole chain can be tried; the e2e script does exactly that.
 
 ## Credential storage
 
@@ -226,6 +338,13 @@ is the intended outcome.
 A Tauri 2 tray / menu-bar app embedding the same `Runtime` (native collectors; simulated
 on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.dc):
 
+* **Language** (G27): English or French. The heartbeat says the person's language (their
+  choice in the web app, else their organization's); the app remembers it in the data
+  directory (`locale`) and otherwise follows the computer's language. Rust texts live in
+  `rd_agent_core::i18n` (English and French side by side, checked by the compiler), the
+  popover's own in `ui/src/i18n.ts`; `AppView.lang` tells the UI which one to use. The
+  examples below are the English.
+
 * **Popover** (dark, `#0B0C0F`): red tracking dot + `TRACKING` / `PAUSED` / `NOT TRACKING`
   and the session's active time `H:MM:SS`; camera badge "Screenshots on for this project ·
   about every N min" when the session's policy enables them; Project / Task pickers;
@@ -237,6 +356,33 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
   `packages/contracts/src/describe.ts` (tests pin the strings). If the project's policy
   cannot be fetched within 4 s the notice says so (screenshots stay off until it arrives);
   if a later policy *expands* collection mid-session, a banner asks the employee to review.
+* **Welcome back** (idle return, dark): "You were away for N min", the times and project,
+  and three choices — keep it as working time, remove it, or move it to another project
+  (picker from the device's project list; "Goes to your manager for approval, like any
+  correction."). The popover opens near the tray icon without taking focus, so keys typed
+  on returning stay in the person's app. Only the person answers (`resolve_idle`).
+* **Work limits** (F4): a "Work limit · 5h 12m of 8h today" line under Today when a
+  limit applies, and a banner at 80% / 100% — "80% of today's 8 h limit", "You've
+  reached this week's 40 h limit" — with one line, "Tracking continues — this is a
+  heads-up from your organization's work limits.", and one button, "Got it".
+* **Reminders** (F3): a card at the top of the popover — "Ready to start tracking?" /
+  "Your hours started at 09:00." with "Start tracking" (the usual start flow: project,
+  then the session-start notice) and "Not today"; "Your hours ended at 17:30" / "This
+  session is still tracking." and "Still tracking?" / "Your hours ended at 17:30." with
+  "Stop tracking" and "Keep tracking" ("shift" instead of "hours" when the
+  organization's schedule sets them). "Reminders" at the bottom opens the settings:
+  master switch, start / end / hourly switches and "My hours" (start, end, workdays),
+  or "Your organization's schedule sets these hours" when a schedule applies.
+* There are no native OS notifications (none of the existing notices use one): for an
+  idle return, a reminder or a limit warning the popover opens near the tray icon
+  without taking focus. Nothing about limits or reminders is shown while paused.
+* **Enrollment links.** The app registers `rdtrack://` (Tauri deep-link plugin; single
+  instance, so on Windows and Linux a second launch hands the link to the running app).
+  `rdtrack://enroll?server=…&code=…` — from My computers on the web or the admin's code
+  dialog — fills in the enrollment form and opens it; the person checks the server
+  address ("Filled in from a link…") and presses Connect. A link never enrolls on its own
+  and is ignored once the computer is connected. Pasting the link into the code field
+  works too. Parsing lives in `link.rs` (unit-tested).
 * **Enrollment** screen (server URL + one-time code), **revocation** screen, and banners
   for licence refusal / grace, missing permissions ("Allow…" once, then "Fix in System
   Settings" — never a second prompt, `DEV-03`), work-hours pause, overlap stop, recovery.
@@ -245,7 +391,7 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
   Pause/resume, Stop, Quit). **Quit stops the session first** and waits for the bounded
   final sync. Closing the popover only hides it.
 * **Security.** The web view gets no filesystem/shell/HTTP/opener permissions: only the
-  17 app commands listed in `capabilities/main.json` (each an `allow-<command>`
+  20 app commands listed in `capabilities/main.json` (each an `allow-<command>`
   permission generated by `build.rs`) plus event listening. URLs are opened by Rust from a
   fixed allowlist (dashboard, System Settings panes). Strict CSP, no remote content, fonts
   (Inter, JetBrains Mono, OFL) and logos bundled. The device credential lives in the OS
@@ -300,12 +446,41 @@ signing step runs only when its secrets exist.
 | Windows signing (Azure Trusted Signing, recommended) | `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID` (S); `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT`, `AZURE_SIGNING_PROFILE` (V) | a service principal with the "Trusted Signing Certificate Profile Signer" role on an Azure Trusted Signing account + certificate profile (organization identity validation required) |
 | Updater signatures | `TAURI_SIGNING_PRIVATE_KEY` (S), `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (S) | generated once with `npx @tauri-apps/cli@2.12.4 signer generate -w ~/.tauri/rd-track.key` — keep the private key offline/backed up; losing it means installed agents can never update again |
 | | `TAURI_UPDATER_PUBKEY` (V) | the matching public key (contents of `rd-track.key.pub`); CI writes it into the updater config, replacing the placeholder in `tauri.conf.json` |
-| | `TAURI_UPDATER_ENDPOINT` (V, optional) | real update endpoint; the committed placeholder is `https://updates.example.invalid/{{target}}/{{arch}}/{{current_version}}` |
 
-No real keys are committed. The update endpoint must serve Tauri's static/dynamic update
-JSON (`version`, `platforms.<target>-<arch>.{url, signature}`) — hosting it (e.g. S3 +
-CloudFront next to the web app) is an infrastructure task. Debug builds and builds with
-the placeholder key never install updates.
+No real keys are committed. Debug builds and builds with the placeholder key never install
+updates.
+
+**Where updates come from (G10).** The app asks the server it is enrolled with —
+`GET /v1/device/update?target&arch&current_version` with its device credential, a minute
+after start and then hourly. The API answers from `AGENT_VERSION` and
+`AGENT_DOWNLOAD_BASE_URL` (the `agent-v*` release): the bundle URL (`RoundDigital.Track.app.tar.gz`
+for macOS, the NSIS `…_x64-setup.exe` for Windows) and the `.sig` the release workflow
+published next to it, fetched and cached for ten minutes. No signature, an up-to-date app,
+Linux, or an organization that holds updates: `204`, nothing to install. Each organization
+chooses under Admin › Devices › App updates: *people choose when* (default — "Version x is
+ready", restart when it suits them), *automatically* (installed by itself, only while no
+session is open; a running session is never interrupted) or *hold* (nothing offered — to
+test a release first, or when IT deploys the MSI, which the updater does not replace). The
+update server must be `https://`.
+
+### Deploying with MDM (Pro)
+
+Admin › Devices › *Deploy with MDM* creates a deployment key and the files to push with
+the app (Jamf, Kandji, Intune, Group Policy):
+
+* `deployment.json` — `{"server": "https://…", "deployment_key": "rddk_…"}` — placed at
+  `/Library/Application Support/RoundDigital Track/deployment.json` (macOS) or
+  `%ProgramData%\RoundDigital Track\deployment.json` (Windows); `RD_TRACK_DEPLOYMENT_FILE`
+  overrides the path. The app ignores a file without an `https://` server or an `rddk_` key,
+  and tolerates the byte-order mark Windows PowerShell writes.
+* `rdtrack-deploy-macos.sh` writes that file (run as root after installing the DMG's app).
+* `Install-RDTrack.ps1` installs the MSI next to it quietly (`/qn`) and writes the file.
+
+On first launch the app asks for the person's work email and calls
+`POST /v1/devices/enrollment-requests`; the server emails *that person* an ordinary
+one-time code, which they type in. The key alone never connects a computer, the answer is
+the same whether or not the email exists, and "I have a code from my administrator" keeps
+the usual flow. Revoking a key stops new requests; computers already connected stay.
 
 ### First run on employee machines
 
@@ -327,8 +502,9 @@ the placeholder key never install updates.
   Some EDR products flag processes that install low-level keyboard hooks — security teams
   may need to allow-list the signed binary.
 * **Both.** The first window is the enrollment screen. Nothing is recorded until the
-  employee starts a session and confirms the notice. Autostart at login is not configured
-  yet (follow-up: Tauri autostart plugin, off by default, shown in the notice).
+  employee starts a session and confirms the notice. *Open when I sign in to this
+  computer* (Settings in the app) is off until the person turns it on; it only opens the
+  app in the menu bar or tray (a LaunchAgent on macOS, the Run key on Windows).
 
 ### Contract (API)
 
@@ -337,6 +513,12 @@ the placeholder key never install updates.
   with members list only those members). On `404` (older servers) the tray offers
   "No project" only.
 * `dashboard_url` in the enrollment and heartbeat responses.
+* `GET /v1/device/work-limits[?exclude_session_id=]` → `{enabled: false}` or `{enabled:
+  true, as_of, timezone, daily_minutes|null, weekly_minutes|null, today: {date,
+  worked_seconds}, week: {period_start, worked_seconds}}`; `404` = no limits.
+* `GET /v1/device/schedule-today` → `{date, timezone, scheduled, shift: {start_at,
+  end_at}|null, day_off: holiday|cancelled|leave|null}` (an unknown `day_off` is still a
+  day off); `404` = no schedules, "my hours" apply.
 * Still open, optional: a device-authenticated "today" total across all of the user's devices; the
   tray currently shows this device's buckets only.
 
@@ -344,7 +526,8 @@ the placeholder key never install updates.
 
 * JSON is snake_case; timestamps are UTC with `Z` and at most millisecond precision
   (`2026-10-28T09:41:00Z`, `…:01.234Z`). Event ids, session ids and batch ids are UUIDv4.
-* Optional payload fields (`project_id`, `task_id`, `domain`) are **omitted**, never `null`.
+* Optional payload fields (`project_id`, `task_id`, `domain`) are **omitted**, never `null`
+  (`idle.decision.v1` included).
   `session.resumed.v1` sends `"payload": {}`.
 * `bucket_start` is the floor of the UTC minute, so the first bucket can start up to 59 s
   before the session's `started_at` and the last can end after `ended_at`: validate
@@ -356,6 +539,14 @@ the placeholder key never install updates.
 * `data_gap.v1`: `suspended` gaps run from the last tick before sleep to the first after;
   `occurred_at` = `gap_end`. `clock_change` gaps cover the jumped span (`gap_start ≤
   gap_end` always).
+* `idle.decision.v1`: `session_id` is the session the idle run happened in, which may
+  already be stopped (the person can answer after stopping), so the event can arrive
+  after that session's `session.stopped.v1`. It can also arrive before the last bucket
+  of the run (the minute in which the person came back is emitted when it ends).
+  `occurred_at` is when the person answered. Spans over 12 h are sent as consecutive
+  ≤ 12 h events with the same decision. Buckets are per minute, so a bucket at either
+  edge of the span can also hold idle seconds of a neighbouring run: remove
+  `min(idle_seconds, seconds of the span inside that minute)` per bucket.
 * A recovered stale session's `session.stopped.v1` has `occurred_at` = last time the agent
   was seen, possibly hours before `received_at`.
 * After an `overlapping_session` rejection the agent sends `session.stopped.v1 {reason:
@@ -383,7 +574,8 @@ the placeholder key never install updates.
   see "How it works".
 * Screenshots are JPEG, not WebP: no pure-Rust WebP encoder; the contract allows both.
 * The outbox seals the whole envelope, not just the payload.
-* `data_gap.v1` events are protected from the storage cap like lifecycle events.
+* `data_gap.v1` and `idle.decision.v1` events are protected from the storage cap like
+  lifecycle events.
 * `idle_auto` pauses are never emitted (no policy field asks for them).
 * For the tray app the runtime publishes a `LiveStatus` snapshot to a `RuntimeObserver`
   every tick, accepts `Command::Preview { project_id }` (fetch and expose the policy a
@@ -391,3 +583,6 @@ the placeholder key never install updates.
   emitted buckets (outbox meta `today_totals`, local calendar day).
 * `Notice::LicenseUnavailable` became a struct variant (`{ block }`) so notices serialize
   for the UI.
+* Overnight shifts: the stop / "still tracking?" reminders follow today's schedule, so a
+  shift that ends after midnight gets no stop reminder; "my hours" must end after they
+  start on the same day.

@@ -3,6 +3,9 @@
  * calendar day string `YYYY-MM-DD`; instants are epoch milliseconds or ISO strings.
  */
 
+import { t } from './i18n';
+import { currentLocale } from './locale';
+
 const MINUTE = 60_000;
 const DAY = 86_400_000;
 
@@ -153,46 +156,63 @@ function calendarDate(date: string): Date {
   return new Date(Date.UTC(y, m - 1, d, 12));
 }
 
-function dayParts(date: string): { weekday: string; day: string; month: string; year: string } {
-  const out = { weekday: '', day: '', month: '', year: '' };
-  const f = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'UTC',
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  });
-  for (const p of f.formatToParts(calendarDate(date))) {
-    if (p.type === 'weekday' || p.type === 'day' || p.type === 'month' || p.type === 'year') out[p.type] = p.value;
+const fmtCache = new Map<string, Intl.DateTimeFormat>();
+/** A formatter in the current locale (G27), cached per locale, time zone and options. */
+function fmt(tz: string, o: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = currentLocale();
+  const key = `${locale}|${tz}|${JSON.stringify(o)}`;
+  let f = fmtCache.get(key);
+  if (!f) {
+    f = new Intl.DateTimeFormat(locale, { timeZone: tz, ...o });
+    fmtCache.set(key, f);
   }
-  return out;
+  return f;
 }
 
-/** "Wed 28 Oct 2026" */
+/** "Wed 28 Oct 2026" (en-GB), "Wed, Oct 28, 2026" (en-US), "mer. 28 oct. 2026" (fr) */
 export function formatDayLabel(date: string): string {
-  const p = dayParts(date);
-  return `${p.weekday} ${p.day} ${p.month} ${p.year}`;
+  return fmt('UTC', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }).format(calendarDate(date));
 }
 
 /** "Wed 28 Oct" */
 export function formatShortDay(date: string): string {
-  const p = dayParts(date);
-  return `${p.weekday} ${p.day} ${p.month}`;
+  return fmt('UTC', { weekday: 'short', day: 'numeric', month: 'short' }).format(calendarDate(date));
 }
 
 /** "26 Oct" */
 export function formatDayMonth(date: string): string {
-  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', day: 'numeric', month: 'short' }).format(
-    calendarDate(date),
-  );
+  return fmt('UTC', { day: 'numeric', month: 'short' }).format(calendarDate(date));
 }
 
-/** "08:12" in `tz`. */
+/** "October 2026" */
+export function formatMonthYear(date: string): string {
+  return fmt('UTC', { month: 'long', year: 'numeric' }).format(calendarDate(date));
+}
+
+/** "October" */
+export function formatMonth(date: string): string {
+  return fmt('UTC', { month: 'long' }).format(calendarDate(date));
+}
+
+/** A weekday's short name, ISO numbering (1 = Monday). */
+export function weekdayShort(isoDay: number): string {
+  // 2026-01-05 was a Monday.
+  return fmt('UTC', { weekday: 'short' }).format(calendarDate(addDays('2026-01-05', isoDay - 1)));
+}
+
+/** "08:12" or "8:12 AM" in `tz`, as the locale writes times. */
 export function formatTime(iso: string | number, tz: string): string {
   const ms = typeof iso === 'number' ? iso : Date.parse(iso);
   if (Number.isNaN(ms)) return '—';
-  const p = zonedParts(ms, tz);
-  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
+  // Two-digit hours where the clock is 24-hour ("08:12"), as the locale has them otherwise ("8:12 AM").
+  const h24 = fmt(tz, { hour: 'numeric' }).resolvedOptions().hourCycle === 'h23';
+  return fmt(tz, { hour: h24 ? '2-digit' : 'numeric', minute: '2-digit' }).format(new Date(ms));
+}
+
+/** An hour on a chart axis: "09" on a 24-hour clock, "9 AM" on a 12-hour one. */
+export function formatHour(ms: number, tz: string): string {
+  const h24 = fmt(tz, { hour: 'numeric' }).resolvedOptions().hourCycle === 'h23';
+  return h24 ? String(zonedParts(ms, tz).hour).padStart(2, '0') : fmt(tz, { hour: 'numeric' }).format(new Date(ms));
 }
 
 /** "27 Oct 2026, 16:40" in `tz`. */
@@ -200,28 +220,34 @@ export function formatDateTime(iso: string | null | undefined, tz: string): stri
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return '—';
+  const h24 = fmt(tz, { hour: 'numeric' }).resolvedOptions().hourCycle === 'h23';
+  return fmt(tz, { day: 'numeric', month: 'short', year: 'numeric', hour: h24 ? '2-digit' : 'numeric', minute: '2-digit' }).format(new Date(ms));
+}
+
+/** "08:12", 24-hour, for time inputs (never localized). */
+function inputTime(ms: number, tz: string): string {
   const p = zonedParts(ms, tz);
-  return `${formatDayMonth(toDateString(p.year, p.month, p.day))} ${p.year}, ${formatTime(ms, tz)}`;
+  return `${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`;
 }
 
 /** Local `{date, time}` of an instant, for prefilling date/time inputs. */
 export function toZonedInputs(iso: string, tz: string): { date: string; time: string } {
   const ms = Date.parse(iso);
-  return { date: dateInTz(ms, tz), time: formatTime(ms, tz) };
+  return { date: dateInTz(ms, tz), time: inputTime(ms, tz) };
 }
 
 /** "3 min ago", "Yesterday 17:58", "12 Oct 2026, 09:00" */
 export function formatRelative(iso: string | null | undefined, tz: string, now: number = Date.now()): string {
-  if (!iso) return 'Never';
+  if (!iso) return t('time.never');
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return '—';
   const diff = now - ms;
-  if (diff >= 0 && diff < MINUTE) return 'just now';
-  if (diff >= 0 && diff < 60 * MINUTE) return `${Math.floor(diff / MINUTE)} min ago`;
+  if (diff >= 0 && diff < MINUTE) return t('time.justNow');
+  if (diff >= 0 && diff < 60 * MINUTE) return new Intl.RelativeTimeFormat(currentLocale(), { style: 'short' }).format(-Math.floor(diff / MINUTE), 'minute');
   const today = dateInTz(now, tz);
   const day = dateInTz(ms, tz);
-  if (day === today) return `Today ${formatTime(ms, tz)}`;
-  if (day === addDays(today, -1)) return `Yesterday ${formatTime(ms, tz)}`;
+  if (day === today) return t('time.todayAt', { time: formatTime(ms, tz) });
+  if (day === addDays(today, -1)) return t('time.yesterdayAt', { time: formatTime(ms, tz) });
   return formatDateTime(iso, tz);
 }
 
@@ -255,4 +281,5 @@ export function timeZoneOptions(...extra: string[]): string[] {
   return [...set].sort((a, b) => a.localeCompare(b));
 }
 
-export const WEEKDAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+/** Monday to Sunday, short, in the current locale. */
+export const weekdaysShort = (): string[] => [1, 2, 3, 4, 5, 6, 7].map(weekdayShort);

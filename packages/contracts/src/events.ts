@@ -66,6 +66,31 @@ export const dataGapPayload = z
   })
   .refine((p) => new Date(p.gap_end) > new Date(p.gap_start), 'gap_end must be after gap_start');
 
+/**
+ * Stage 4 F1: what the person chose when they came back from an idle run. `keep`
+ * leaves the time as recorded, `discard` removes the idle seconds of that span from
+ * the session, `reassign` asks (through a time correction) to move the span to
+ * another project. Only the span and the choice travel — never what happened in it.
+ */
+export const IDLE_DECISIONS = ['keep', 'discard', 'reassign'] as const;
+export const MAX_IDLE_SPAN_MS = 12 * 3600_000;
+export const idleDecisionPayload = z
+  .strictObject({
+    idle_started_at: timestamp,
+    idle_ended_at: timestamp,
+    decision: z.enum(IDLE_DECISIONS),
+    // Omitted, never null (agent wire notes); both only with `reassign`.
+    project_id: uuid.optional(),
+    task_id: uuid.optional(),
+  })
+  .refine((p) => new Date(p.idle_ended_at) > new Date(p.idle_started_at), 'idle_ended_at must be after idle_started_at')
+  .refine(
+    (p) => new Date(p.idle_ended_at).getTime() - new Date(p.idle_started_at).getTime() <= MAX_IDLE_SPAN_MS,
+    'an idle span is at most 12 hours',
+  )
+  .refine((p) => (p.decision === 'reassign') === Boolean(p.project_id), 'project_id is required for reassign, and only for reassign')
+  .refine((p) => p.decision === 'reassign' || p.task_id === undefined, 'task_id is only for reassign');
+
 const envelopeBase = {
   event_id: uuid,
   organization_id: uuid,
@@ -85,6 +110,7 @@ export const eventEnvelopeSchema = z.discriminatedUnion('event_type', [
   z.strictObject({ ...envelopeBase, event_type: z.literal('activity_bucket.v1'), payload: activityBucketPayload }),
   z.strictObject({ ...envelopeBase, event_type: z.literal('app_usage.v1'), payload: appUsagePayload }),
   z.strictObject({ ...envelopeBase, event_type: z.literal('data_gap.v1'), payload: dataGapPayload }),
+  z.strictObject({ ...envelopeBase, event_type: z.literal('idle.decision.v1'), payload: idleDecisionPayload }),
 ]);
 export type EventEnvelope = z.infer<typeof eventEnvelopeSchema>;
 export type EventType = EventEnvelope['event_type'];

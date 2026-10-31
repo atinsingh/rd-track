@@ -24,8 +24,8 @@ describe('misc formatting', () => {
   it('formats percent, money and initials', () => {
     expect(percentOrDash(null)).toBe('—');
     expect(percentOrDash(70.6)).toBe('71%');
-    expect(formatMoney(250)).toBe('$2.50');
-    expect(formatMoney(123450)).toBe('$1,234.50');
+    expect(formatMoney(250)).toBe('US$2.50');
+    expect(formatMoney(123450)).toBe('US$1,234.50');
     expect(initials('Priya Nair')).toBe('PN');
     expect(initials('cher')).toBe('C');
   });

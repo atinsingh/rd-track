@@ -103,7 +103,44 @@
   word-break: break-all;
   padding: 14px 16px;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
   background: var(--canvas);
   color: var(--text);
   user-select: all;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+/* Work-app presets (Stage 4 F9) */
+.presetApps {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.presetApp label {
+  overflow-wrap: anywhere;
+}
+.presetApp {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--rule-soft);
+  border-radius: var(--radius-control);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.presetApp legend {
+  padding: 0 4px;
+  font-weight: 600;
 }

@@ -7,8 +7,10 @@ import { enrollmentCode, normalizeEnrollmentCode, randomToken, sha256Hex } from 
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertLicensedForTracking, currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
 import { assertInOrg } from '../org/service';
 import { orgRevision } from '../policy/service';
+import { localesOf } from '../../i18n';
 
 const CODE_TTL_MIN = 30;
 
@@ -24,7 +26,11 @@ export async function createEnrollmentCode(
   if (u!.status !== 'active') throw errors.validation('User is deactivated');
   if (!u!.tracking_enabled) {
     // Viewer-only users are free seats; tracking (and its seat check) must be turned on first.
-    throw errors.validation('Turn on tracking for this user before enrolling a device (it uses a licence seat).');
+    throw errors.validation(
+      userId === actor.userId
+        ? 'Tracking is off for your account, so there is nothing to connect. An org admin can turn it on.'
+        : 'Turn on tracking for this user before enrolling a device (it uses a licence seat).',
+    );
   }
   const code = enrollmentCode();
   const expires = new Date(deps.now().getTime() + CODE_TTL_MIN * 60_000).toISOString();
@@ -92,6 +98,12 @@ export async function enroll(
   };
 }
 
+/** OS permissions that limit what can be measured. Accessibility is not used by the agent. */
+const MEASURED_PERMISSIONS = [
+  ['input_monitoring', 'Input Monitoring', 'computer activity'],
+  ['screen_recording', 'Screen Recording', 'the screenshots your organization’s policy asks for'],
+] as const;
+
 export async function heartbeat(
   deps: Deps,
   q: Queryable,
@@ -100,13 +112,27 @@ export async function heartbeat(
 ): Promise<HeartbeatResponse> {
   const now = deps.now();
   const offset = now.getTime() - new Date(input.client_time).getTime();
+  const before = await one<{ name: string; permissions: Record<string, string> | null }>(q, 'SELECT name, permissions FROM devices WHERE id = $1', [device.deviceId]);
   await q.query(
     `UPDATE devices SET last_seen_at = $2, agent_version = $3, permissions = $4,
        applied_policy_revision = COALESCE($5, applied_policy_revision),
-       clock_offset_ms = $6::int, clock_skew_detected = (abs($6::int) > 120000)
+       clock_offset_ms = $6::int, clock_skew_detected = (abs($6::int) > 120000),
+       browser_extensions = $7
      WHERE id = $1`,
-    [device.deviceId, now.toISOString(), input.agent_version, input.permissions, input.applied_policy_revision, Math.round(offset)],
+    [device.deviceId, now.toISOString(), input.agent_version, input.permissions, input.applied_policy_revision, Math.round(offset), [...new Set(input.browser_extensions ?? [])].sort()],
   );
+  // A permission the agent needs was just turned off (or never granted): tell the person, once a day.
+  for (const [key, label, what] of MEASURED_PERMISSIONS) {
+    if (input.permissions[key] === 'denied' && before?.permissions?.[key] !== 'denied') {
+      await publish(q, {
+        organizationId: device.organizationId,
+        type: 'device.permission_missing',
+        subjectUserId: device.userId,
+        data: { device_id: device.deviceId, device_name: before?.name ?? 'Your computer', permission: key, permission_label: label, what },
+        dedupeKey: `permission:${device.deviceId}:${key}:${now.toISOString().slice(0, 10)}`,
+      });
+    }
+  }
   if (input.applied_policy_revision !== null) {
     await q.query(
       `INSERT INTO policy_receipts (device_id, organization_id, revision) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
@@ -123,29 +149,33 @@ export async function heartbeat(
     credential_status: 'active',
     license: license === 'grace' && sub.grace_ends_at ? { status: license, grace_ends_at: sub.grace_ends_at } : { status: license },
     dashboard_url: dashboardUrl(deps),
+    // The person's language (G27): theirs, else the organization's; null lets the computer decide.
+    locale: (await localesOf(q, [device.userId], { withoutDefault: true })).get(device.userId) ?? null,
   };
 }
 
-export async function listDevices(q: Queryable, orgId: string): Promise<DeviceDTO[]> {
+/** Every device in the organization, or only one person's (their own "My computers"). */
+export async function listDevices(q: Queryable, orgId: string, userId: string | null = null): Promise<DeviceDTO[]> {
   return many<DeviceDTO>(
     q,
     `SELECT d.id, d.user_id, u.display_name AS user_name, d.name, d.os, d.os_version, d.agent_version, d.credential_status,
             d.enrolled_at, d.revoked_at, d.last_seen_at, d.last_sync_at, d.applied_policy_revision,
-            o.policy_revision AS current_policy_revision, d.permissions, d.clock_skew_detected, d.sequence_gaps
+            o.policy_revision AS current_policy_revision, d.permissions, d.clock_skew_detected, d.sequence_gaps,
+            d.browser_extensions
      FROM devices d JOIN users u ON u.id = d.user_id JOIN organizations o ON o.id = d.organization_id
-     WHERE d.organization_id = $1
+     WHERE d.organization_id = $1 AND ($2::uuid IS NULL OR d.user_id = $2)
      ORDER BY d.credential_status, u.display_name, d.name`,
-    [orgId],
+    [orgId, userId],
   );
 }
 
 /** IAM-05 / DEV-04: revocation is immediate; open sessions on the device stop. */
 export async function revokeDevice(deps: Deps, q: Queryable, actor: UserActor, deviceId: string, requestId?: string) {
   const now = deps.now().toISOString();
-  const d = await one<{ user_id: string }>(
+  const d = await one<{ user_id: string; name: string }>(
     q,
     `UPDATE devices SET credential_status = 'revoked', revoked_at = $3
-     WHERE id = $1 AND organization_id = $2 AND credential_status = 'active' RETURNING user_id`,
+     WHERE id = $1 AND organization_id = $2 AND credential_status = 'active' RETURNING user_id, name`,
     [deviceId, actor.organizationId, now],
   );
   if (!d) {
@@ -173,5 +203,12 @@ export async function revokeDevice(deps: Deps, q: Queryable, actor: UserActor, d
     targetUserId: d.user_id,
     requestId,
     metadata: { stopped_sessions: open.length },
+  });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'device.revoked',
+    subjectUserId: d.user_id,
+    actorUserId: actor.userId,
+    data: { device_id: deviceId, device_name: d.name },
   });
 }

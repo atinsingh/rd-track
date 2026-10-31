@@ -30,7 +30,7 @@ describe('time zone helpers', () => {
     expect(addDays('2026-03-01', -1)).toBe('2026-02-28');
     expect(startOfWeek('2026-10-28')).toBe('2026-10-26');
     expect(startOfWeek('2026-11-01')).toBe('2026-10-26');
-    expect(formatDayLabel('2026-10-28')).toBe('Wed 28 Oct 2026');
+    expect(formatDayLabel('2026-10-28')).toBe('Wed, 28 Oct 2026');
   });
 
   it('formats countdowns', () => {

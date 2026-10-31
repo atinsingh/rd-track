@@ -1,0 +1,71 @@
+/* Operator console (slice 5a): its own frame, so nobody mistakes it for a tenant's app. */
+.frame {
+  min-height: 100vh;
+  background: var(--backdrop);
+}
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 24px;
+  padding: 14px 24px;
+  background: var(--ink);
+  color: var(--text-on-ink);
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  color: inherit;
+  text-decoration: none;
+}
+.tag {
+  font: 500 10px/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 4px 6px;
+  border: 1px solid var(--ink-border);
+  border-radius: 4px;
+  color: var(--ink-text);
+}
+.nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+.navLink {
+  color: var(--ink-text);
+  text-decoration: none;
+}
+.navLink[aria-current='page'] {
+  color: var(--text-on-ink);
+  text-decoration: underline;
+  text-underline-offset: 6px;
+}
+.who {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ink-text);
+  font-size: 13px;
+}
+.signOut {
+  background: transparent;
+  border: 1px solid var(--ink-border);
+  border-radius: var(--radius-control);
+  color: var(--text-on-ink);
+  padding: 6px 12px;
+}
+.main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.rule {
+  color: var(--text-3);
+  font-size: 13px;
+}

@@ -1,3 +1,9 @@
+variable "lean" {
+  description = "Lowest-cost shape for a trial account running on credits: two AZs, no interface endpoints (that traffic goes through the NAT gateway), one API and one web task, a smaller web task and db.t4g.micro. About half the monthly cost; no redundancy."
+  type        = bool
+  default     = false
+}
+
 variable "aws_account_id" {
   description = "AWS account that hosts staging. The provider refuses any other."
   type        = string
@@ -49,13 +55,25 @@ variable "billing_provider" {
 }
 
 variable "stripe_price_standard" {
-  description = "Stripe price id for Standard."
+  description = "Stripe price id for Standard, month to month."
   type        = string
   default     = ""
 }
 
 variable "stripe_price_pro" {
-  description = "Stripe price id for Pro."
+  description = "Stripe price id for Pro, month to month."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_standard_annual" {
+  description = "Stripe price id for Standard on an annual term."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_pro_annual" {
+  description = "Stripe price id for Pro on an annual term."
   type        = string
   default     = ""
 }
@@ -82,4 +100,16 @@ variable "extra_app_environment" {
   description = "Extra plain env vars for API/worker/migrate."
   type        = map(string)
   default     = {}
+}
+
+variable "agent_download_base_url" {
+  description = "AGENT_DOWNLOAD_BASE_URL: where agent installers are published, e.g. https://github.com/<org>/<repo>/releases/download/agent-v0.2.0. Empty: the web app says installers aren't published yet."
+  type        = string
+  default     = ""
+}
+
+variable "agent_version" {
+  description = "AGENT_VERSION: the published agent version offered for download, e.g. 0.2.0."
+  type        = string
+  default     = ""
 }

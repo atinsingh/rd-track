@@ -2,10 +2,15 @@ import { z } from 'zod';
 import { timestamp, uuid } from './events';
 import type { LicenseState } from './plans';
 import type { PolicySettings } from './policy';
+import type { AppLocale } from './locale';
 
 /** Agent ↔ API request/response contracts (system design §5.2). */
 
 const permissionState = z.enum(['granted', 'denied', 'not_required', 'unknown']);
+
+/** The browser families the Track extension runs in (website domains, Pro). */
+export const BROWSER_FAMILIES = ['chromium', 'firefox'] as const;
+export type BrowserFamily = (typeof BROWSER_FAMILIES)[number];
 
 export const enrollRequest = z.strictObject({
   enrollment_code: z.string().min(6).max(32),
@@ -34,6 +39,8 @@ export const heartbeatRequest = z.strictObject({
   }),
   outbox_depth: z.number().int().min(0),
   applied_policy_revision: z.number().int().min(0).nullable(),
+  /** Browsers whose Track extension the app heard from lately (website domains, Pro). */
+  browser_extensions: z.array(z.enum(BROWSER_FAMILIES)).max(4).optional(),
 });
 export interface HeartbeatResponse {
   server_time: string;
@@ -41,6 +48,8 @@ export interface HeartbeatResponse {
   credential_status: 'active' | 'revoked';
   license: { status: LicenseState; grace_ends_at?: string };
   dashboard_url: string;
+  /** The person's language and formats (G27); null lets the computer's own language decide. */
+  locale: AppLocale | null;
 }
 
 /** `GET /v1/device/projects`: what the device's user may book time to (tray pickers). */
@@ -75,3 +84,41 @@ export const sessionCreateRequest = z.strictObject({
 export const sessionStopRequest = z.strictObject({
   reason: z.enum(['user', 'logout', 'shutdown', 'revoked', 'policy', 'overlap']).default('user'),
 });
+
+// ───────────── Stage 4 F4 / F3: limit warnings and reminders ─────────────
+
+/** The agent leaves out its own running session and adds it locally, so a warning never waits for an upload. */
+export const deviceWorkLimitsQuery = z.object({ exclude_session_id: uuid.optional() });
+
+/**
+ * `GET /v1/device/work-limits`: daily and weekly limits with time worked so far, for the
+ * tray's banners at 80% and 100%. `enabled: false` on plans without work limits. A limit
+ * never stops a session; it only informs the person.
+ */
+export type DeviceWorkLimitsResponse =
+  | { enabled: false }
+  | {
+      enabled: true;
+      as_of: string;
+      timezone: string;
+      daily_minutes: number | null;
+      weekly_minutes: number | null;
+      today: { date: string; worked_seconds: number };
+      week: { period_start: string; worked_seconds: number };
+    };
+
+/**
+ * `GET /v1/device/schedule-today`: the person's working hours today, so start / stop /
+ * "still tracking?" reminders stay inside them.
+ * - `scheduled: false`: no schedule (or the plan has none); the agent uses the hours the
+ *   person set in the tray.
+ * - `scheduled: true` with `shift: null`: not a working day.
+ * - `day_off`: a holiday, a cancelled shift or approved full-day leave; no reminders.
+ */
+export interface DeviceScheduleTodayResponse {
+  date: string;
+  timezone: string;
+  scheduled: boolean;
+  shift: { start_at: string; end_at: string } | null;
+  day_off: 'holiday' | 'cancelled' | 'leave' | null;
+}

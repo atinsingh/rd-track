@@ -2,7 +2,9 @@ import {
   BREAKLESS_STRETCH_SECONDS,
   FOCUS_MIN_MINUTES,
   LONG_DAY_SECONDS,
+  TYPICAL_DAY_MIN_SECONDS,
   type DayInsight,
+  type TypicalDay,
 } from '@rd/contracts';
 
 /**
@@ -115,7 +117,7 @@ export function dailyInsights(
   const startMin = hhmm(workingHours.start);
   const endMin = hhmm(workingHours.end);
   const sorted = [...buckets].sort((a, b) => a.bucket_start.localeCompare(b.bucket_start));
-  const byDay = new Map<string, DayInsight & { _lastTs: number; _stretchStart: number }>();
+  const byDay = new Map<string, DayInsight & { _lastTs: number; _stretchStart: number; _first: number; _last: number }>();
 
   for (const b of sorted) {
     const c = clock(b.bucket_start);
@@ -131,13 +133,21 @@ export function dailyInsights(
         weekend: c.weekday >= 6,
         longest_stretch_seconds: 0,
         long_day: false,
+        first_start: '',
+        last_stop: '',
+        idle_seconds: 0,
         _lastTs: -Infinity,
         _stretchStart: ts,
+        _first: c.minuteOfDay,
+        _last: c.minuteOfDay,
       };
       byDay.set(c.date, d);
     }
     const seconds = b.active_seconds + b.idle_seconds;
     d.tracked_seconds += seconds;
+    d.idle_seconds += b.idle_seconds;
+    d._first = Math.min(d._first, c.minuteOfDay);
+    d._last = Math.max(d._last, c.minuteOfDay);
     if (c.weekday < 6 && (c.minuteOfDay < startMin || c.minuteOfDay >= endMin)) d.after_hours_seconds += seconds;
     if (ts - d._lastTs > BREAK_MIN_MINUTES * 60_000) d._stretchStart = ts;
     d.longest_stretch_seconds = Math.max(d.longest_stretch_seconds, (ts - d._stretchStart) / 1000 + 60);
@@ -151,8 +161,30 @@ export function dailyInsights(
     }
   }
   return [...byDay.values()]
-    .map(({ _lastTs: _l, _stretchStart: _s, ...d }) => ({ ...d, long_day: d.tracked_seconds > LONG_DAY_SECONDS }))
+    .map(({ _lastTs: _l, _stretchStart: _s, _first, _last, ...d }) => ({
+      ...d,
+      long_day: d.tracked_seconds > LONG_DAY_SECONDS,
+      first_start: clockText(_first),
+      last_stop: clockText(Math.min(_last + 1, 24 * 60)),
+    }))
     .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function clockText(minute: number): string {
+  return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+}
+
+/** Average first start, last stop and idle time over the days with at least half an hour tracked. */
+export function typicalDay(days: readonly DayInsight[]): TypicalDay {
+  const worked = days.filter((d) => d.tracked_seconds >= TYPICAL_DAY_MIN_SECONDS);
+  if (worked.length === 0) return { days: 0, start: null, stop: null, idle_seconds: null };
+  const avg = (f: (d: DayInsight) => number) => worked.reduce((n, d) => n + f(d), 0) / worked.length;
+  return {
+    days: worked.length,
+    start: clockText(Math.round(avg((d) => hhmm(d.first_start)))),
+    stop: clockText(Math.round(avg((d) => hhmm(d.last_stop)))),
+    idle_seconds: Math.round(avg((d) => d.idle_seconds)),
+  };
 }
 
 export function summarize(days: readonly DayInsight[]) {

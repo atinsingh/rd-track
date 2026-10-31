@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { timestamp, uuid } from './events';
 import { partialPolicySettingsSchema, type FieldSource, type PolicySettings, type ScopeType } from './policy';
 import type { CollectionChange } from './policy';
-import type { Entitlement, LicenseState, PlanId, SubscriptionStatus } from './plans';
+import { BILLING_INTERVALS, type BillingInterval, type Entitlement, type LicenseState, type PlanId, type SubscriptionStatus } from './plans';
+import type { AppLocale } from './locale';
+import type { BrowserFamily } from './agent-api';
 
 /**
  * Web/API request schemas and response shapes (system design §5.4).
@@ -13,7 +15,8 @@ export interface ApiErrorBody {
   error: { code: string; message: string; request_id: string; details?: unknown };
 }
 
-export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin'] as const;
+/** `finance` (slice 4, G21) runs Money: rates, invoices, budgets and payroll, without full admin. */
+export const ORG_ROLES = ['employee', 'org_admin', 'auditor', 'super_admin', 'finance'] as const;
 export type OrgRole = (typeof ORG_ROLES)[number];
 
 // ───────────────────────── auth ─────────────────────────
@@ -44,8 +47,19 @@ export interface Me {
     timezone: string;
     tracking_enabled: boolean;
     mfa_enabled: boolean;
+    /** The person's language and formats (G27); null follows the organization's. */
+    locale: AppLocale | null;
   };
-  organization: { id: string; name: string; plan: PlanId; license: LicenseState };
+  organization: {
+    id: string;
+    name: string;
+    plan: PlanId;
+    license: LicenseState;
+    /** The organization's default language and formats; null follows each browser. */
+    locale: AppLocale | null;
+    /** The organization's own logo (G26), a short-lived link; null when none is set. */
+    logo_url: string | null;
+  };
   mfa_verified: boolean;
   managed_team_ids: string[];
   managed_project_ids: string[];
@@ -77,6 +91,22 @@ export interface SessionDTO {
   active_seconds: number;
   idle_seconds: number;
   paused_seconds: number;
+  /** Idle time the person removed or moved on return (Stage 4 F1). `keep` is not listed. */
+  idle_adjustments: IdleAdjustmentDTO[];
+}
+
+export interface IdleAdjustmentDTO {
+  id: string;
+  idle_started_at: string;
+  idle_ended_at: string;
+  seconds: number;
+  decision: 'discard' | 'reassign';
+  /** applied: in effect · pending: a move waiting for approval · rejected: no effect */
+  status: 'applied' | 'pending' | 'rejected';
+  /** `week_locked`, `unknown_project` */
+  status_reason: string | null;
+  /** Target project of a move. */
+  project_name: string | null;
 }
 
 export interface ActivityBucketDTO {
@@ -139,6 +169,8 @@ export interface ScreenshotDTO {
   deletion_request_status: 'pending' | 'approved' | 'rejected' | null;
   /** App in front at capture time, when app names are collected. */
   app_name: string | null;
+  /** Blurred on the computer before upload (SCR-12). */
+  blurred: boolean;
 }
 export interface ViewUrlResponse {
   url: string;
@@ -154,6 +186,8 @@ export interface UploadIntentResponse {
   upload_url: string;
   upload_headers: Record<string, string>;
   expires_at: string;
+  /** The policy blurs this screenshot: the agent must blur it before encoding. */
+  blur: boolean;
 }
 export const screenshotCompleteRequest = z.strictObject({
   screenshot_id: uuid,
@@ -162,6 +196,8 @@ export const screenshotCompleteRequest = z.strictObject({
   bytes: z.number().int().min(1).max(10 * 1024 * 1024),
   width: z.number().int().min(1).max(8000),
   height: z.number().int().min(1).max(8000),
+  /** The agent blurred the image before encoding (SCR-12). Older agents leave it out. */
+  blurred: z.boolean().optional(),
 });
 
 export const deletionRequestCreate = z.strictObject({
@@ -202,7 +238,7 @@ export interface CorrectionDTO {
   user_id: string;
   user_name: string;
   session_id: string | null;
-  kind: 'edit' | 'manual_add';
+  kind: 'edit' | 'manual_add' | 'idle_reassign';
   original: CorrectionValues | null;
   requested: CorrectionValues;
   reason: string;
@@ -211,10 +247,24 @@ export interface CorrectionDTO {
   reviewed_at: string | null;
   review_note: string | null;
   created_at: string;
+  /** Names of the projects in `original` and `requested`, so a reviewer who doesn't manage them still reads names. */
+  project_names: Record<string, string>;
 }
 export const reviewRequest = z.strictObject({ note: z.string().max(1000).optional() });
 
 // ───────────────────────── reports ─────────────────────────
+
+/** Names for the ⌘K palette: the people in teams you manage and the projects you manage. Names only, no data. */
+export interface DirectoryPerson {
+  user_id: string;
+  display_name: string;
+  team_id: string;
+  team_name: string;
+}
+export interface DirectoryResponse {
+  people: DirectoryPerson[];
+  projects: { id: string; name: string }[];
+}
 
 export interface TeamSummary {
   id: string;
@@ -232,6 +282,9 @@ export interface MemberReportRow {
   paused_seconds: number;
   manual_seconds: number;
   days_active: number;
+  /** Minutes the agent measured without the OS permission it needs (shown in each reader's language). */
+  permission_missing_minutes: number;
+  /** The same notes in English, for API and CSV readers. */
   notes: string[];
 }
 export interface DailyProjectRow {
@@ -293,7 +346,10 @@ export const createUserRequest = z.strictObject({
   org_role: z.enum(ORG_ROLES).default('employee'),
   tracking_enabled: z.boolean().default(true),
   timezone: z.string().min(1).max(64).default('UTC'),
-  /** Initial password; omit to generate one that is returned once. */
+  /**
+   * For scripted provisioning only. Omit it and the person gets an invite email to choose
+   * their own password; nobody else ever sees it.
+   */
   password: z.string().min(12).max(200).optional(),
 });
 export const updateUserRequest = z.strictObject({
@@ -313,6 +369,9 @@ export interface UserDTO {
   timezone: string;
   teams: { id: string; name: string; role: 'member' | 'manager' }[];
   created_at: string;
+  /** Invited and hasn't chosen a password yet. */
+  invite_pending: boolean;
+  invited_at: string | null;
 }
 
 export const createTeamRequest = z.strictObject({ name: z.string().min(1).max(200) });
@@ -326,10 +385,63 @@ export const createProjectRequest = z.strictObject({
 });
 export const createTaskRequest = z.strictObject({ name: z.string().min(1).max(200) });
 export const projectMemberRequest = teamMemberRequest;
+
+// ───────── People and Teams pages (slice 4b, G14–G15) ─────────
+
+const structureName = z.string().trim().min(1).max(200);
+export const teamUpdateRequest = z.strictObject({ name: structureName });
+export const projectUpdateRequest = z.strictObject({
+  name: structureName.optional(),
+  client_ref: z.string().trim().max(200).nullable().optional(),
+  /** Archived projects leave everyone's project picker; their time stays on record. */
+  status: z.enum(['active', 'archived']).optional(),
+});
+export const taskUpdateRequest = z.strictObject({ name: structureName.optional(), status: z.enum(['active', 'archived']).optional() });
+
+/** The admin view of a project adds who is on it. */
+export interface AdminProjectDTO extends ProjectDTO {
+  members: { user_id: string; display_name: string; role: 'member' | 'manager' }[];
+}
+
+/** One CSV row of people to invite. Rows are checked one by one, so one bad row never blocks the rest. */
+export const userImportRow = z.strictObject({
+  email: z.email().max(320),
+  display_name: z.string().trim().min(1).max(200),
+  org_role: z.enum(ORG_ROLES).default('employee'),
+  timezone: z.string().min(1).max(64).default('UTC'),
+  tracking_enabled: z.boolean().default(true),
+  /** A team to join as a member; created if it doesn't exist yet. */
+  team: z.string().trim().min(1).max(200).optional(),
+});
+export type UserImportRow = z.input<typeof userImportRow>;
+export const USER_IMPORT_MAX_ROWS = 500;
+export const userImportRequest = z.strictObject({
+  rows: z.array(z.unknown()).min(1).max(USER_IMPORT_MAX_ROWS),
+  /** Check every row (format, duplicates, existing people, seats) without inviting anyone. */
+  dry_run: z.boolean().default(false),
+});
+export interface UserImportResult {
+  /** 1-based, matching the file's data rows. */
+  row: number;
+  email: string | null;
+  ok: boolean;
+  code?: string;
+  message?: string;
+  user_id?: string;
+  team?: 'joined' | 'created';
+}
+export interface UserImportResponse {
+  dry_run: boolean;
+  ok: number;
+  failed: number;
+  results: UserImportResult[];
+}
 export interface ProjectDTO {
   id: string;
   name: string;
   client_ref: string | null;
+  /** The client it's billed to (Money), so expenses on it can be billed too. */
+  client_name: string | null;
   status: 'active' | 'archived';
   tasks: { id: string; name: string }[];
 }
@@ -359,6 +471,8 @@ export interface DeviceDTO {
   permissions: Record<string, PermissionState>;
   clock_skew_detected: boolean;
   sequence_gaps: number;
+  /** Browsers on this computer with the Track extension (website domains, Pro). */
+  browser_extensions: BrowserFamily[];
 }
 
 // ───────────────────────── policies ─────────────────────────
@@ -415,7 +529,7 @@ export interface MyPolicyResponse {
 
 export interface AuditEventDTO {
   id: string;
-  actor_type: 'user' | 'device' | 'system' | 'platform';
+  actor_type: 'user' | 'device' | 'system' | 'platform' | 'directory' | 'api_token';
   actor_id: string | null;
   actor_name: string | null;
   action: string;
@@ -426,14 +540,6 @@ export interface AuditEventDTO {
   request_id: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
-}
-export interface NotificationDTO {
-  id: string;
-  kind: string;
-  title: string;
-  body: string;
-  created_at: string;
-  read_at: string | null;
 }
 
 // ───────────────────────── billing ─────────────────────────
@@ -447,8 +553,13 @@ export interface SubscriptionDTO {
   billable_seats: number;
   viewer_seats: number;
   seat_ceiling: number;
+  billing_interval: BillingInterval;
+  /** Per seat per month on this term. */
   price_per_seat_cents: number;
+  /** Seats × price, per month. */
   estimated_monthly_cents: number;
+  /** What one invoice comes to: the monthly estimate, or 12 months of it on an annual term. */
+  estimated_invoice_cents: number;
   trial_ends_at: string | null;
   grace_ends_at: string | null;
   current_period_end: string | null;
@@ -469,14 +580,55 @@ export const signupRequest = z.strictObject({
   display_name: z.string().trim().min(1).max(200),
   email: z.email().max(320),
   password: z.string().min(12).max(200),
+  /** The subscription terms and data processing agreement (TERMS_VERSION). */
+  accept_terms: z.literal(true, { error: 'Accept the terms and the data processing agreement to continue.' }),
 });
 export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).max(200) });
 export const changePlanRequest = z.strictObject({
   plan: z.enum(['free', 'standard', 'pro']),
   seats: z.number().int().min(0).max(100_000),
+  /** Omitted: keep the current term (month for a new paid plan). */
+  interval: z.enum(BILLING_INTERVALS).optional(),
 });
 
 export interface Page<T> {
   items: T[];
   next_cursor: string | null;
+}
+
+// ───────────── Stage 4 F2: batch approvals ─────────────
+
+export const APPROVAL_TYPES = ['correction', 'timesheet', 'time_off', 'deletion_request', 'expense'] as const;
+export type ApprovalType = (typeof APPROVAL_TYPES)[number];
+export const MAX_BATCH_APPROVALS = 100;
+
+/**
+ * Approve or send back several requests at once. Each item is checked exactly as if it
+ * were reviewed on its own (your own requests, scope, plan, state) and succeeds or
+ * fails independently. Sending back needs a note, as it does one at a time.
+ */
+export const approvalsBatchRequest = z
+  .strictObject({
+    action: z.enum(['approve', 'reject']),
+    note: z.string().trim().max(1000).optional(),
+    items: z
+      .array(z.strictObject({ type: z.enum(APPROVAL_TYPES), id: uuid }))
+      .min(1)
+      .max(MAX_BATCH_APPROVALS),
+  })
+  .refine((b) => b.action === 'approve' || (b.note ?? '').length >= 3, { message: 'A note of at least 3 characters is required to send back', path: ['note'] });
+
+export interface ApprovalsBatchResult {
+  type: ApprovalType;
+  id: string;
+  ok: boolean;
+  /** On failure: the same error code a single review would return. */
+  code?: string;
+  message?: string;
+}
+export interface ApprovalsBatchResponse {
+  approved: number;
+  rejected: number;
+  failed: number;
+  results: ApprovalsBatchResult[];
 }

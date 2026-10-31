@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -45,6 +45,15 @@ impl Os {
             Os::Linux
         }
     }
+}
+
+/// `POST /v1/devices/enrollment-requests` request (G26).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmailCodeRequest {
+    /// The key from the deployment file.
+    pub deployment_key: String,
+    /// The person's work email.
+    pub email: String,
 }
 
 /// `POST /v1/devices/enroll` request.
@@ -90,6 +99,9 @@ pub struct HeartbeatRequest {
     pub client_time: DateTime<Utc>,
     /// Permission status.
     pub permissions: Permissions,
+    /// Browsers whose Track extension was heard from lately (left out when none).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub browser_extensions: Vec<crate::browser::BrowserFamily>,
     /// Events waiting in the outbox.
     pub outbox_depth: u64,
     /// Highest policy revision applied.
@@ -113,6 +125,8 @@ pub struct HeartbeatResponse {
         skip_serializing_if = "Option::is_none"
     )]
     pub license: Option<LicenseInfo>,
+    /// The person's language and formats (`fr-CA`…); `None` lets the computer decide.
+    pub locale: Option<String>,
 }
 
 /// Licence status reported in heartbeats.
@@ -179,11 +193,15 @@ impl LicenseBlock {
 
     /// Text shown to the employee.
     pub fn message(self) -> &'static str {
+        self.message_in(crate::i18n::Lang::En)
+    }
+
+    /// The same, in `lang`.
+    pub fn message_in(self, lang: crate::i18n::Lang) -> &'static str {
+        let m = lang.messages();
         match self {
-            Self::SubscriptionInactive => {
-                "Tracking is unavailable: your organization's subscription is inactive"
-            }
-            Self::SeatUnavailable => "Tracking is unavailable: no licence seat assigned",
+            Self::SubscriptionInactive => m.license_inactive,
+            Self::SeatUnavailable => m.license_no_seat,
         }
     }
 }
@@ -215,6 +233,90 @@ pub struct DeviceProject {
 enum DeviceProjectList {
     Bare(Vec<DeviceProject>),
     Wrapped { projects: Vec<DeviceProject> },
+}
+
+/// Time worked so far today (`GET /v1/device/work-limits`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkedToday {
+    /// The person's local date (in [`WorkLimits::timezone`]).
+    pub date: NaiveDate,
+    /// Seconds worked on that date, the running session left out when asked.
+    pub worked_seconds: u64,
+}
+
+/// Time worked so far this week (`GET /v1/device/work-limits`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkedWeek {
+    /// Monday of the ISO week.
+    pub period_start: NaiveDate,
+    /// Seconds worked in the week, the running session left out when asked.
+    pub worked_seconds: u64,
+}
+
+/// `GET /v1/device/work-limits` with `enabled: true` (Stage 4 F4): the person's daily
+/// and weekly limits and the time worked so far. Sessions count on the local day they
+/// start on. Read only by the agent, for local warnings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkLimits {
+    /// Server time of the figures.
+    #[serde(with = "crate::ts")]
+    pub as_of: DateTime<Utc>,
+    /// IANA time zone the dates are in.
+    pub timezone: String,
+    /// Daily limit (`None` = no daily limit).
+    #[serde(default)]
+    pub daily_minutes: Option<u32>,
+    /// Weekly limit (`None` = no weekly limit).
+    #[serde(default)]
+    pub weekly_minutes: Option<u32>,
+    /// Today so far.
+    pub today: WorkedToday,
+    /// This week so far.
+    pub week: WorkedWeek,
+}
+
+/// Today's shift (`GET /v1/device/schedule-today`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledShift {
+    /// Shift start.
+    #[serde(with = "crate::ts")]
+    pub start_at: DateTime<Utc>,
+    /// Shift end.
+    #[serde(with = "crate::ts")]
+    pub end_at: DateTime<Utc>,
+}
+
+/// Why today is not a working day.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DayOff {
+    /// An organization holiday.
+    Holiday,
+    /// Today's shift was cancelled.
+    Cancelled,
+    /// Approved full-day leave.
+    Leave,
+    /// A reason this agent does not know (still a day off).
+    #[serde(other)]
+    Other,
+}
+
+/// `GET /v1/device/schedule-today` (Stage 4 F3): the person's working hours today, so
+/// reminders stay inside them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduleToday {
+    /// The person's local date.
+    pub date: NaiveDate,
+    /// IANA time zone of `date`.
+    pub timezone: String,
+    /// `false`: no schedule (the agent uses the hours the person set).
+    pub scheduled: bool,
+    /// Today's shift; `None` with `scheduled` means not a working day.
+    #[serde(default)]
+    pub shift: Option<ScheduledShift>,
+    /// A holiday, cancelled shift or full-day leave: no reminders.
+    #[serde(default)]
+    pub day_off: Option<DayOff>,
 }
 
 /// `POST /v1/ingestion/event-batches` request.
@@ -310,6 +412,10 @@ pub struct UploadIntentResponse {
     /// URL expiry.
     #[serde(default, with = "crate::ts::option")]
     pub expires_at: Option<DateTime<Utc>>,
+    /// The policy blurs this screenshot (the server's word; the agent also blurs when its
+    /// own policy says so).
+    #[serde(default)]
+    pub blur: bool,
 }
 
 /// `POST /v1/screenshots/complete` request.
@@ -328,6 +434,8 @@ pub struct CompleteRequest {
     pub width: u32,
     /// Image height.
     pub height: u32,
+    /// The image was blurred before it was encoded.
+    pub blurred: bool,
 }
 
 /// `POST /v1/screenshots/complete` response.
@@ -533,6 +641,19 @@ impl ApiClient {
         )
     }
 
+    /// `POST /v1/devices/enrollment-requests` (public, G26): on a computer IT deployed, asks
+    /// the server to email the person a one-time code. The answer is the same whether or not
+    /// the email belongs to someone who can connect.
+    pub fn request_email_code(&self, req: &EmailCodeRequest) -> Result<(), ApiError> {
+        let _: serde_json::Value = self.call(
+            Method::Post,
+            self.url("/devices/enrollment-requests"),
+            Some(Self::json(req)?),
+            false,
+        )?;
+        Ok(())
+    }
+
     /// `POST /v1/device/heartbeat`.
     pub fn heartbeat(&self, req: &HeartbeatRequest) -> Result<HeartbeatResponse, ApiError> {
         self.call(
@@ -563,6 +684,29 @@ impl ApiClient {
         Ok(match list {
             DeviceProjectList::Bare(v) | DeviceProjectList::Wrapped { projects: v } => v,
         })
+    }
+
+    /// `GET /v1/device/work-limits[?exclude_session_id=…]` — `None` when the plan has
+    /// no work limits (`enabled: false`). `exclude` is the running session, which the
+    /// agent counts itself.
+    pub fn work_limits(&self, exclude: Option<Uuid>) -> Result<Option<WorkLimits>, ApiError> {
+        let mut url = self.url("/device/work-limits");
+        if let Some(id) = exclude {
+            url.push_str("?exclude_session_id=");
+            url.push_str(&id.to_string());
+        }
+        let v: serde_json::Value = self.call(Method::Get, url, None, true)?;
+        if v.get("enabled").and_then(serde_json::Value::as_bool) != Some(true) {
+            return Ok(None);
+        }
+        serde_json::from_value(v)
+            .map(Some)
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
+    /// `GET /v1/device/schedule-today`.
+    pub fn schedule_today(&self) -> Result<ScheduleToday, ApiError> {
+        self.call(Method::Get, self.url("/device/schedule-today"), None, true)
     }
 
     /// Serializes a batch request.
@@ -693,6 +837,7 @@ mod tests {
                 agent_version: "0.1.0".into(),
                 client_time: Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap(),
                 permissions: Permissions::default(),
+                browser_extensions: vec![crate::browser::BrowserFamily::Firefox],
                 outbox_depth: 4,
                 applied_policy_revision: 2,
             })
@@ -708,6 +853,7 @@ mod tests {
             json!({"input_monitoring": "unknown", "screen_recording": "unknown", "accessibility": "unknown"})
         );
         assert_eq!(body["client_time"], "2026-10-28T09:00:00Z");
+        assert_eq!(body["browser_extensions"], json!(["firefox"]));
 
         t.push(
             401,
@@ -813,6 +959,115 @@ mod tests {
     }
 
     #[test]
+    fn work_limits_endpoint() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("http://h", t.clone()).with_credential("c");
+        t.push(
+            200,
+            json!({"enabled": true, "as_of": "2026-10-28T15:00:00.000Z", "timezone": "Europe/Riga",
+                   "daily_minutes": 480, "weekly_minutes": null,
+                   "today": {"date": "2026-10-28", "worked_seconds": 1800},
+                   "week": {"period_start": "2026-10-26", "worked_seconds": 5400}, "extra": 1}),
+        );
+        let session = Uuid::parse_str("6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b").unwrap();
+        let l = api.work_limits(Some(session)).unwrap().unwrap();
+        assert_eq!(l.daily_minutes, Some(480));
+        assert_eq!(l.weekly_minutes, None);
+        assert_eq!(l.today.date, NaiveDate::from_ymd_opt(2026, 10, 28).unwrap());
+        assert_eq!(l.week.worked_seconds, 5400);
+        assert_eq!(l.timezone, "Europe/Riga");
+        let req = t.requests().remove(0);
+        assert_eq!(req.method, Method::Get);
+        assert!(req.url.ends_with(
+            "/v1/device/work-limits?exclude_session_id=6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+        ));
+        assert!(req
+            .headers
+            .contains(&("authorization".into(), "Device c".into())));
+
+        // Plans without work limits.
+        t.push(200, json!({"enabled": false}));
+        assert_eq!(api.work_limits(None).unwrap(), None);
+        assert!(t.requests()[1].url.ends_with("/v1/device/work-limits"));
+        // `enabled: true` without the figures is a decode error (the last good copy stays).
+        t.push(200, json!({"enabled": true, "timezone": "UTC"}));
+        assert!(matches!(api.work_limits(None), Err(ApiError::Decode(_))));
+
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "x"}}),
+        );
+        assert_eq!(api.work_limits(None).unwrap_err(), ApiError::DeviceRevoked);
+        t.push(401, json!({"error": {"code": "unauthorized"}}));
+        assert!(matches!(
+            api.work_limits(None),
+            Err(ApiError::Http { status: 401, .. })
+        ));
+        t.fail_next("connection refused");
+        assert!(matches!(api.work_limits(None), Err(ApiError::Transport(_))));
+        let unenrolled = ApiClient::new("http://h", t);
+        assert_eq!(
+            unenrolled.work_limits(None).unwrap_err(),
+            ApiError::NotEnrolled
+        );
+    }
+
+    #[test]
+    fn schedule_today_endpoint() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("http://h", t.clone()).with_credential("c");
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": true,
+                   "shift": {"start_at": "2026-10-28T09:00:00.000Z", "end_at": "2026-10-28T17:00:00.000Z"},
+                   "day_off": null}),
+        );
+        let s = api.schedule_today().unwrap();
+        assert!(s.scheduled);
+        let shift = s.shift.unwrap();
+        assert_eq!(
+            shift.start_at,
+            crate::ts::parse("2026-10-28T09:00:00Z").unwrap()
+        );
+        assert_eq!(
+            shift.end_at,
+            crate::ts::parse("2026-10-28T17:00:00Z").unwrap()
+        );
+        assert_eq!(s.day_off, None);
+        assert!(t.requests()[0].url.ends_with("/v1/device/schedule-today"));
+
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": true, "shift": null, "day_off": "holiday"}),
+        );
+        assert_eq!(api.schedule_today().unwrap().day_off, Some(DayOff::Holiday));
+        t.push(
+            200,
+            json!({"date": "2026-10-28", "timezone": "UTC", "scheduled": false, "day_off": "sabbatical"}),
+        );
+        let s = api.schedule_today().unwrap();
+        assert_eq!(s.shift, None);
+        assert_eq!(
+            s.day_off,
+            Some(DayOff::Other),
+            "unknown reasons are still a day off"
+        );
+
+        t.push(
+            401,
+            json!({"error": {"code": "device_revoked", "message": "x"}}),
+        );
+        assert_eq!(api.schedule_today().unwrap_err(), ApiError::DeviceRevoked);
+        t.push(404, json!({"error": {"code": "not_found"}}));
+        assert!(matches!(
+            api.schedule_today(),
+            Err(ApiError::Http { status: 404, .. })
+        ));
+        t.fail_next("offline");
+        assert!(matches!(api.schedule_today(), Err(ApiError::Transport(_))));
+    }
+
+    #[test]
     fn batch_response_handles_unknown_status() {
         let v = json!({"server_time": "2026-10-28T09:00:00Z", "results": [
             {"event_id": "00000000-0000-0000-0000-000000000000", "status": "accepted"},
@@ -834,6 +1089,7 @@ mod tests {
             upload_url: "http://minio/bucket/key?sig=1".into(),
             upload_headers: [("x-amz-meta-a".to_string(), "1".to_string())].into(),
             expires_at: None,
+            blur: false,
         };
         api.upload_object(&intent, ImageContentType::Jpeg, vec![1, 2, 3])
             .unwrap();

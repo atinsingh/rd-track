@@ -3,6 +3,7 @@
 //! simulated platform. Used by the headless `rd-agent` binary and the tray app
 //! (`rd-agent-desktop`).
 
+pub mod browser_host;
 pub mod config;
 pub mod credentials;
 pub mod http;

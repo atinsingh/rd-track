@@ -21,13 +21,17 @@ rd-agent-core = { path = "../rd-agent-core" }
 rd-agent = { path = "../rd-agent", features = ["keychain"] }
 tauri = { version = "2.12", features = ["tray-icon", "image-png"] }
 tauri-plugin-updater = "2.14"
+tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2.7"
+tauri-plugin-deep-link = "2"
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 chrono.workspace = true
 env_logger.workspace = true
 log.workspace = true
 rand.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+sys-locale = "0.3.2"
 uuid.workspace = true
 
 [dev-dependencies]

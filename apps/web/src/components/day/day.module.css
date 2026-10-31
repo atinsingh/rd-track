@@ -4,7 +4,12 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 12px 22px;
-  background: var(--ink);
+  background: var(--ink-glass);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--ink-glass-edge);
+  box-shadow: var(--ink-glass-shadow);
+  border-radius: var(--radius-panel);
   color: var(--ink-text);
   padding: 16px 20px;
 }
@@ -53,8 +58,12 @@
 .tiles {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
 }
 .tile {
   padding: 18px 20px;
@@ -357,6 +366,7 @@
   max-width: 100%;
   height: auto;
   border: 1px solid var(--rule);
+  border-radius: var(--radius-control);
   background: var(--canvas);
 }
 .recorded {
@@ -382,6 +392,7 @@
   height: var(--target);
   width: var(--target);
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text);
   font: 500 16px var(--font-ui);
@@ -394,6 +405,7 @@
   height: var(--target);
   padding: 0 12px;
   border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   background: var(--surface);
   display: flex;
   align-items: center;

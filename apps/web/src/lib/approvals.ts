@@ -1,0 +1,109 @@
+import { type ApprovalType, type CorrectionDTO, type DeletionRequestDTO, type ExpenseDTO, type TimeOffRequestDTO, type TimesheetDTO } from '@rd/contracts';
+import { expenseCategoryLabel } from './expenses';
+import { formatDuration, formatMoney } from './format';
+import { t, type MessageKey } from './i18n';
+import { dateSpanLabel, formatHours } from './scheduling';
+import { addDays, dateInTz, formatDayMonth, formatShortDay, formatTime } from './time';
+
+/** One row of the approvals inbox (Stage 4 F2), whatever kind of request it is. */
+export interface InboxItem {
+  type: ApprovalType;
+  id: string;
+  /** Tab it belongs to. */
+  group: 'timesheets' | 'time' | 'timeoff' | 'expenses' | 'privacy';
+  who: string;
+  what: string;
+  kindLabel: string;
+  amount: string;
+  submittedAt: string;
+  /** Something the reviewer should notice before approving. */
+  flag: string | null;
+}
+
+export const INBOX_TABS = [{ key: 'all' }, { key: 'timesheets' }, { key: 'time' }, { key: 'timeoff' }, { key: 'expenses' }, { key: 'privacy' }] as const;
+export type InboxTab = (typeof INBOX_TABS)[number]['key'];
+
+/** A tab's name in the current language. */
+export const inboxTabLabel = (tab: InboxTab): string => t(`mgr.tab.${tab}` as MessageKey);
+
+const KIND_KEY: Record<CorrectionDTO['kind'], MessageKey> = { edit: 'mgr.kindLabel.edit', manual_add: 'mgr.kindLabel.manual', idle_reassign: 'mgr.kindLabel.idle' };
+
+function correctionItem(c: CorrectionDTO, tz: string): InboxItem {
+  const v = c.requested;
+  const s = Date.parse(v.started_at);
+  const e = Date.parse(v.ended_at);
+  const when = `${formatShortDay(dateInTz(s, tz))} ${formatTime(s, tz)}–${formatTime(e, tz)}`;
+  const target = v.project_id ? (c.project_names?.[v.project_id] ?? t('mgr.item.aProject')) : t('mgr.item.noProject');
+  const what = t(c.kind === 'manual_add' ? 'mgr.item.add' : c.kind === 'idle_reassign' ? 'mgr.item.away' : 'mgr.item.change', { when, target });
+  return {
+    type: 'correction', id: c.id, group: 'time', who: c.user_name, what, kindLabel: t(KIND_KEY[c.kind]),
+    amount: formatDuration((e - s) / 1000), submittedAt: c.created_at, flag: null,
+  };
+}
+
+function timesheetItem(sheet: TimesheetDTO): InboxItem {
+  const totals = sheet.submitted_totals ?? sheet.totals;
+  return {
+    type: 'timesheet', id: sheet.id!, group: 'timesheets', who: sheet.user_name,
+    what: t('mgr.item.week', { from: formatDayMonth(sheet.period_start), to: formatDayMonth(addDays(sheet.period_start, 6)) }),
+    kindLabel: t('mgr.item.timesheet'), amount: formatDuration(totals.total_seconds), submittedAt: sheet.submitted_at ?? '',
+    flag: sheet.changed_since_submit ? t('mgr.item.changed') : null,
+  };
+}
+
+function timeOffItem(r: TimeOffRequestDTO): InboxItem {
+  return {
+    type: 'time_off', id: r.id, group: 'timeoff', who: r.user_name,
+    what: `${r.policy_name} · ${dateSpanLabel(r.start_date, r.end_date)}${r.partial_hours !== null ? t('mgr.item.partDay') : ''}`,
+    kindLabel: t('mgr.item.timeOff'), amount: formatHours(r.hours), submittedAt: r.created_at, flag: null,
+  };
+}
+
+function expenseItem(e: ExpenseDTO): InboxItem {
+  return {
+    type: 'expense', id: e.id, group: 'expenses', who: e.user_name,
+    what: `${expenseCategoryLabel(e.category)} · ${e.note}${e.billable && e.client_name ? t('mgr.item.bill', { client: e.client_name }) : ''}`,
+    kindLabel: t('mgr.item.expense'), amount: formatMoney(e.amount_cents, e.currency), submittedAt: e.created_at, flag: e.has_receipt ? null : t('mgr.item.noReceipt'),
+  };
+}
+
+function deletionItem(d: DeletionRequestDTO): InboxItem {
+  return {
+    type: 'deletion_request', id: d.id, group: 'privacy', who: d.requester_name,
+    what: t('mgr.item.deleteShot'), kindLabel: t('mgr.item.deletion'), amount: t('mgr.item.oneShot'), submittedAt: d.created_at, flag: null,
+  };
+}
+
+/** Every pending request in one list, oldest first. Deletion requests reach org admins only. */
+export function inboxItems(
+  corrections: readonly CorrectionDTO[],
+  timesheets: readonly TimesheetDTO[],
+  timeOff: readonly TimeOffRequestDTO[],
+  tz: string,
+  deletions: readonly DeletionRequestDTO[] = [],
+  expenses: readonly ExpenseDTO[] = [],
+): InboxItem[] {
+  return [
+    ...timesheets.filter((t) => t.id).map(timesheetItem),
+    ...expenses.map(expenseItem),
+    ...corrections.map((c) => correctionItem(c, tz)),
+    ...timeOff.map(timeOffItem),
+    ...deletions.filter((d) => d.status === 'pending').map(deletionItem),
+  ].sort((a, b) => a.submittedAt.localeCompare(b.submittedAt));
+}
+
+export function inTab(items: readonly InboxItem[], tab: InboxTab): InboxItem[] {
+  return tab === 'all' ? [...items] : items.filter((i) => i.group === tab);
+}
+
+export const itemKey = (i: Pick<InboxItem, 'type' | 'id'>) => `${i.type}:${i.id}`;
+
+/** "3 approved · 1 couldn't be: already reviewed" from a batch response. */
+export function batchSummary(
+  r: { approved: number; rejected: number; failed: number; results: { ok: boolean; message?: string }[] },
+): string {
+  const done = r.approved ? t('mgr.batch.approved', { n: r.approved }) : t('mgr.batch.sentBack', { n: r.rejected });
+  if (!r.failed) return done;
+  const reasons = [...new Set(r.results.filter((x) => !x.ok).map((x) => (x.message ?? t('mgr.batch.notAllowed')).replace(/\.$/, '').toLowerCase()))];
+  return t('mgr.batch.failed', { done, n: r.failed, reasons: reasons.join('; ') });
+}

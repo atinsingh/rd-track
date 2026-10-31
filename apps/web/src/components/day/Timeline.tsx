@@ -6,15 +6,16 @@ import { activityPercent } from '@rd/contracts';
 import { Card, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { ActivityInfo } from '@/components/ui/ActivityInfo';
 import { cx } from '@/lib/cx';
-import { formatDuration } from '@/lib/format';
-import { formatTime } from '@/lib/time';
+import { formatDuration, formatPercent } from '@/lib/format';
+import { t } from '@/lib/i18n';
+import { formatHour, formatTime } from '@/lib/time';
 import {
-  KIND_LABEL,
   buildTimelineColumns,
   describeTimeline,
   timelineRuns,
   timelineWindow,
   type ColumnKind,
+  kindLabel,
   type TimelineColumn,
 } from '@/lib/timeline';
 import s from './day.module.css';
@@ -27,15 +28,13 @@ const KIND_CLASS: Record<ColumnKind, string | undefined> = {
   none: s.kindNone,
 };
 
-const QUALITY_TEXT = { ok: 'data ok', partial: 'partial data', permission_missing: 'no permission to measure' } as const;
-
 function columnTitle(c: TimelineColumn, tz: string): string {
   const span = `${formatTime(c.start, tz)}–${formatTime(c.end, tz)}`;
   if (c.kind === 'activity') {
-    const q = c.quality ? ` · ${QUALITY_TEXT[c.quality]}` : '';
-    return `${span} · active ${Math.round(c.activeSeconds)} s, idle ${Math.round(c.idleSeconds)} s${q}`;
+    const q = c.quality ? ` · ${t(`timeline.quality.${c.quality}`)}` : '';
+    return `${t('timeline.column', { span, active: Math.round(c.activeSeconds), idle: Math.round(c.idleSeconds) })}${q}`;
   }
-  return `${span} · ${KIND_LABEL[c.kind]}`;
+  return `${span} · ${kindLabel(c.kind)}`;
 }
 
 function barHeight(c: TimelineColumn): number {
@@ -87,7 +86,7 @@ export function Timeline({
 
   return (
     <Card
-      title="Computer activity through the day"
+      title={t('day.activityTitle')}
       actions={
         <button
           type="button"
@@ -97,30 +96,30 @@ export function Timeline({
           aria-controls={tableId}
           onClick={() => setShowTable((v) => !v)}
         >
-          {showTable ? 'View as chart →' : 'View as table →'}
+          {showTable ? t('timeline.viewChart') : t('timeline.viewTable')}
         </button>
       }
     >
       {showTable ? (
         <div id={tableId}>
           {runs.length === 0 ? (
-            <p className="secondary">No sessions in this period.</p>
+            <p className="secondary">{t('timeline.none')}</p>
           ) : (
-            <TableBox label="Activity periods">
+            <TableBox label={t('timeline.periods')}>
               <table className={tableClass} style={{ minWidth: 520 }}>
-                <caption className="visually-hidden">Activity periods for the day, in {tz}</caption>
+                <caption className="visually-hidden">{t('timeline.caption', { tz })}</caption>
                 <thead>
                   <tr>
-                    <th scope="col">Period</th>
-                    <th scope="col">What</th>
+                    <th scope="col">{t('timeline.period')}</th>
+                    <th scope="col">{t('timeline.what')}</th>
                     <th scope="col" className={numClass}>
-                      Active
+                      {t('timeline.active')}
                     </th>
                     <th scope="col" className={numClass}>
-                      Idle
+                      {t('timeline.idle')}
                     </th>
                     <th scope="col" className={numClass}>
-                      Computer activity
+                      {t('timeline.activity')}
                     </th>
                   </tr>
                 </thead>
@@ -132,10 +131,10 @@ export function Timeline({
                         <td className="mono">
                           {formatTime(r.start, tz)}–{formatTime(r.end, tz)}
                         </td>
-                        <td>{KIND_LABEL[r.kind]}</td>
+                        <td>{kindLabel(r.kind)}</td>
                         <td className={numClass}>{r.kind === 'activity' ? formatDuration(r.activeSeconds) : '—'}</td>
                         <td className={numClass}>{r.kind === 'activity' ? formatDuration(r.idleSeconds) : '—'}</td>
-                        <td className={numClass}>{pct === null ? '—' : `${pct}%`}</td>
+                        <td className={numClass}>{pct === null ? '—' : formatPercent(pct)}</td>
                       </tr>
                     );
                   })}
@@ -161,7 +160,7 @@ export function Timeline({
               .filter((_, i) => showAll || i % 2 === 0 || i === hours.length - 1)
               .map((h) => (
                 <span key={h.ms} style={{ left: `${h.left}%` }}>
-                  {formatTime(h.ms, tz).slice(0, 2)}
+                  {formatHour(h.ms, tz)}
                 </span>
               ))}
           </div>
@@ -170,30 +169,29 @@ export function Timeline({
       <div className={s.legend}>
         <span>
           <span className={cx(s.swatch, s.kindActivity)} aria-hidden="true" />
-          Active minutes (height = share of the 5 min)
+          {t('timeline.legendActive')}
         </span>
         <span>
           <span className={cx(s.swatch, s.kindPaused)} aria-hidden="true" />
-          Paused
+          {kindLabel('paused')}
         </span>
         <span>
           <span className={cx(s.swatch, s.kindOffline)} aria-hidden="true" />
-          Asleep or offline
+          {kindLabel('offline')}
         </span>
         <span>
           <span className={cx(s.swatch, s.kindPermission)} aria-hidden="true" />
-          No permission to measure
+          {kindLabel('permission')}
         </span>
         <span>
           <span className={s.swatchLine} aria-hidden="true" />
-          No session
+          {kindLabel('none')}
         </span>
       </div>
       <div className={s.explain} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
         <ActivityInfo />
         <span>
-          Activity = active seconds ÷ (active + idle seconds) in minutes the agent could measure. It can&apos;t see
-          meetings, calls, reading or thinking, so a low bar is not a judgement about {isSelf ? 'your' : 'anyone’s'} work.
+          {isSelf ? t('timeline.explainYours') : t('timeline.explainAnyone')}
         </span>
       </div>
     </Card>

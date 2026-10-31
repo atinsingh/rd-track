@@ -7,8 +7,12 @@
 .tree {
   flex: 1 1 260px;
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   padding: 16px 0;
   display: flex;
   flex-direction: column;
@@ -66,8 +70,12 @@
 .editor {
   flex: 3 1 640px;
   min-width: 0;
-  background: var(--surface);
-  border: 1px solid var(--rule);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-edge);
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
   padding: 22px 24px;
   display: flex;
   flex-direction: column;

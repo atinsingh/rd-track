@@ -7,7 +7,9 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
 import { emitEvent } from '../webhooks/service';
+import { settleIdleReassign } from '../idle/apply';
 import { assertWeekUnlocked } from '../timesheets/service';
 
 /** TIME-08: proposals keep the original values; approval applies them without losing history. */
@@ -16,7 +18,9 @@ const MAX_ENTRY_MS = 16 * 3600_000;
 
 const SELECT = `
   SELECT c.id, c.user_id, u.display_name AS user_name, c.session_id, c.kind, c.original, c.requested, c.reason, c.status,
-         c.reviewed_by, c.reviewed_at, c.review_note, c.created_at
+         c.reviewed_by, c.reviewed_at, c.review_note, c.created_at,
+         (SELECT COALESCE(json_object_agg(p.id, p.name), '{}'::json) FROM projects p
+          WHERE p.id::text IN (c.original->>'project_id', c.requested->>'project_id')) AS project_names
   FROM time_corrections c JOIN users u ON u.id = c.user_id`;
 
 async function get(q: Queryable, id: string): Promise<CorrectionDTO> {
@@ -88,8 +92,16 @@ export async function proposeCorrection(
   if (sub.status !== 'trialing' && !hasEntitlement(sub.plan, 'correction_approvals')) {
     await apply(q, r!.id);
     await q.query(`UPDATE time_corrections SET status = 'approved', reviewed_at = now(), review_note = 'Applied automatically' WHERE id = $1`, [r!.id]);
+  } else {
+    await submitted(q, actor.organizationId, actor.userId, r!.id, actor.displayName);
   }
   return get(q, r!.id);
+}
+
+/** Tells the reviewers a correction is waiting (engine: correction.submitted). */
+async function submitted(q: Queryable, orgId: string, userId: string, correctionId: string, userName?: string) {
+  const name = userName ?? (await one<{ display_name: string }>(q, 'SELECT display_name FROM users WHERE id = $1', [userId]))?.display_name ?? 'Someone';
+  await publish(q, { organizationId: orgId, type: 'correction.submitted', subjectUserId: userId, actorUserId: userId, data: { correction_id: correctionId, user_name: name } });
 }
 
 async function apply(q: Queryable, id: string) {
@@ -116,7 +128,54 @@ async function apply(q: Queryable, id: string) {
       `INSERT INTO session_transitions (session_id, organization_id, state, at, reason) VALUES ($1, $2, 'stopped', $3, 'manual')`,
       [sid, c!.organization_id, v.ended_at],
     );
+    // A moved idle span: the time now lives on the manual entry, so it leaves the agent session.
+    if (c!.kind === 'idle_reassign') await settleIdleReassign(q, id, true);
   }
+}
+
+/**
+ * Stage 4 F1: the person moved an idle span to another project from the agent's
+ * return prompt. It is a correction like any other — approved by their manager, or
+ * applied directly on plans without the approval workflow. The span stays inside
+ * its own agent session, which is why it is not checked for overlap with it.
+ */
+export async function proposeIdleReassign(
+  deps: Deps,
+  q: Queryable,
+  input: {
+    organizationId: string;
+    userId: string;
+    sessionId: string;
+    decisionId: string;
+    original: CorrectionValues;
+    requested: CorrectionValues;
+  },
+): Promise<string> {
+  const r = await one<{ id: string }>(
+    q,
+    `INSERT INTO time_corrections (organization_id, user_id, session_id, kind, original, requested, reason, requested_by)
+     VALUES ($1, $2, $3, 'idle_reassign', $4, $5, $6, $2) RETURNING id`,
+    [input.organizationId, input.userId, input.sessionId, input.original, input.requested, 'Away from the computer — moved from the agent prompt'],
+  );
+  // Link first: applying below settles the decision through this link.
+  await q.query('UPDATE idle_decisions SET correction_id = $2 WHERE id = $1', [input.decisionId, r!.id]);
+  await audit(q, {
+    organizationId: input.organizationId,
+    actor: { kind: 'system' },
+    action: 'time_correction.create',
+    targetType: 'time_correction',
+    targetId: r!.id,
+    targetUserId: input.userId,
+    metadata: { kind: 'idle_reassign', idle_decision_id: input.decisionId },
+  });
+  const sub = await currentSubscription(q, input.organizationId, deps.now());
+  if (sub.status !== 'trialing' && !hasEntitlement(sub.plan, 'correction_approvals')) {
+    await apply(q, r!.id);
+    await q.query(`UPDATE time_corrections SET status = 'approved', reviewed_at = now(), review_note = 'Applied automatically' WHERE id = $1`, [r!.id]);
+  } else {
+    await submitted(q, input.organizationId, input.userId, r!.id);
+  }
+  return r!.id;
 }
 
 export async function myCorrections(q: Queryable, actor: UserActor): Promise<CorrectionDTO[]> {
@@ -145,9 +204,9 @@ export async function reviewCorrection(
   note: string | undefined,
   requestId?: string,
 ): Promise<CorrectionDTO> {
-  const c = await one<{ user_id: string; status: string; session_id: string | null; original: CorrectionValues | null; requested: CorrectionValues }>(
+  const c = await one<{ user_id: string; kind: string; status: string; session_id: string | null; original: CorrectionValues | null; requested: CorrectionValues }>(
     q,
-    'SELECT user_id, status, session_id, original, requested FROM time_corrections WHERE id = $1 AND organization_id = $2 FOR UPDATE',
+    'SELECT user_id, kind, status, session_id, original, requested FROM time_corrections WHERE id = $1 AND organization_id = $2 FOR UPDATE',
     [id, actor.organizationId],
   );
   if (!c) throw errors.notFound('Correction');
@@ -165,6 +224,8 @@ export async function reviewCorrection(
       ended_at: c.requested.ended_at,
       project_id: c.requested.project_id,
     });
+  } else if (c.kind === 'idle_reassign') {
+    await settleIdleReassign(q, id, false);
   }
   await q.query(
     `UPDATE time_corrections SET status = $2, reviewed_by = $3, reviewed_at = now(), review_note = $4 WHERE id = $1`,
@@ -178,6 +239,13 @@ export async function reviewCorrection(
     targetId: id,
     targetUserId: c.user_id,
     requestId,
+  });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'correction.decided',
+    subjectUserId: c.user_id,
+    actorUserId: actor.userId,
+    data: { correction_id: id, approved: approve, reviewer_name: actor.displayName, note: note?.trim() || null },
   });
   return get(q, id);
 }

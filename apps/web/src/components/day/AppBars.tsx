@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Layout';
 import { Empty } from '@/components/ui/DataState';
 import { formatDuration } from '@/lib/format';
+import { t } from '@/lib/i18n';
 import s from './day.module.css';
 
 const TOP = 8;
@@ -18,12 +19,12 @@ export function AppBars({ apps }: { apps: readonly AppUsageRow[] }) {
   const hasDomains = sorted.some((a) => a.domain);
   return (
     <Card
-      title="Applications in front"
-      subtitle={hasDomains ? 'App names and website domains · no window titles or full URLs' : 'App names only · no window titles or URLs'}
+      title={t('day.appsTitle')}
+      subtitle={hasDomains ? t('apps.withDomains') : t('apps.namesOnly')}
       className="grow"
     >
       {sorted.length === 0 ? (
-        <Empty title="No app usage recorded">App names are recorded only during a session.</Empty>
+        <Empty title={t('apps.none')}>{t('apps.noneBody')}</Empty>
       ) : (
         <>
           <ul className={s.apps}>
@@ -42,7 +43,7 @@ export function AppBars({ apps }: { apps: readonly AppUsageRow[] }) {
           </ul>
           {sorted.length > TOP ? (
             <Button variant="link" onClick={() => setAll((v) => !v)} aria-expanded={all}>
-              {all ? 'Show top 8' : `Show all ${sorted.length} apps`}
+              {all ? t('apps.showTop') : t('apps.showAll', { n: sorted.length })}
             </Button>
           ) : null}
         </>

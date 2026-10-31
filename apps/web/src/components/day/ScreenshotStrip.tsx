@@ -10,21 +10,11 @@ import { Card, formActionsClass } from '@/components/ui/Layout';
 import { rd, toApiError, type ApiError } from '@/lib/api';
 import { formatDateTime, formatTime } from '@/lib/time';
 import { useAction } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import s from './day.module.css';
 
-const STATUS_TEXT: Record<ScreenshotDTO['status'], string> = {
-  pending: 'Uploading',
-  verifying: 'Checking',
-  stored: '',
-  deleted: 'Deleted',
-  failed: 'Upload failed',
-};
-
-const DELETION_TEXT = {
-  pending: 'Deletion requested',
-  approved: 'Deletion approved',
-  rejected: 'Deletion declined',
-} as const;
+const statusText = (st: ScreenshotDTO['status']): string => (st === 'stored' ? '' : t(`shots.status.${st}`));
+const deletionText = (d: NonNullable<ScreenshotDTO['deletion_request_status']>): string => t(`shots.deletion.${d}`);
 
 function CameraIcon() {
   return (
@@ -87,21 +77,21 @@ export function ScreenshotStrip({
   };
 
   return (
-    <Card title="Screenshots" subtitle={policyText}>
+    <Card title={t('day.screenshots')} subtitle={policyText}>
       {!isSelf ? (
         <span className={s.recorded}>
-          <CameraIcon /> Viewing is recorded{personName ? ` and shown to ${personName}` : ''}
+          <CameraIcon /> {personName ? t('shots.viewingRecordedFor', { name: personName }) : t('shots.viewingRecorded')}
         </span>
       ) : null}
       {sorted.length === 0 ? (
-        <p className="secondary">No screenshots in this period.</p>
+        <p className="secondary">{t('shots.none')}</p>
       ) : (
         <ul className={s.shots}>
           {sorted.map((shot) => {
             const time = formatTime(shot.captured_at, tz);
             const viewable = shot.status === 'stored';
-            const status = STATUS_TEXT[shot.status];
-            const deletion = shot.deletion_request_status ? DELETION_TEXT[shot.deletion_request_status] : null;
+            const status = statusText(shot.status);
+            const deletion = shot.deletion_request_status ? deletionText(shot.deletion_request_status) : null;
             return (
               <li key={shot.id} className={s.shot}>
                 <button
@@ -109,23 +99,29 @@ export function ScreenshotStrip({
                   className={s.thumb}
                   disabled={!viewable}
                   onClick={() => open(shot)}
-                  aria-label={viewable ? `View screenshot from ${time}` : `Screenshot from ${time}: ${status}`}
+                  aria-label={viewable ? t('shots.viewFrom', { time }) : t('shots.from', { time, status })}
                 >
                   <span className={s.thumbBar} aria-hidden="true" />
                   <span className={s.thumbBody} aria-hidden="true">
                     <span className={s.thumbSide} />
-                    <span className={s.thumbMain}>{viewable ? 'View' : status}</span>
+                    <span className={s.thumbMain}>{viewable ? t('shots.view') : status}</span>
                   </span>
                 </button>
                 <span className={s.shotCaption}>
                   <span>
                     <span className="mono">{time}</span>
                     {shot.app_name ? ` · ${shot.app_name}` : ''}
+                    {shot.blurred ? (
+                      <>
+                        {' · '}
+                        <span title={t('shots.blurredHint')}>{t('shots.blurred')}</span>
+                      </>
+                    ) : null}
                     {deletion ? ` · ${deletion}` : status ? ` · ${status}` : ''}
                   </span>
                   {isSelf && viewable && !shot.deletion_request_status ? (
                     <Button variant="link" onClick={() => setDeleting(shot)} style={{ alignSelf: 'flex-start', fontSize: 12 }}>
-                      Request deletion
+                      {t('shots.requestDeletion')}
                     </Button>
                   ) : null}
                 </span>
@@ -142,11 +138,17 @@ export function ScreenshotStrip({
           setUrl(null);
         }}
         size="lg"
-        title={viewing ? `Screenshot · ${formatDateTime(viewing.captured_at, tz)}` : 'Screenshot'}
+        title={
+          viewing
+            ? `${t('shots.titleAt', { when: formatDateTime(viewing.captured_at, tz) })}${viewing.blurred ? ` · ${t('shots.blurred')}` : ''}`
+            : t('shots.title')
+        }
         description={
           isSelf
-            ? `Kept until ${viewing ? formatDateTime(viewing.retention_after, tz) : '—'}.`
-            : `This view is recorded in the audit log${personName ? ` and shown to ${personName}` : ''}.`
+            ? t('shots.keptUntil', { when: viewing ? formatDateTime(viewing.retention_after, tz) : '—' })
+            : personName
+              ? t('shots.viewAuditedFor', { name: personName })
+              : t('shots.viewAudited')
         }
       >
         {viewError ? (
@@ -157,12 +159,12 @@ export function ScreenshotStrip({
           <img
             className={s.viewer}
             src={url.url}
-            alt={`Screenshot captured at ${formatTime(viewing.captured_at, tz)}`}
+            alt={t('shots.alt', { time: formatTime(viewing.captured_at, tz) })}
             width={viewing.width ?? undefined}
             height={viewing.height ?? undefined}
           />
         ) : (
-          <Loading label="Requesting a short-lived link" />
+          <Loading label={t('shots.loadingLink')} />
         )}
       </Dialog>
 
@@ -172,24 +174,21 @@ export function ScreenshotStrip({
           setDeleting(null);
           del.reset();
         }}
-        title="Request deletion"
-        description={
-          deleting
-            ? `Screenshot from ${formatDateTime(deleting.captured_at, tz)}. Depending on policy it is deleted right away or after an admin review. The request is recorded; the image is never shown to the reviewer.`
-            : undefined
+        title={t('shots.requestDeletion')}
+        description={deleting ? t('shots.deletionBody', { when: formatDateTime(deleting.captured_at, tz) }) : undefined
         }
         footer={
           <div className={formActionsClass}>
-            <Button onClick={() => setDeleting(null)}>Cancel</Button>
+            <Button onClick={() => setDeleting(null)}>{t('common.cancel')}</Button>
             <Button variant="primary" disabled={del.busy || reason.trim().length < 3} onClick={submitDeletion}>
-              {del.busy ? 'Sending…' : 'Request deletion'}
+              {del.busy ? t('shots.sending') : t('shots.requestDeletion')}
             </Button>
           </div>
         }
       >
         <TextArea
-          label="Reason (required)"
-          hint="For example: a personal message was on screen."
+          label={t('shots.reason')}
+          hint={t('shots.reasonHint')}
           value={reason}
           maxLength={1000}
           rows={3}

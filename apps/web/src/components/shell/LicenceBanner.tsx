@@ -2,11 +2,13 @@
 
 import Link from 'next/link';
 import { Banner } from '@/components/ui/Layout';
+import { useT } from '@/lib/i18n';
 import { useMe } from '@/lib/me';
 
 /** Licence state from GET /v1/me (commercial model §4). Billing never hides collection. */
 export function LicenceBanner() {
   const { me, access } = useMe();
+  const t = useT();
   const license = me.organization.license;
   if (license === 'active') return null;
   if (license === 'grace') {
@@ -14,13 +16,10 @@ export function LicenceBanner() {
       <Banner
         tone="warn"
         role="status"
-        title="Payment is overdue — grace period"
-        actions={access.isAdmin ? <Link href="/admin/billing">Open billing →</Link> : undefined}
+        title={t('licence.graceTitle')}
+        actions={access.isAdmin ? <Link href="/admin/billing">{t('licence.openBilling')}</Link> : undefined}
       >
-        Everything keeps working for now.{' '}
-        {access.isAdmin
-          ? 'Update payment before the grace period ends, or tracking stops for everyone.'
-          : 'Your org admin has been notified.'}
+        {t('licence.keepsWorking')} {access.isAdmin ? t('licence.adminGrace') : t('licence.memberGrace')}
       </Banner>
     );
   }
@@ -28,10 +27,10 @@ export function LicenceBanner() {
     <Banner
       tone="error"
       role="status"
-      title="Subscription inactive — nothing is being collected"
-      actions={access.isAdmin ? <Link href="/admin/billing">Reactivate in billing →</Link> : undefined}
+      title={t('licence.inactiveTitle')}
+      actions={access.isAdmin ? <Link href="/admin/billing">{t('licence.reactivate')}</Link> : undefined}
     >
-      Agents have stopped tracking and show a notice. Existing records stay readable and exports keep working.
+      {t('licence.inactiveBody')}
     </Banner>
   );
 }

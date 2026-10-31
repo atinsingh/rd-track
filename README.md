@@ -1,7 +1,8 @@
 # RoundDigital Track
 
 A transparent work-session, project-time and computer-activity platform, sold as
-multi-tenant SaaS (Free up to 2 users · Standard $2.50 · Pro $5 per user per month).
+multi-tenant SaaS (Free up to 2 tracked users · Standard $2.50 · Pro $5 per user per month on an annual
+term, or $5 / $10 month to month).
 
 - Employees explicitly start and stop work sessions; nothing is collected outside them.
 - Activity is aggregated per minute (counts, never keys or content); app names only.
@@ -24,7 +25,7 @@ multi-tenant SaaS (Free up to 2 users · Standard $2.50 · Pro $5 per user per m
 |---|---|
 | `packages/contracts` | Shared Zod schemas and types: event envelope, policy model and resolver, plans, API DTOs |
 | `apps/api` | Fastify API (`src/main.ts`) and worker (`src/worker.ts`) on PostgreSQL |
-| `apps/web` | Next.js dashboard for employees, managers, admins and auditors |
+| `apps/web` | Next.js dashboard with a home for each role: employees, managers, admins, finance and auditors |
 | `agent/` | Rust desktop agent: `rd-agent-core` library and `rd-agent` headless binary |
 | `infra/` | Local Postgres + MinIO (`docker compose`) |
 | `scripts/e2e-agent.sh` | Real agent against real API + worker, reconciled in SQL |
@@ -44,7 +45,14 @@ pnpm dev:web                                         # http://localhost:3000
 ```
 
 The seed prints demo sign-ins (password `track-demo-2026`): an org admin, a team manager
-(Priya), employees and an auditor, with a week of synthetic sessions.
+(Priya), employees, an auditor and a finance user, with a week of synthetic sessions. Each lands on
+their own home: My day, Team today, Setup and health, Period close or the audit log.
+
+RoundDigital operators use a separate console at `/platform` (own login, TOTP always).
+Create one with `pnpm --filter @rd/api platform:create-admin -- ops@example.com "Name"`.
+Operators manage organizations, plans and seats; reading an organization's setup needs
+support access its admins approve under Settings › Support access, and every read lands
+in that organization's audit log.
 
 Run a desktop agent against it (simulated input — native collectors come next):
 

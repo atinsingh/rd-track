@@ -3,7 +3,8 @@
 
 use std::sync::{Arc, Mutex};
 
-use rd_agent_core::api::{ApiClient, EnrollRequest, Os};
+use rd_agent_core::api::{ApiClient, ApiError, EmailCodeRequest, EnrollRequest, Os};
+use rd_agent_core::i18n::{fill, Lang};
 use rd_agent_core::identity::DeviceIdentity;
 use rd_agent_core::outbox::{CredentialStoreKey, Outbox, OutboxConfig, SharedOutbox};
 use rd_agent_core::platform::{secret_names, CredentialStore};
@@ -44,6 +45,30 @@ pub fn is_enrolled(paths: &Paths, creds: &dyn CredentialStore) -> Result<bool, S
         .map_err(|e| e.to_string())?
         .is_some();
     Ok(identity.is_some_and(|i| !i.revoked) && has_credential)
+}
+
+/// On a computer IT deployed (G26): asks the organization's server to email the person a
+/// one-time code. Employee-facing errors; the same success whether or not the email exists.
+pub fn request_email_code(
+    deployment: &config::Deployment,
+    email: &str,
+    lang: Lang,
+) -> Result<(), String> {
+    let m = lang.messages();
+    let api = ApiClient::new(&deployment.server, Arc::new(http::UreqTransport::new()));
+    api.request_email_code(&EmailCodeRequest {
+        deployment_key: deployment.deployment_key.clone(),
+        email: email.trim().to_owned(),
+    })
+    .map_err(|e| match e.code() {
+        Some("invalid_deployment_key") => m.setup_key_invalid.to_owned(),
+        Some("validation_failed") => m.setup_enter_email.to_owned(),
+        _ if matches!(e, ApiError::Transport(_)) => {
+            fill(m.setup_cant_reach, &[("server", &deployment.server)])
+        }
+        _ if matches!(e, ApiError::Http { status: 429, .. }) => m.setup_too_many.to_owned(),
+        _ => fill(m.setup_code_failed, &[("error", &e.to_string())]),
+    })
 }
 
 /// Enrolls this device with a one-time code. A new enrollment is a new device: the

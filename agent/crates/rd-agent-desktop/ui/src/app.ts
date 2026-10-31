@@ -2,6 +2,8 @@
 // everything comes from the Rust side through `invoke` (allow-listed commands) and
 // the `view` event. All server-provided strings are set with textContent.
 
+import { browserLang, setLang, t, type Key, type Lang } from "./i18n.js";
+
 interface TauriGlobal {
   core: { invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> };
   event: { listen<T>(event: string, cb: (e: { payload: T }) => void): Promise<() => void> };
@@ -13,9 +15,49 @@ declare global {
 }
 
 interface BannerAction { label: string; command: string; arg: string | null }
-interface Banner { id: string; kind: "info" | "warn"; text: string; action: BannerAction | null; dismissible: boolean }
+interface Banner {
+  id: string;
+  kind: "info" | "warn";
+  text: string;
+  detail: string | null;
+  action: BannerAction | null;
+  dismissible: boolean;
+}
 interface Task { id: string; name: string }
 interface Project { id: string; name: string; tasks: Task[] }
+interface IdleView {
+  id: string;
+  title: string;
+  times: string;
+  project: string;
+  keep_label: string;
+  discard_label: string;
+  reassign_label: string;
+  targets: Project[];
+}
+type IdleDecision = "keep" | "discard" | "reassign";
+type ReminderChoice = "start" | "not_today" | "stop" | "keep";
+interface ReminderButton { label: string; choice: ReminderChoice }
+interface ReminderView {
+  id: string;
+  kind: "start" | "stop" | "still_tracking";
+  title: string;
+  detail: string;
+  primary: ReminderButton;
+  secondary: ReminderButton;
+}
+interface RemindersView {
+  enabled: boolean;
+  start: boolean;
+  stop: boolean;
+  still_tracking: boolean;
+  my_start: string;
+  my_end: string;
+  my_days: number[];
+  schedule_note: string | null;
+  today: string;
+}
+type RemindersInput = Omit<RemindersView, "schedule_note" | "today">;
 interface AppView {
   phase: "enroll" | "starting" | "running" | "stopping" | "revoked" | "error";
   error: string | null;
@@ -27,15 +69,24 @@ interface AppView {
   camera: string | null;
   today: string;
   activity: string | null;
+  limit_today: string | null;
+  limit_week: string | null;
   sync: string;
   banners: Banner[];
+  idle: IdleView | null;
+  reminder: ReminderView | null;
+  reminders: RemindersView;
   can_start: boolean;
   require_project: boolean;
   projects: Project[];
   projects_supported: boolean | null;
   server_url: string | null;
+  enroll_prefill: { server_url: string; code: string } | null;
+  deployment: { server_url: string } | null;
   simulated: boolean;
   version: string;
+  /** The person's language; every string above is already in it (G27). */
+  lang: Lang;
 }
 interface Item { key: string; collected: boolean; text: string; detail: string }
 interface SessionNotice {
@@ -60,7 +111,40 @@ let selectedTask = "";
 let busy = false;
 let error: string | null = null;
 let projectsRequested = false;
+// The "Reminders" settings section is open, and its last save error.
+let settingsOpen = false;
+// "Open when I sign in" (G10): read when the settings open; null until then.
+let openAtLogin: boolean | null = null;
+let settingsError: string | null = null;
+// Shown under the start button when "Start tracking" needs a project first.
+let startHint: string | null = null;
 const enrollForm = { server: "", code: "", name: "" };
+// The enrolment link last applied to the form, so typing over it isn't undone on the next view.
+let appliedLink = "";
+let fromLink = false;
+// IT deployed this computer (G26): connect with a work email and an emailed code.
+const managed = { step: "email" as "email" | "code", email: "", useAdminCode: false };
+
+/** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
+function linkParts(text: string): { server: string; code: string } | null {
+  const t = text.trim();
+  if (!t.startsWith("rdtrack://")) return null;
+  try {
+    const u = new URL(t);
+    const server = u.searchParams.get("server") ?? "";
+    const code = u.searchParams.get("code") ?? "";
+    return u.hostname === "enroll" && server && code ? { server: server.replace(/\/$/, ""), code } : null;
+  } catch {
+    return null;
+  }
+}
+// The person's pending choice on the idle-return panel (reset for each new prompt).
+const idleChoice: { id: string; decision: IdleDecision; project: string; task: string } = {
+  id: "",
+  decision: "keep",
+  project: "",
+  task: "",
+};
 
 // ----- tiny DOM helper ------------------------------------------------------------------
 
@@ -113,7 +197,7 @@ async function run(fn: () => Promise<unknown>): Promise<void> {
   try {
     await fn();
   } catch (e) {
-    error = typeof e === "string" ? e : e instanceof Error ? e.message : "Something went wrong";
+    error = typeof e === "string" ? e : e instanceof Error ? e.message : t("error.generic");
   } finally {
     busy = false;
     render();
@@ -142,14 +226,56 @@ function loadProjects(): void {
 
 const opt = (s: string): string | null => (s === "" ? null : s);
 
-function onStart(): void {
-  void run(async () => {
-    const data = await invoke<SessionNotice>("prepare_session", {
-      projectId: opt(selectedProject),
-      taskId: opt(selectedTask),
-    });
-    notice = { data, review: false };
+async function prepareStart(): Promise<void> {
+  const data = await invoke<SessionNotice>("prepare_session", {
+    projectId: opt(selectedProject),
+    taskId: opt(selectedTask),
   });
+  notice = { data, review: false };
+}
+
+function onStart(): void {
+  startHint = null;
+  void run(prepareStart);
+}
+
+// A reminder's buttons. "Start tracking" continues into the same flow as the Start
+// button (project picker, then the session-start notice).
+function onReminder(r: ReminderView, choice: ReminderChoice): void {
+  void run(async () => {
+    view = await invoke<AppView>("resolve_reminder", { id: r.id, choice });
+    if (choice !== "start") return;
+    if (!view.can_start) return;
+    if (view.require_project && !selectedProject) {
+      startHint = t("pick.startHint");
+      return;
+    }
+    await prepareStart();
+  });
+}
+
+function saveReminders(change: Partial<RemindersInput>): void {
+  if (!view) return;
+  const r = view.reminders;
+  const settings: RemindersInput = {
+    enabled: r.enabled,
+    start: r.start,
+    stop: r.stop,
+    still_tracking: r.still_tracking,
+    my_start: r.my_start,
+    my_end: r.my_end,
+    my_days: r.my_days,
+    ...change,
+  };
+  settingsError = null;
+  invoke<AppView>("set_reminder_settings", { settings })
+    .then((v) => {
+      view = v;
+    })
+    .catch((e) => {
+      settingsError = String(e);
+    })
+    .finally(render);
 }
 
 function onConfirmStart(): void {
@@ -171,6 +297,8 @@ function onBannerAction(b: Banner): void {
       await invoke(a.command, { name: a.arg });
     } else if (a.command === "install_update") {
       await invoke("install_update");
+    } else if (a.command === "dismiss_banner") {
+      await invoke("dismiss_banner", { id: a.arg });
     }
     await refresh();
   });
@@ -183,7 +311,8 @@ function banners(v: AppView): Node[] {
     h(
       "div",
       { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" },
-      h("span", {}, b.text),
+      b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text),
+      b.detail && h("span", { class: "banner-detail" }, b.detail),
       (b.action || b.dismissible) &&
         h(
           "div",
@@ -193,7 +322,7 @@ function banners(v: AppView): Node[] {
               class: "x",
               type: "button",
               onclick: () => void run(() => invoke("dismiss_banner", { id: b.id })),
-            }, "DISMISS"),
+            }, t("banner.dismiss")),
           b.action &&
             h("button", { class: "act", type: "button", onclick: () => onBannerAction(b) }, b.action.label),
         ),
@@ -212,7 +341,7 @@ function header(v: AppView): HTMLElement {
       h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }),
       h("span", { class: "status" }, h("span", { class: dotClass, "aria-hidden": "true" }), v.label),
     ),
-    v.elapsed && h("span", { class: "elapsed", "aria-label": "Elapsed" }, v.elapsed),
+    v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed),
   );
 }
 
@@ -231,7 +360,7 @@ function projectPickers(v: AppView): Node[] {
         render();
       },
     },
-    h("option", { value: "" }, v.require_project ? "Choose a project…" : "No project"),
+    h("option", { value: "" }, v.require_project ? t("pick.chooseProject") : t("pick.noProject")),
     ...v.projects.map((p) => h("option", { value: p.id }, p.name)),
   );
   // A recovered session's project may not be in the list (yet): still show it.
@@ -246,17 +375,17 @@ function projectPickers(v: AppView): Node[] {
         selectedTask = (e.target as HTMLSelectElement).value;
       },
     },
-    h("option", { value: "" }, tasks.length ? "No task" : "—"),
-    ...tasks.map((t) => h("option", { value: t.id }, t.name)),
+    h("option", { value: "" }, tasks.length ? t("pick.noTask") : "—"),
+    ...tasks.map((task) => h("option", { value: task.id }, task.name)),
   );
-  if (taskValue && !tasks.some((t) => t.id === taskValue)) taskSelect.append(h("option", { value: taskValue }, taskValue));
+  if (taskValue && !tasks.some((task) => task.id === taskValue)) taskSelect.append(h("option", { value: taskValue }, taskValue));
   taskSelect.value = taskValue;
   const out: Node[] = [
-    h("label", { class: "field" }, "Project", projectSelect),
-    h("label", { class: "field" }, "Task", taskSelect),
+    h("label", { class: "field" }, t("pick.project"), projectSelect),
+    h("label", { class: "field" }, t("pick.task"), taskSelect),
   ];
   if (v.projects_supported === false) {
-    out.push(h("p", { class: "hint" }, "Your server does not list projects for this app yet. Sessions start without a project."));
+    out.push(h("p", { class: "hint" }, t("pick.unsupported")));
   }
   return out;
 }
@@ -267,7 +396,7 @@ function sessionButtons(v: AppView): HTMLElement {
     return h(
       "div",
       { class: "actions one" },
-      h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, "Start session"),
+      h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")),
     );
   }
   const paused = v.tray === "paused";
@@ -282,50 +411,302 @@ function sessionButtons(v: AppView): HTMLElement {
         disabled: busy,
         onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
       },
-      paused ? "Resume" : "Pause",
+      paused ? t("session.resume") : t("session.pause"),
     ),
     h(
       "button",
       { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },
-      "Stop",
+      t("session.stop"),
+    ),
+  );
+}
+
+// A start / stop / "still tracking?" reminder: title, one line, two buttons.
+function reminderCard(r: ReminderView): HTMLElement {
+  return h(
+    "div",
+    { class: "banner info reminder", role: "status" },
+    h("strong", { class: "banner-title" }, r.title),
+    h("span", { class: "banner-detail" }, r.detail),
+    h(
+      "div",
+      { class: "row" },
+      h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label),
+      h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label),
+    ),
+  );
+}
+
+const WEEKDAYS: [number, Key][] = [[1, "day.mon"], [2, "day.tue"], [3, "day.wed"], [4, "day.thu"], [5, "day.fri"], [6, "day.sat"], [7, "day.sun"]];
+
+// "Reminders": employee-controlled, kept on this computer only.
+function remindersSection(v: AppView): HTMLElement {
+  const r = v.reminders;
+  const toggle = (label: string, checked: boolean, disabled: boolean, change: (on: boolean) => Partial<RemindersInput>): HTMLElement =>
+    h(
+      "label",
+      { class: `toggle${disabled ? " disabled" : ""}` },
+      h("input", {
+        type: "checkbox",
+        checked,
+        disabled,
+        onchange: (e: Event) => saveReminders(change((e.target as HTMLInputElement).checked)),
+      }),
+      h("span", {}, label),
+    );
+  const off = !r.enabled;
+  const hours: Node[] = r.schedule_note
+    ? [h("p", { class: "hint" }, r.schedule_note)]
+    : [
+        h(
+          "div",
+          { class: "hours" },
+          h("label", { class: "field" }, t("settings.start"), h("input", { type: "time", value: r.my_start, disabled: off, onchange: (e: Event) => saveReminders({ my_start: (e.target as HTMLInputElement).value }) })),
+          h("label", { class: "field" }, t("settings.end"), h("input", { type: "time", value: r.my_end, disabled: off, onchange: (e: Event) => saveReminders({ my_end: (e.target as HTMLInputElement).value }) })),
+        ),
+        h(
+          "fieldset",
+          { class: "days" },
+          h("legend", { class: "sr-only" }, t("settings.workdays")),
+          ...WEEKDAYS.map(([d, name]) =>
+            h(
+              "label",
+              { class: `day${r.my_days.includes(d) ? " on" : ""}` },
+              h("input", {
+                type: "checkbox",
+                checked: r.my_days.includes(d),
+                disabled: off,
+                onchange: (e: Event) => {
+                  const on = (e.target as HTMLInputElement).checked;
+                  saveReminders({ my_days: on ? [...r.my_days, d] : r.my_days.filter((x) => x !== d) });
+                },
+              }),
+              h("span", {}, t(name)),
+            ),
+          ),
+        ),
+      ];
+  return h(
+    "section",
+    { class: "settings", "aria-label": t("settings.label") },
+    h("span", { class: "eyebrow", id: "reminders-h" }, t("settings.reminders")),
+    toggle(t("settings.remindersToggle"), r.enabled, false, (on) => ({ enabled: on })),
+    toggle(t("settings.whenStart"), r.start, off, (on) => ({ start: on })),
+    toggle(t("settings.whenEnd"), r.stop, off, (on) => ({ stop: on })),
+    toggle(t("settings.everyHour"), r.still_tracking, off, (on) => ({ still_tracking: on })),
+    h("span", { class: "label" }, t("settings.myHours")),
+    ...hours,
+    h("p", { class: "hint" }, t("settings.localOnly", { today: r.today })),
+    h("span", { class: "eyebrow" }, t("settings.thisComputer")),
+    h(
+      "label",
+      { class: `toggle${openAtLogin === null ? " disabled" : ""}` },
+      h("input", {
+        type: "checkbox",
+        checked: openAtLogin === true,
+        disabled: openAtLogin === null,
+        onchange: (e: Event) => {
+          const enabled = (e.target as HTMLInputElement).checked;
+          settingsError = null;
+          invoke<boolean>("set_open_at_login", { enabled })
+            .then((on) => {
+              openAtLogin = on;
+            })
+            .catch((err: unknown) => {
+              settingsError = String(err);
+            })
+            .finally(render);
+        },
+      }),
+      h("span", {}, t("settings.openAtLogin")),
+    ),
+    h("p", { class: "hint" }, t("settings.openAtLoginHint")),
+    settingsError && h("p", { class: "error", role: "alert" }, settingsError),
+  );
+}
+
+function onResolveIdle(iv: IdleView): void {
+  const move = idleChoice.decision === "reassign";
+  void run(async () => {
+    view = await invoke<AppView>("resolve_idle", {
+      id: iv.id,
+      decision: idleChoice.decision,
+      projectId: move ? opt(idleChoice.project) : null,
+      taskId: move ? opt(idleChoice.task) : null,
+    });
+  });
+}
+
+// "Welcome back": what should happen to the idle run the person just came back from.
+// Only they can answer; tracking carries on whatever they pick.
+function idleView(v: AppView, iv: IdleView): HTMLElement {
+  if (idleChoice.id !== iv.id) {
+    Object.assign(idleChoice, { id: iv.id, decision: "keep", project: "", task: "" });
+    error = null;
+  }
+  const canMove = iv.targets.length > 0;
+  const choice = (value: IdleDecision, text: string, enabled = true): HTMLElement => {
+    const on = idleChoice.decision === value;
+    return h(
+      "label",
+      { class: `choice${on ? " on" : ""}${enabled ? "" : " disabled"}` },
+      h("input", {
+        type: "radio",
+        name: "idle-choice",
+        value,
+        checked: on,
+        disabled: busy || !enabled,
+        onchange: () => {
+          idleChoice.decision = value;
+          error = null;
+          render();
+        },
+      }),
+      h("span", {}, text),
+    );
+  };
+  const move = idleChoice.decision === "reassign";
+  const target = iv.targets.find((p) => p.id === idleChoice.project);
+  const tasks = target?.tasks ?? [];
+  const picker: Node[] = [];
+  if (move) {
+    const projectSelect = h(
+      "select",
+      {
+        disabled: busy,
+        onchange: (e: Event) => {
+          idleChoice.project = (e.target as HTMLSelectElement).value;
+          idleChoice.task = "";
+          render();
+        },
+      },
+      h("option", { value: "" }, t("pick.chooseProject")),
+      ...iv.targets.map((p) => h("option", { value: p.id }, p.name)),
+    );
+    projectSelect.value = idleChoice.project;
+    picker.push(h("label", { class: "field" }, t("pick.project"), projectSelect));
+    if (tasks.length > 0) {
+      const taskSelect = h(
+        "select",
+        {
+          disabled: busy,
+          onchange: (e: Event) => {
+            idleChoice.task = (e.target as HTMLSelectElement).value;
+          },
+        },
+        h("option", { value: "" }, t("pick.noTask")),
+        ...tasks.map((task) => h("option", { value: task.id }, task.name)),
+      );
+      taskSelect.value = idleChoice.task;
+      picker.push(h("label", { class: "field" }, t("pick.task"), taskSelect));
+    }
+    picker.push(h("p", { class: "hint" }, t("idle.correction")));
+  }
+  const primary =
+    idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;
+  return h(
+    "section",
+    { class: "popover", "aria-labelledby": "idle-h" },
+    header(v),
+    h(
+      "div",
+      { class: "idle-panel" },
+      h("span", { class: "eyebrow" }, t("idle.welcome")),
+      h("h1", { class: "title", id: "idle-h" }, iv.title),
+      h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project),
+      h(
+        "fieldset",
+        { class: "choices" },
+        h("legend", { class: "sr-only" }, t("idle.question")),
+        choice("keep", t("idle.keep")),
+        choice("discard", t("idle.discard")),
+        choice("reassign", t("idle.move"), canMove),
+      ),
+      !canMove && h("p", { class: "hint" }, t("idle.noTarget")),
+      ...picker,
+      error && h("p", { class: "error", role: "alert" }, error),
+      h(
+        "div",
+        { class: "actions one" },
+        h(
+          "button",
+          { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) },
+          primary,
+        ),
+      ),
+      h("p", { class: "idle-foot" }, t("idle.foot")),
     ),
   );
 }
 
 function mainView(v: AppView): HTMLElement {
   loadProjects();
+  if (v.idle) return idleView(v, v.idle);
   return h(
     "section",
     { class: "popover", "aria-label": "RoundDigital Track" },
     header(v),
+    v.reminder && reminderCard(v.reminder),
     ...banners(v),
     v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera),
     ...projectPickers(v),
     sessionButtons(v),
+    v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint),
     error && h("p", { class: "error", role: "alert" }, error),
     h(
       "div",
       { class: "today" },
-      h("span", { class: "label" }, "Today"),
+      h("span", { class: "label" }, t("main.today")),
       h(
         "span",
         { class: "value" },
         h("span", { class: "mono" }, v.today),
-        v.activity ? " · activity " : "",
+        v.activity ? t("main.activity") : "",
         v.activity ? h("span", { class: "mono" }, v.activity) : "",
       ),
     ),
+    (v.limit_today || v.limit_week) &&
+      h(
+        "div",
+        { class: "limits" },
+        h("span", { class: "label" }, t("main.workLimit")),
+        h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l): l is string => !!l).map((l) => h("span", { class: "mono" }, l))),
+      ),
     h(
       "div",
       { class: "foot" },
       h("span", {}, v.sync),
-      h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, "My dashboard →"),
+      h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, t("main.dashboard")),
     ),
+    settingsOpen && remindersSection(v),
     h(
       "div",
       { class: "small-links" },
       h("span", { class: "hint" }, `v${v.version}`),
-      h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? "Quit" : "Stop & quit"),
+      h(
+        "button",
+        {
+          class: "link",
+          type: "button",
+          "aria-expanded": String(settingsOpen),
+          onclick: () => {
+            settingsOpen = !settingsOpen;
+            settingsError = null;
+            if (settingsOpen)
+              invoke<boolean>("get_open_at_login")
+                .then((on) => {
+                  openAtLogin = on;
+                })
+                .catch(() => {
+                  openAtLogin = null;
+                })
+                .finally(render);
+            render();
+          },
+        },
+        settingsOpen ? t("settings.close") : t("settings.open"),
+      ),
+      h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit")),
     ),
   );
 }
@@ -335,9 +716,9 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
   return h(
     "section",
     { class: "notice", "aria-labelledby": "notice-h" },
-    h("span", { class: "eyebrow" }, review ? "What changed" : "Before you start"),
-    h("h2", { id: "notice-h" }, review ? "This session now collects" : n.title),
-    h("p", { class: "lead" }, "While this session runs, RoundDigital Track records:"),
+    h("span", { class: "eyebrow" }, review ? t("notice.whatChanged") : t("notice.beforeStart")),
+    h("h2", { id: "notice-h" }, review ? t("notice.nowCollects") : n.title),
+    h("p", { class: "lead" }, t("notice.lead")),
     h(
       "ul",
       {},
@@ -351,9 +732,9 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
       h(
         "details",
         {},
-        h("summary", {}, "Not collected"),
+        h("summary", {}, t("notice.notCollected")),
         h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))),
-        h("p", {}, `Never: ${n.never}`),
+        h("p", {}, t("notice.never", { list: n.never })),
       ),
     error && h("p", { class: "warnline", role: "alert" }, error),
     h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)),
@@ -367,15 +748,84 @@ function noticeButtons(review: boolean): HTMLElement[] {
     render();
   };
   if (review) {
-    return [h("button", { class: "btn-action", type: "button", onclick: close }, "OK")];
+    return [h("button", { class: "btn-action", type: "button", onclick: close }, t("notice.ok"))];
   }
   return [
-    h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, "Choose another project"),
-    h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, "Start session →"),
+    h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
+    h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, t("notice.start")),
   ];
 }
 
+function managedEnrollView(v: AppView, server: string): HTMLElement {
+  const field = (label: string, value: string, set: (s: string) => void, attrs: Record<string, unknown>): HTMLElement =>
+    h(
+      "label",
+      { class: "field" },
+      label,
+      h("input", { value, disabled: busy, oninput: (e: Event) => set((e.target as HTMLInputElement).value), ...attrs }),
+    );
+  const askForCode = (e: Event): void => {
+    e.preventDefault();
+    void run(async () => {
+      await invoke("request_email_code", { email: managed.email.trim() });
+      managed.step = "code";
+    });
+  };
+  const connect = (e: Event): void => {
+    e.preventDefault();
+    void run(async () => {
+      view = await invoke<AppView>("enroll", { serverUrl: server, code: enrollForm.code, deviceName: opt(enrollForm.name.trim()) });
+      enrollForm.code = "";
+    });
+  };
+  const other = h(
+    "div",
+    { class: "small-links" },
+    managed.step === "code"
+      ? h("button", { class: "link", type: "button", onclick: () => { managed.step = "email"; error = null; render(); } }, t("managed.again"))
+      : h("span", {}),
+    h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, t("managed.adminCode")),
+  );
+  const head = [
+    h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+    h("span", { class: "eyebrow" }, t("enroll.setUp")),
+  ];
+  if (managed.step === "email")
+    return h(
+      "form",
+      { class: "popover", onsubmit: askForCode },
+      ...head,
+      h("h1", { class: "title" }, t("managed.title")),
+      h("p", { class: "muted" }, t("managed.intro", { server })),
+      v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
+      field(t("managed.email"), managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }),
+      error && h("p", { class: "error", role: "alert" }, error),
+      h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("managed.sending") : t("managed.send"))),
+      other,
+    );
+  return h(
+    "form",
+    { class: "popover", onsubmit: connect },
+    ...head,
+    h("h1", { class: "title" }, t("managed.checkTitle")),
+    h("p", { class: "muted" }, t("managed.checkIntro", { email: managed.email })),
+    field(t("managed.code"), enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }),
+    field(t("enroll.deviceName"), enrollForm.name, (s) => (enrollForm.name = s), { placeholder: t("enroll.deviceNamePlaceholder") }),
+    error && h("p", { class: "error", role: "alert" }, error),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
+    other,
+  );
+}
+
 function enrollView(v: AppView): HTMLElement {
+  if (v.deployment && !managed.useAdminCode) return managedEnrollView(v, v.deployment.server_url);
+  const p = v.enroll_prefill;
+  if (p && `${p.server_url} ${p.code}` !== appliedLink) {
+    appliedLink = `${p.server_url} ${p.code}`;
+    enrollForm.server = p.server_url;
+    enrollForm.code = p.code;
+    fromLink = true;
+  }
   const input = (key: keyof typeof enrollForm, label: string, attrs: Record<string, unknown>): HTMLElement =>
     h(
       "label",
@@ -384,7 +834,16 @@ function enrollView(v: AppView): HTMLElement {
       h("input", {
         value: enrollForm[key],
         oninput: (e: Event) => {
-          enrollForm[key] = (e.target as HTMLInputElement).value;
+          const value = (e.target as HTMLInputElement).value;
+          const parts = key === "code" ? linkParts(value) : null;
+          if (parts) {
+            enrollForm.server = parts.server;
+            enrollForm.code = parts.code;
+            fromLink = true;
+            render();
+            return;
+          }
+          enrollForm[key] = value;
         },
         disabled: busy,
         ...attrs,
@@ -407,15 +866,16 @@ function enrollView(v: AppView): HTMLElement {
       },
     },
     h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
-    h("span", { class: "eyebrow" }, "Set up this computer"),
-    h("h1", { class: "title" }, "Connect to your organization"),
-    h("p", { class: "muted" }, "Your administrator gives you a server address and a one-time code. Nothing is recorded until you start a session."),
+    h("span", { class: "eyebrow" }, t("enroll.setUp")),
+    h("h1", { class: "title" }, t("enroll.title")),
+    h("p", { class: "muted" }, t("enroll.intro")),
+    fromLink && h("p", { class: "hint", role: "status" }, t("enroll.fromLink")),
     v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
-    input("server", "Server address", { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
-    input("code", "Enrollment code", { placeholder: "ABCDEFGHJK", required: true, autocomplete: "one-time-code", spellcheck: false }),
-    input("name", "Device name (optional)", { placeholder: "Defaults to this computer's name" }),
+    input("server", t("enroll.server"), { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
+    input("code", t("enroll.code"), { placeholder: t("enroll.codePlaceholder"), required: true, autocomplete: "one-time-code", spellcheck: false }),
+    input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }),
     error && h("p", { class: "error", role: "alert" }, error),
-    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? "Connecting…" : "Connect")),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
   );
 }
 
@@ -424,11 +884,11 @@ function revokedView(): HTMLElement {
     "section",
     { class: "popover" },
     h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
-    h("span", { class: "eyebrow" }, "Device removed"),
-    h("h1", { class: "title" }, "Tracking has stopped"),
-    h("p", { class: "muted" }, "Your organization removed this computer. Nothing is recorded and data that had not been sent was erased from this computer."),
-    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke<AppView>("reenroll"); }) }, "Enroll again")),
-    h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, "Quit")),
+    h("span", { class: "eyebrow" }, t("revoked.eyebrow")),
+    h("h1", { class: "title" }, t("revoked.title")),
+    h("p", { class: "muted" }, t("revoked.body")),
+    h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke<AppView>("reenroll"); }) }, t("revoked.again"))),
+    h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))),
   );
 }
 
@@ -440,14 +900,16 @@ function render(): void {
   const root = document.getElementById("app");
   if (!root) return;
   const v = view;
+  // The person's language from the Rust side; before the first view, the computer's (G27).
+  setLang(v?.lang ?? browserLang());
   let content: HTMLElement;
-  if (!v) content = simpleView("Starting…");
+  if (!v) content = simpleView(t("app.starting"));
   else if (notice) content = noticeView(notice.data, notice.review);
   else if (v.phase === "enroll" || (v.phase === "error" && !v.server_url)) content = enrollView(v);
   else if (v.phase === "revoked") content = revokedView();
-  else if (v.phase === "error") content = simpleView(v.error ?? "The agent could not start.");
-  else if (v.phase === "starting") content = simpleView("Starting…");
-  else if (v.phase === "stopping") content = simpleView("Stopping the session and sending the last data…");
+  else if (v.phase === "error") content = simpleView(v.error ?? t("error.couldNotStart"));
+  else if (v.phase === "starting") content = simpleView(t("app.starting"));
+  else if (v.phase === "stopping") content = simpleView(t("app.stopping"));
   else content = mainView(v);
   document.body.classList.toggle("light", notice !== null);
   // Keep focus and the select values stable across re-renders.

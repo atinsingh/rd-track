@@ -4,6 +4,7 @@ import { many, one, type Queryable } from '../../db/pool';
 import { enqueue } from '../../jobs/queue';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
+import { publish } from '../engine/events';
 import { currentSubscription } from '../billing/service';
 import { assertInOrg } from '../org/service';
 import { resolveFor } from '../policy/service';
@@ -90,6 +91,13 @@ export async function reviewDeletionRequest(
     targetUserId: req.requester_id,
     requestId,
   });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'deletion_request.decided',
+    subjectUserId: req.requester_id,
+    actorUserId: actor.userId,
+    data: { request_id: id, approved: approve, reviewer_name: actor.displayName },
+  });
   return (await one<DeletionRequestDTO>(q, `${REQUEST_SELECT} WHERE d.id = $1`, [id]))!;
 }
 
@@ -124,14 +132,4 @@ export async function createLegalHold(
   return { id: r!.id };
 }
 
-export async function listNotifications(q: Queryable, userId: string): Promise<NotificationDTO[]> {
-  return many<NotificationDTO>(
-    q,
-    `SELECT id, kind, title, body, created_at, read_at FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100`,
-    [userId],
-  );
-}
 
-export async function markNotificationRead(q: Queryable, userId: string, id: string) {
-  await q.query('UPDATE notifications SET read_at = COALESCE(read_at, now()) WHERE id = $1 AND user_id = $2', [id, userId]);
-}

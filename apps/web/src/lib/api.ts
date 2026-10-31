@@ -1,6 +1,48 @@
 import type {
+  AppLocale,
+  AccountSecurity,
+  InviteInfo,
+  DataExportDTO,
+  ExpenseCreate,
+  ExpenseDTO,
+  MyExpensesResponse,
+  ReceiptUploadResponse,
+  PayrollAdjustmentDTO,
+  ApiTokenCreated,
+  ApiTokenDTO,
+  ApiTokenRequest,
+  ScimTokenDTO,
+  SsoDiscoverResponse,
+  SsoDomainDTO,
+  SsoConnectionRequest,
+  SsoSettings,
+  SsoStartResponse,
+  ErasureRequestDTO,
+  OrganizationLifecycle,
+  SupportGrantDTO,
+  AgentDownloadsResponse,
+  AdminProjectDTO,
+  UserImportResponse,
+  AdminOverview,
+  AuditPerson,
+  MoneyOverview,
+  InboxCounts,
+  TimesheetRule,
+  TodosResponse,
+  RecoveryCodesResponse,
+  BillingInterval,
+  DirectoryResponse,
+  ApprovalType,
+  ApprovalsBatchResponse,
   AppCategory,
+  AgentUpdateMode,
+  AgentUpdateSettings,
+  BrandingDTO,
+  DeploymentKeyCreated,
+  DeploymentKeyDTO,
+  LogoUploadResponse,
   AppCategoryDTO,
+  AppPresetId,
   PersonalInsights,
   TeamInsights,
   WebhookDeliveryDTO,
@@ -21,7 +63,9 @@ import type {
   Me,
   MfaEnrollResponse,
   MyPolicyResponse,
-  NotificationDTO,
+  NotificationCategory,
+  NotificationPreferencesResponse,
+  NotificationsResponse,
   Page,
   PartialPolicySettings,
   PolicyListResponse,
@@ -53,6 +97,7 @@ import type {
   BudgetKind,
   BudgetResets,
 } from '@rd/contracts';
+import { t } from './i18n';
 
 /**
  * Typed client for the `/v1` web API (system design §5.4).
@@ -247,6 +292,8 @@ export interface AuditQuery {
   to?: string;
   action?: string;
   actor_id?: string;
+  /** Whose data the event was about. */
+  subject_id?: string;
   cursor?: string;
 }
 
@@ -293,6 +340,21 @@ const money = {
     post<BillRateDTO>('/v1/admin/rates/bill', body),
   deleteBillRate: (id: string) => ok(del(`/v1/admin/rates/bill/${enc(id)}`)),
   myPayRate: (signal?: AbortSignal) => get<MyPayRateResponse>('/v1/me/pay-rate', { signal }),
+  /** F8: bonuses, deductions and reimbursements. */
+  myAdjustments: (signal?: AbortSignal) => list<PayrollAdjustmentDTO>('/v1/me/payroll-adjustments', { signal }),
+  adjustments: (signal?: AbortSignal) => list<PayrollAdjustmentDTO>('/v1/admin/payroll-adjustments', { signal }),
+  createAdjustment: (body: {
+    user_id: string;
+    kind: PayrollAdjustmentDTO['kind'];
+    amount_cents: number;
+    currency: string;
+    note: string;
+    recurrence: PayrollAdjustmentDTO['recurrence'];
+    effective_from: string;
+    effective_to?: string | null;
+  }) => post<PayrollAdjustmentDTO>('/v1/admin/payroll-adjustments', body),
+  endAdjustment: (id: string, effectiveTo: string) => post<PayrollAdjustmentDTO>(`/v1/admin/payroll-adjustments/${enc(id)}/end`, { effective_to: effectiveTo }),
+  deleteAdjustment: (id: string) => ok(del(`/v1/admin/payroll-adjustments/${enc(id)}`)),
   budgets: (signal?: AbortSignal) => list<ProjectBudgetDTO>('/v1/admin/budgets', { signal }),
   projectBudget: (projectId: string, signal?: AbortSignal) =>
     get<ProjectBudgetResponse>(`/v1/projects/${enc(projectId)}/budget`, { signal }),
@@ -310,6 +372,11 @@ const money = {
   deleteInvoice: (id: string) => ok(del(`/v1/admin/invoices/${enc(id)}`)),
   /** Same-origin GET; the browser sends the session cookie and saves the CSV. */
   invoiceCsvUrl: (id: string) => `/v1/admin/invoices/${enc(id)}/csv`,
+  markInvoicePaid: (id: string, paidOn: string, note?: string) =>
+    post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/paid`, note ? { paid_on: paidOn, note } : { paid_on: paidOn }),
+  markInvoiceUnpaid: (id: string) => del<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/paid`),
+  sendInvoice: (id: string, body: { to?: string; message?: string }) => post<InvoiceDTO>(`/v1/admin/invoices/${enc(id)}/send`, body),
+  overview: (signal?: AbortSignal) => get<MoneyOverview>('/v1/money/overview', { signal }),
   payrollExports: (signal?: AbortSignal) => list<PayrollExportDTO>('/v1/admin/payroll-exports', { signal }),
   payrollExport: (id: string) => get<PayrollExportDTO>(`/v1/admin/payroll-exports/${enc(id)}`),
   createPayrollExport: (body: { period_from: string; period_to: string; timezone?: string; user_ids?: string[] }) =>
@@ -321,13 +388,35 @@ export const rd = {
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
-    signup: (body: { org_name: string; display_name: string; email: string; password: string }) =>
+    signup: (body: { org_name: string; display_name: string; email: string; password: string; accept_terms: true }) =>
       post<{ ok: true }>('/v1/signup', body, { redirectOnAuth: false }),
     verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
     mfaEnroll: () => post<MfaEnrollResponse>('/v1/auth/mfa/enroll', {}, { redirectOnAuth: false }),
-    mfaEnrollConfirm: (code: string) => ok(post('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false })),
+    mfaEnrollConfirm: (code: string) => post<RecoveryCodesResponse>('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false }),
+    mfaRecovery: (recovery_code: string) =>
+      post<{ ok: true; recovery_codes_left: number }>('/v1/auth/mfa/recovery', { recovery_code }, { redirectOnAuth: false }),
     logout: () => ok(post('/v1/auth/logout', {}, { redirectOnAuth: false })),
+    // Links that arrive by email.
+    invite: (token: string) => get<InviteInfo>(`/v1/invites/${enc(token)}`, { redirectOnAuth: false }),
+    acceptInvite: (body: { token: string; password: string; timezone?: string }) =>
+      ok(post('/v1/invites/accept', body, { redirectOnAuth: false })),
+    requestPasswordReset: (email: string) => ok(post('/v1/auth/password-reset', { email }, { redirectOnAuth: false })),
+    confirmPasswordReset: (token: string, password: string) =>
+      ok(post('/v1/auth/password-reset/confirm', { token, password }, { redirectOnAuth: false })),
+    confirmEmailChange: (token: string) => ok(post('/v1/auth/email-change/confirm', { token }, { redirectOnAuth: false })),
+    /** Whether this address signs in through its organization's identity provider (slice 6a). */
+    ssoDiscover: (email: string) => post<SsoDiscoverResponse>('/v1/auth/sso/discover', { email }, { redirectOnAuth: false }),
+    ssoStart: (email: string, returnTo?: string) =>
+      post<SsoStartResponse>('/v1/auth/sso/start', returnTo ? { email, return_to: returnTo } : { email }, { redirectOnAuth: false }),
+  },
+  account: {
+    security: (signal?: AbortSignal) => get<AccountSecurity>('/v1/me/security', { signal }),
+    update: (body: { display_name?: string; timezone?: string; locale?: AppLocale | null }) => ok(patch('/v1/me', body)),
+    changePassword: (current_password: string, new_password: string) => ok(post('/v1/me/password', { current_password, new_password })),
+    changeEmail: (new_email: string, current_password: string) => ok(post('/v1/me/email', { new_email, current_password })),
+    newRecoveryCodes: () => post<RecoveryCodesResponse>('/v1/auth/mfa/recovery-codes'),
+    signOutOthers: () => post<{ signed_out: number }>('/v1/me/sessions/sign-out-others'),
   },
   me: (opts?: RequestOptions) => get<Me>('/v1/me', opts),
   person: {
@@ -350,12 +439,46 @@ export const rd = {
         target_id: screenshotId,
         reason,
       }),
-    notifications: (signal?: AbortSignal) => list<NotificationDTO>('/v1/me/notifications', { signal }),
+    notifications: (signal?: AbortSignal) => get<NotificationsResponse>('/v1/me/notifications', { signal }),
+    unreadCount: (signal?: AbortSignal) => get<{ unread: number }>('/v1/me/notifications/unread-count', { signal }),
     markRead: (id: string) => ok(post(`/v1/me/notifications/${enc(id)}/read`)),
+    markAllRead: () => post<{ marked: number }>('/v1/me/notifications/read-all'),
+    notificationPreferences: (signal?: AbortSignal) => get<NotificationPreferencesResponse>('/v1/me/notification-preferences', { signal }),
+    setNotificationPreferences: (items: { category: NotificationCategory; in_app: boolean; email: boolean }[]) =>
+      put<NotificationPreferencesResponse>('/v1/me/notification-preferences', { items }),
     policy: (signal?: AbortSignal) => get<MyPolicyResponse>('/v1/me/policy', { signal }),
     accessLog: (signal?: AbortSignal) => list<AuditEventDTO>('/v1/me/access-log', { signal }),
     projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/me/projects', { signal }),
+    directory: (signal?: AbortSignal) => get<DirectoryResponse>('/v1/me/directory', { signal }),
     insights: (r: Range, tz: string, signal?: AbortSignal) => get<PersonalInsights>('/v1/me/insights', { query: { ...r, tz }, signal }),
+    todos: (signal?: AbortSignal) => get<TodosResponse>('/v1/me/todos', { signal }),
+    devices: (signal?: AbortSignal) => list<DeviceDTO>('/v1/me/devices', { signal }),
+    /** A one-time code to connect one of my own computers (self-enrolment, G12). */
+    enrollmentCode: () => post<EnrollmentCodeResponse>('/v1/me/enrollment-code', {}),
+    agentDownloads: (signal?: AbortSignal) => get<AgentDownloadsResponse>('/v1/agent/downloads', { signal }),
+    /** Everything Track holds about me, as a ZIP (G18). */
+    dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/me/data-exports', { signal }),
+    requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),
+    erasureRequest: (signal?: AbortSignal) => get<{ request: ErasureRequestDTO | null }>('/v1/me/erasure-request', { signal }).then((r) => r.request),
+    requestErasure: (reason?: string) => post<ErasureRequestDTO>('/v1/me/erasure-request', reason ? { reason } : {}),
+  },
+  /** Expenses (F7): claims, review, receipts. */
+  expenses: {
+    mine: (from: string, signal?: AbortSignal) => get<MyExpensesResponse>('/v1/me/expenses', { query: { from }, signal }),
+    receiptUpload: (contentType: string, sizeBytes: number) =>
+      post<ReceiptUploadResponse>('/v1/me/expenses/receipt-uploads', { content_type: contentType, size_bytes: sizeBytes }),
+    create: (body: ExpenseCreate) => post<ExpenseDTO>('/v1/me/expenses', body),
+    cancel: (id: string) => post<ExpenseDTO>(`/v1/me/expenses/${enc(id)}/cancel`),
+    pending: (signal?: AbortSignal) => list<ExpenseDTO>('/v1/expenses/pending', { signal }),
+    approve: (id: string, note?: string) => post<ExpenseDTO>(`/v1/expenses/${enc(id)}/approve`, note ? { note } : {}),
+    reject: (id: string, note: string) => post<ExpenseDTO>(`/v1/expenses/${enc(id)}/reject`, { note }),
+    receiptUrl: (id: string) => get<{ url: string }>(`/v1/expenses/${enc(id)}/receipt-url`),
+  },
+  /** API tokens (F5): admins see every token, others their own. */
+  apiTokens: {
+    list: (signal?: AbortSignal) => list<ApiTokenDTO>('/v1/api-tokens', { signal }),
+    create: (body: ApiTokenRequest) => post<ApiTokenCreated>('/v1/api-tokens', body),
+    revoke: (id: string) => ok(post(`/v1/api-tokens/${enc(id)}/revoke`)),
   },
   screenshotViewUrl: (id: string) => get<ViewUrlResponse>(`/v1/screenshots/${enc(id)}/view-url`),
   teams: {
@@ -389,18 +512,29 @@ export const rd = {
   admin: {
     users: (signal?: AbortSignal) => list<UserDTO>('/v1/admin/users', { signal }),
     createUser: (body: CreateUserBody) =>
-      post<{ user: UserDTO; initial_password?: string }>('/v1/admin/users', body),
+      post<{ user: UserDTO; invite_sent: boolean }>('/v1/admin/users', body),
+    resendInvite: (id: string) => post<{ invite_sent: true }>(`/v1/admin/users/${enc(id)}/invite`),
+    resetMfa: (id: string) => ok(post(`/v1/admin/users/${enc(id)}/mfa/reset`)),
     /** Resolves to the updated user, or null when the API returns no body. */
     updateUser: (id: string, body: UpdateUserBody) =>
       patch<UserDTO | undefined>(`/v1/admin/users/${enc(id)}`, body).then((u) => u ?? null),
     deactivateUser: (id: string) => ok(post(`/v1/admin/users/${enc(id)}/deactivate`)),
+    reactivateUser: (id: string) => post<UserDTO>(`/v1/admin/users/${enc(id)}/reactivate`),
+    importUsers: (rows: readonly unknown[], dryRun: boolean) => post<UserImportResponse>('/v1/admin/users/import', { rows, dry_run: dryRun }),
+    renameTeam: (id: string, name: string) => patch<{ id: string; name: string }>(`/v1/admin/teams/${enc(id)}`, { name }),
+    archiveTeam: (id: string) => ok(post(`/v1/admin/teams/${enc(id)}/archive`)),
+    updateProject: (id: string, body: { name?: string; client_ref?: string | null; status?: 'active' | 'archived' }) =>
+      patch<ProjectDTO>(`/v1/admin/projects/${enc(id)}`, body),
+    updateTask: (projectId: string, taskId: string, body: { name?: string; status?: 'active' | 'archived' }) =>
+      ok(patch(`/v1/admin/projects/${enc(projectId)}/tasks/${enc(taskId)}`, body)),
+    removeProjectMember: (projectId: string, userId: string) => ok(del(`/v1/admin/projects/${enc(projectId)}/members/${enc(userId)}`)),
     teams: (signal?: AbortSignal) => list<TeamSummary>('/v1/admin/teams', { signal }),
     createTeam: (name: string) => post<TeamSummary>('/v1/admin/teams', { name }),
     addTeamMember: (teamId: string, userId: string, role: 'member' | 'manager') =>
       ok(post(`/v1/admin/teams/${enc(teamId)}/members`, { user_id: userId, role })),
     removeTeamMember: (teamId: string, userId: string) =>
       ok(del(`/v1/admin/teams/${enc(teamId)}/members/${enc(userId)}`)),
-    projects: (signal?: AbortSignal) => list<ProjectDTO>('/v1/admin/projects', { signal }),
+    projects: (signal?: AbortSignal) => list<AdminProjectDTO>('/v1/admin/projects', { signal }),
     createProject: (name: string, clientRef?: string) =>
       post<ProjectDTO>('/v1/admin/projects', clientRef ? { name, client_ref: clientRef } : { name }),
     addTask: (projectId: string, name: string) => ok(post(`/v1/admin/projects/${enc(projectId)}/tasks`, { name })),
@@ -409,15 +543,53 @@ export const rd = {
     enrollmentCode: (userId: string) =>
       post<EnrollmentCodeResponse>('/v1/admin/enrollment-codes', { user_id: userId }),
     devices: (signal?: AbortSignal) => list<DeviceDTO>('/v1/admin/devices', { signal }),
+    agentUpdates: (signal?: AbortSignal) => get<AgentUpdateSettings>('/v1/admin/agent-updates', { signal }),
+    branding: (signal?: AbortSignal) => get<BrandingDTO>('/v1/admin/branding', { signal }),
+    logoUpload: (contentType: string, sizeBytes: number) =>
+      post<LogoUploadResponse>('/v1/admin/branding/logo-uploads', { content_type: contentType, size_bytes: sizeBytes }),
+    setLogo: (uploadId: string) => put<BrandingDTO>('/v1/admin/branding/logo', { upload_id: uploadId }),
+    removeLogo: () => request<BrandingDTO>('DELETE', '/v1/admin/branding/logo'),
+    setOrgLocale: (locale: AppLocale | null) => put<BrandingDTO>('/v1/admin/branding/locale', { locale }),
+    deploymentKeys: (signal?: AbortSignal) => list<DeploymentKeyDTO>('/v1/admin/deployment-keys', { signal }),
+    createDeploymentKey: (name: string) => post<DeploymentKeyCreated>('/v1/admin/deployment-keys', { name }),
+    revokeDeploymentKey: (id: string) => post<DeploymentKeyDTO>(`/v1/admin/deployment-keys/${enc(id)}/revoke`),
+    setAgentUpdateMode: (mode: AgentUpdateMode) => put<AgentUpdateSettings>('/v1/admin/agent-updates', { mode }),
     revokeDevice: (id: string) => ok(post(`/v1/admin/devices/${enc(id)}/revoke`)),
     deletionRequests: (signal?: AbortSignal) =>
       list<DeletionRequestDTO>('/v1/admin/deletion-requests', { signal }),
     approveDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/approve`)),
     rejectDeletion: (id: string) => ok(post(`/v1/admin/deletion-requests/${enc(id)}/reject`)),
+    overview: (signal?: AbortSignal) => get<AdminOverview>('/v1/admin/overview', { signal }),
+    organization: (signal?: AbortSignal) => get<OrganizationLifecycle>('/v1/admin/organization', { signal }),
+    closeOrganization: (confirmName: string) => post<OrganizationLifecycle>('/v1/admin/organization/close', { confirm_name: confirmName }),
+    cancelClose: () => post<OrganizationLifecycle>('/v1/admin/organization/close/cancel'),
+    dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/admin/data-exports', { signal }),
+    requestDataExport: () => post<DataExportDTO>('/v1/admin/data-exports'),
+    sso: (signal?: AbortSignal) => get<SsoSettings>('/v1/admin/sso', { signal }),
+    saveSsoConnection: (body: SsoConnectionRequest) => put<SsoSettings>('/v1/admin/sso/connection', body),
+    deleteSsoConnection: () => del<SsoSettings>('/v1/admin/sso/connection'),
+    setSsoOptions: (body: { active?: boolean; enforced?: boolean; jit_provisioning?: boolean }) => patch<SsoSettings>('/v1/admin/sso', body),
+    testSso: () => post<SsoStartResponse>('/v1/admin/sso/test'),
+    addSsoDomain: (domain: string) => post<SsoDomainDTO>('/v1/admin/sso/domains', { domain }),
+    verifySsoDomain: (id: string) => post<SsoDomainDTO>(`/v1/admin/sso/domains/${enc(id)}/verify`),
+    removeSsoDomain: (id: string) => ok(del(`/v1/admin/sso/domains/${enc(id)}`)),
+    createScimToken: (label: string) => post<ScimTokenDTO & { token: string }>('/v1/admin/scim-tokens', { label }),
+    revokeScimToken: (id: string) => ok(del(`/v1/admin/scim-tokens/${enc(id)}`)),
+    erasureRequests: (signal?: AbortSignal) => list<ErasureRequestDTO>('/v1/admin/erasure-requests', { signal }),
+    approveErasure: (id: string) => post<ErasureRequestDTO>(`/v1/admin/erasure-requests/${enc(id)}/approve`),
+    declineErasure: (id: string, reason: string) => post<ErasureRequestDTO>(`/v1/admin/erasure-requests/${enc(id)}/decline`, { reason }),
+    supportGrants: (signal?: AbortSignal) => list<SupportGrantDTO>('/v1/admin/support-grants', { signal }),
+    approveSupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/approve`),
+    denySupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/deny`),
+    endSupport: (id: string) => post<SupportGrantDTO>(`/v1/admin/support-grants/${enc(id)}/end`),
+    timesheetRule: (signal?: AbortSignal) => get<TimesheetRule>('/v1/admin/timesheet-rule', { signal }),
+    setTimesheetRule: (rule: TimesheetRule) => put<TimesheetRule>('/v1/admin/timesheet-rule', rule),
     appCategories: (signal?: AbortSignal) => list<AppCategoryDTO>('/v1/admin/app-categories', { signal }),
     setAppCategory: (body: { app_identifier: string; category: AppCategory; team_id?: string | null }) =>
       put<AppCategoryDTO>('/v1/admin/app-categories', body),
     deleteAppCategory: (id: string) => ok(del(`/v1/admin/app-categories/${enc(id)}`)),
+    applyAppPreset: (body: { preset: AppPresetId; category: AppCategory; team_id?: string | null; identifiers?: string[] }) =>
+      post<{ applied: number }>('/v1/admin/app-categories/presets', body),
     webhooks: (signal?: AbortSignal) => list<WebhookEndpointDTO>('/v1/admin/webhooks', { signal }),
     createWebhook: (body: { url: string; description?: string; events: WebhookEventType[] }) =>
       post<WebhookEndpointDTO>('/v1/admin/webhooks', body),
@@ -438,8 +610,21 @@ export const rd = {
   },
   billing: {
     subscription: (signal?: AbortSignal) => get<SubscriptionDTO>('/v1/billing/subscription', { signal }),
-    changePlan: (plan: PlanId, seats: number) => post<ChangePlanResponse>('/v1/billing/plan', { plan, seats }),
+    changePlan: (plan: PlanId, seats: number, interval?: BillingInterval) =>
+      post<ChangePlanResponse>('/v1/billing/plan', interval ? { plan, seats, interval } : { plan, seats }),
     portal: () => post<{ url: string }>('/v1/billing/portal', {}),
+  },
+  approvals: {
+    /** What's waiting on the signed-in reviewer, for the badge. */
+    counts: (signal?: AbortSignal) => get<InboxCounts>('/v1/inbox/counts', { signal }),
+    batch: (body: { action: 'approve' | 'reject'; note?: string; items: { type: ApprovalType; id: string }[] }) =>
+      post<ApprovalsBatchResponse>('/v1/approvals/batch', body),
+  },
+  auditPeople: (signal?: AbortSignal) => list<AuditPerson>('/v1/audit-events/people', { signal }),
+  /** Same-origin GET of the filtered log as CSV; the browser sends the session cookie. */
+  auditExportUrl: (q: Omit<AuditQuery, 'cursor'>) => {
+    const p = new URLSearchParams(Object.entries(q).filter((e): e is [string, string] => typeof e[1] === 'string' && e[1] !== ''));
+    return `/v1/audit-events/export${p.size ? `?${p}` : ''}`;
   },
   audit: (q: AuditQuery, signal?: AbortSignal) =>
     get<Page<AuditEventDTO>>('/v1/audit-events', { query: { ...q }, signal }),
@@ -449,24 +634,25 @@ export const rd = {
 export function describeError(e: ApiError): string {
   switch (e.code) {
     case 'unauthenticated':
-      return 'Your session has ended. Sign in again.';
+      return t('error.unauthenticated');
     case 'mfa_required':
-      return 'This needs two-factor verification first.';
+      return t('error.mfaRequired');
     case 'forbidden':
-      return "You don't have access to this.";
+      return t('error.forbidden');
     case 'not_found':
-      return "We couldn't find that. It may have been removed, or you may not have access.";
+      return t('error.notFound');
     case 'validation_failed':
-      return e.message || 'Some values are not valid.';
+      // The server's own words name the field; they are English for now.
+      return e.message || t('error.validation');
     case 'seat_limit_reached':
-      return 'All licensed seats (including the overage allowance) are in use. Add seats in Billing first.';
+      return t('error.seats');
     case 'plan_upgrade_required':
-      return "Your plan doesn't include this. An org admin can change the plan in Billing.";
+      return t('error.plan');
     case 'subscription_inactive':
-      return 'Your organization’s subscription is inactive, so this is read-only.';
+      return t('error.inactive');
     case 'network_error':
-      return "Couldn't reach the server. Check your connection and try again.";
+      return t('error.network');
     default:
-      return e.message || 'Something went wrong.';
+      return e.message || t('error.generic');
   }
 }

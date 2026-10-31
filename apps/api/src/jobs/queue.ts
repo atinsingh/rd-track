@@ -13,11 +13,16 @@ export type JobKind =
   | 'export.generate'
   | 'retention.run'
   | 'seats.snapshot'
-  | 'notify.policy_expansion'
+  | 'notification.email'
+  | 'billing.lifecycle'
+  | 'rules.run'
   | 'webhook.deliver'
   | 'time_off.accrue'
   | 'payroll.generate'
-  | 'budgets.check';
+  | 'budgets.check'
+  | 'data_export.generate'
+  | 'organizations.purge'
+  | 'person.erase';
 
 export interface Job {
   id: number;

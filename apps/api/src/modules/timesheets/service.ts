@@ -6,6 +6,7 @@ import {
   isoWeekStart,
   weekDates,
   weeksBetween,
+  type DeviceWorkLimitsResponse,
   type EffectiveWorkLimits,
   type MemberOvertimeRow,
   type MyWorkLimitsResponse,
@@ -28,6 +29,9 @@ import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { assertCanView, assertSameOrgUser, isTeamManagerOf } from '../authz';
 import { currentSubscription } from '../billing/service';
+import { publish } from '../engine/events';
+import { notify as notifyPeople } from '../engine/notify';
+import type { Localized, ServerMessageKey } from '../../i18n';
 
 /**
  * Weekly timesheets (submit → approve/reject, approval locks the week), work limits and
@@ -87,7 +91,7 @@ interface LimitRow {
   effective_from: string;
 }
 
-async function limitRows(q: Queryable, orgId: string, userIds: string[]): Promise<LimitRow[]> {
+export async function limitRows(q: Queryable, orgId: string, userIds: string[]): Promise<LimitRow[]> {
   return many<LimitRow>(
     q,
     `SELECT user_id, daily_minutes, weekly_minutes, effective_from::text AS effective_from FROM work_limits
@@ -142,6 +146,7 @@ async function sessionTimes(
   tz: string,
   fromDate: string,
   toDate: string,
+  excludeSessionId: string | null = null,
 ): Promise<SessionTime[]> {
   const rows = await many<{
     id: string;
@@ -161,8 +166,9 @@ async function sessionTimes(
      LEFT JOIN projects p ON p.id = s.project_id
      LEFT JOIN LATERAL (SELECT sum(active_seconds + idle_seconds) AS secs FROM activity_buckets WHERE session_id = s.id) b ON true
      WHERE s.organization_id = $1 AND s.user_id = $2
-       AND s.started_at >= ($4::date::timestamp AT TIME ZONE $3) AND s.started_at < ($5::date::timestamp AT TIME ZONE $3)`,
-    [orgId, userId, tz, fromDate, toDate],
+       AND s.started_at >= ($4::date::timestamp AT TIME ZONE $3) AND s.started_at < ($5::date::timestamp AT TIME ZONE $3)
+       AND ($6::uuid IS NULL OR s.id <> $6)`,
+    [orgId, userId, tz, fromDate, toDate, excludeSessionId],
   );
   const corrected = rows.filter((r) => r.source === 'agent' && r.corrected && r.ended_at);
   const paused = await pausedWithin(deps, q, corrected);
@@ -268,13 +274,14 @@ async function liveTotals(
   userId: string,
   weeks: { period_start: string; timezone: string }[],
   limits: LimitRow[],
+  excludeSessionId: string | null = null,
 ): Promise<Map<string, TimesheetTotals>> {
   const out = new Map<string, TimesheetTotals>();
   const byZone = new Map<string, string[]>();
   for (const w of weeks) byZone.set(w.timezone, [...(byZone.get(w.timezone) ?? []), w.period_start]);
   for (const [tz, starts] of byZone) {
     const sorted = [...starts].sort();
-    const sessions = await sessionTimes(deps, q, orgId, userId, tz, sorted[0]!, addCalendarDays(sorted[sorted.length - 1]!, 7));
+    const sessions = await sessionTimes(deps, q, orgId, userId, tz, sorted[0]!, addCalendarDays(sorted[sorted.length - 1]!, 7), excludeSessionId);
     for (const w of sorted) {
       const mine = sessions.filter((s) => isoWeekStart(s.date) === w);
       out.set(w, buildTotals(w, mine, plainLimits(resolveLimits(limits, userId, addCalendarDays(w, 6)))));
@@ -473,13 +480,8 @@ export async function pendingTimesheets(deps: Deps, q: Queryable, actor: UserAct
 
 // ───────────────────────── state changes ─────────────────────────
 
-async function notify(q: Queryable, orgId: string, userId: string, title: string, body: string) {
-  await q.query(`INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'timesheet_review', $3, $4)`, [
-    orgId,
-    userId,
-    title,
-    body,
-  ]);
+async function notify(q: Queryable, orgId: string, userId: string, title: Localized, body: Localized) {
+  await notifyPeople(q, orgId, [userId], { kind: 'timesheet_review', category: 'my_requests', title, body, link: '/me/time' });
 }
 
 async function recordEvent(
@@ -540,6 +542,13 @@ export async function submitTimesheet(
     requestId,
     metadata: { period_start: periodStart, total_seconds: dto.totals.total_seconds },
   });
+  await publish(q, {
+    organizationId: actor.organizationId,
+    type: 'timesheet.submitted',
+    subjectUserId: actor.userId,
+    actorUserId: actor.userId,
+    data: { timesheet_id: row.id, user_name: who.display_name, period_start: periodStart },
+  });
   return buildDto(deps, q, actor, who, periodStart, await sheetFor(q, actor.organizationId, actor.userId, periodStart));
 }
 
@@ -589,18 +598,23 @@ export async function reviewTimesheet(
     requestId,
     metadata: { period_start: row.period_start, ...(snapshot ? { total_seconds: snapshot.total_seconds } : {}) },
   });
-  const what = `Your timesheet for the week of ${row.period_start}`;
-  const titles: Record<ReviewVerb, string> = {
-    approve: `${what} was approved`,
-    reject: `${what} was sent back`,
-    reopen: `${what} was reopened`,
+  const titles: Record<ReviewVerb, ServerMessageKey> = { approve: 'ts.approved.title', reject: 'ts.rejected.title', reopen: 'ts.reopened.title' };
+  const vars = { name: actor.displayName, note: note ?? '' };
+  const bodies: Record<ReviewVerb, ServerMessageKey> = {
+    approve: note ? 'ts.approved.note' : 'ts.approved.body',
+    reject: 'ts.rejected.body',
+    reopen: 'ts.reopened.body',
   };
-  const bodies: Record<ReviewVerb, string> = {
-    approve: note ? `${actor.displayName}: “${note}”` : `${actor.displayName} approved it. The week is now locked.`,
-    reject: `${actor.displayName}: “${note ?? ''}”. Make any corrections and submit it again.`,
-    reopen: `${actor.displayName}: “${note ?? ''}”. You can propose corrections for that week again, then resubmit.`,
-  };
-  await notify(q, actor.organizationId, row.user_id, titles[verb], bodies[verb]);
+  await notify(q, actor.organizationId, row.user_id, (l) => l.t(titles[verb], { week: l.day(row.period_start) }), (l) => l.t(bodies[verb], vars));
+  if (verb !== 'reopen') {
+    await publish(q, {
+      organizationId: actor.organizationId,
+      type: 'timesheet.decided',
+      subjectUserId: row.user_id,
+      actorUserId: actor.userId,
+      data: { timesheet_id: id, period_start: row.period_start, approved: verb === 'approve' },
+    });
+  }
   return buildDto(deps, q, actor, who, row.period_start, await one<SheetRow>(q, `${SHEET_SELECT} WHERE t.id = $1`, [id]));
 }
 
@@ -754,6 +768,39 @@ export async function myWorkLimits(deps: Deps, q: Queryable, actor: UserActor): 
       remaining_seconds: left(limits.weekly_minutes, totals.total_seconds),
       overtime_seconds: totals.overtime_seconds,
     },
+  };
+}
+
+/**
+ * Stage 4 F4: limits and time worked so far, for the agent's warnings. `exclude` is the
+ * agent's running session, which it counts itself. An approved (locked) week reports its
+ * approved totals, which can't include a running session anyway.
+ */
+export async function deviceWorkLimits(
+  deps: Deps,
+  q: Queryable,
+  device: { organizationId: string; userId: string },
+  excludeSessionId: string | null,
+): Promise<DeviceWorkLimitsResponse> {
+  if (!(await timesheetsEnabled(deps, q, device.organizationId))) return { enabled: false };
+  const who = await person(q, device.organizationId, device.userId);
+  const now = deps.now();
+  const today = dateInZone(now, who.timezone);
+  const week = isoWeekStart(today);
+  const row = await sheetFor(q, device.organizationId, who.id, week);
+  const tz = row?.timezone ?? who.timezone;
+  const limitData = await limitRows(q, device.organizationId, [who.id]);
+  const limits = resolveLimits(limitData, who.id, today);
+  const live = (await liveTotals(deps, q, device.organizationId, who.id, [{ period_start: week, timezone: tz }], limitData, excludeSessionId)).get(week);
+  const totals = countedTotals(row ?? undefined, live)!;
+  return {
+    enabled: true,
+    as_of: now.toISOString(),
+    timezone: tz,
+    daily_minutes: limits.daily_minutes,
+    weekly_minutes: limits.weekly_minutes,
+    today: { date: today, worked_seconds: totals.days.find((d) => d.date === today)?.total_seconds ?? 0 },
+    week: { period_start: week, worked_seconds: totals.total_seconds },
   };
 }
 

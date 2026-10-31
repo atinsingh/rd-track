@@ -4,12 +4,27 @@ import rateLimit from '@fastify/rate-limit';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { Deps } from './context';
 import { SYSTEM_SCOPE, tenantScope } from './db/tenant-scope';
-import { PLATFORM_COOKIE, SESSION_COOKIE } from './http';
+import { CLIENT_COOKIE, PLATFORM_COOKIE, SESSION_COOKIE } from './http';
 import { AppError } from './lib/errors';
 import { adminRoutes } from './modules/admin-routes';
 import { agentRoutes } from './modules/agent-routes';
 import { commerceRoutes } from './modules/commerce-routes';
 import { insightsRoutes } from './modules/insights-routes';
+import { approvalsRoutes } from './modules/approvals-routes';
+import { workspacesRoutes } from './modules/workspaces-routes';
+import { lifecycleRoutes } from './modules/lifecycle-routes';
+import { authenticateDirectory } from './modules/scim/service';
+import { authenticateToken } from './modules/api-tokens/service';
+import { apiEndpoint } from './modules/api-tokens/surface';
+import { developerRoutes } from './modules/developer-routes';
+import { brandingRoutes } from './modules/branding-routes';
+import { authenticateClient } from './modules/client-portal/service';
+import { clientPortalRoutes } from './modules/client-portal-routes';
+import { expensesRoutes } from './modules/expenses-routes';
+import { audit } from './modules/audit/service';
+import { withScope } from './db/tenant-scope';
+import { scimRoutes } from './modules/scim-routes';
+import { ssoRoutes } from './modules/sso-routes';
 import { moneyRoutes } from './modules/money-routes';
 import { authRoutes } from './modules/auth/routes';
 import { authenticateDevice, authenticateUser } from './modules/auth/service';
@@ -81,6 +96,16 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       return;
     }
 
+    if (mode === 'directory') {
+      const m = /^Bearer\s+(\S{20,300})$/i.exec(req.headers.authorization ?? '');
+      const d = m ? await authenticateDirectory(deps, deps.pool, m[1]!) : null;
+      if (d === 'not_entitled') throw new AppError(403, 'forbidden', 'Directory sync is part of the Pro plan');
+      if (!d) throw new AppError(401, 'unauthenticated', 'A valid directory token is required');
+      req.directory = d;
+      narrowScope(d.organizationId);
+      return;
+    }
+
     if (mode === 'platform') {
       const token = req.cookies[PLATFORM_COOKIE];
       const p = token ? await authenticatePlatform(deps, deps.pool, token) : null;
@@ -89,6 +114,36 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
         throw new AppError(403, 'csrf_failed', 'Missing x-rd-csrf header');
       }
       req.platform = p;
+      return;
+    }
+
+    if (mode === 'client') {
+      const token = req.cookies[CLIENT_COOKIE];
+      const c = token ? await authenticateClient(deps, deps.pool, token) : null;
+      if (c === 'not_entitled') throw new AppError(403, 'portal_unavailable', 'The client portal is not available for this organization');
+      if (!c) throw new AppError(401, 'unauthenticated', 'Sign in required');
+      if (!SAFE_METHODS.has(req.method) && req.headers['x-rd-csrf'] !== '1') {
+        throw new AppError(403, 'csrf_failed', 'Missing x-rd-csrf header');
+      }
+      req.client = c;
+      narrowScope(c.organizationId);
+      return;
+    }
+
+    // API tokens (F5): `Authorization: Bearer rdt_…`, only on the routes in the API reference.
+    const bearer = /^Bearer\s+(rdt_(?:org|pat)_[A-Za-z0-9_-]{20,200})$/.exec(req.headers.authorization ?? '');
+    if (bearer) {
+      const t = await authenticateToken(deps, deps.pool, bearer[1]!);
+      if (t === 'not_entitled') throw new AppError(403, 'plan_upgrade_required', 'The API is part of the Pro plan');
+      if (!t) throw new AppError(401, 'invalid_token', 'This API token is unknown, revoked or expired');
+      req.apiCaller = t;
+      const endpoint = apiEndpoint(req.method, req.routeOptions.url);
+      if (!endpoint) throw new AppError(403, 'not_in_api', 'API tokens can only call the endpoints in the API reference (/v1/docs)');
+      if (t.token!.kind === 'personal' && !endpoint.personal) throw new AppError(403, 'insufficient_scope', 'Personal tokens read only your own data');
+      const missing = endpoint.scopes.filter((sc) => !t.token!.scopes.includes(sc));
+      if (missing.length) throw new AppError(403, 'insufficient_scope', `This token needs the ${missing.join(' and ')} scope`);
+      req.user = t;
+      narrowScope(t.organizationId);
       return;
     }
 
@@ -102,6 +157,25 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
     if (!u.mfaVerified && !cfg.allowWithoutMfa) throw new AppError(403, 'mfa_required', 'Multi-factor authentication is required');
     req.user = u;
     narrowScope(u.organizationId);
+  });
+
+  // Every call made with an API token is in the audit log under the token, allowed or not.
+  app.addHook('onResponse', async (req, reply) => {
+    const caller = req.apiCaller;
+    if (!caller) return;
+    const status = reply.statusCode;
+    await withScope(caller.organizationId, () =>
+      audit(deps.pool, {
+        organizationId: caller.organizationId,
+        actor: caller,
+        action: 'api.request',
+        targetType: 'api_token',
+        targetId: caller.token!.id,
+        result: status < 400 ? 'success' : status === 401 || status === 403 ? 'denied' : 'error',
+        requestId: req.id,
+        metadata: { method: req.method, route: req.routeOptions.url ?? null, status },
+      }),
+    ).catch((e) => req.log.error({ err: { message: (e as Error).message } }, 'api audit failed'));
   });
 
   app.setErrorHandler((err, req, reply) => {
@@ -137,10 +211,19 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => adminRoutes(s, deps));
   await app.register(async (s) => commerceRoutes(s, deps));
   await app.register(async (s) => insightsRoutes(s, deps));
+  await app.register(async (s) => approvalsRoutes(s, deps));
+  await app.register(async (s) => workspacesRoutes(s, deps));
+  await app.register(async (s) => lifecycleRoutes(s, deps));
+  await app.register(async (s) => ssoRoutes(s, deps));
+  await app.register(async (s) => scimRoutes(s, deps));
+  await app.register(async (s) => developerRoutes(s, deps));
+  await app.register(async (s) => expensesRoutes(s, deps));
   await app.register(async (s) => timesheetRoutes(s, deps));
   await app.register(async (s) => schedulingRoutes(s, deps));
   await app.register(async (s) => moneyRoutes(s, deps));
   await app.register(async (s) => platformRoutes(s, deps));
+  await app.register(async (s) => clientPortalRoutes(s, deps));
+  await app.register(async (s) => brandingRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;
 }

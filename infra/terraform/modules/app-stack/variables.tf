@@ -39,6 +39,18 @@ variable "vpc_cidr" {
   type        = string
 }
 
+variable "az_count" {
+  description = "Availability zones to span (2 or 3)."
+  type        = number
+  default     = 3
+}
+
+variable "interface_endpoints" {
+  description = "AWS services reached through interface VPC endpoints instead of the NAT gateway (each about USD 8/month per AZ). Empty sends that traffic through NAT."
+  type        = list(string)
+  default     = ["ecr.api", "ecr.dkr", "secretsmanager", "logs"]
+}
+
 variable "single_nat_gateway" {
   description = "One NAT gateway instead of one per AZ."
   type        = bool
@@ -199,13 +211,25 @@ variable "billing_provider" {
 }
 
 variable "stripe_price_standard" {
-  description = "STRIPE_PRICE_STANDARD (price id, not secret)."
+  description = "STRIPE_PRICE_STANDARD_MONTHLY: Standard, month to month (price id, not secret)."
   type        = string
   default     = ""
 }
 
 variable "stripe_price_pro" {
-  description = "STRIPE_PRICE_PRO (price id, not secret)."
+  description = "STRIPE_PRICE_PRO_MONTHLY: Pro, month to month (price id, not secret)."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_standard_annual" {
+  description = "STRIPE_PRICE_STANDARD_ANNUAL: Standard, annual term (price id, not secret)."
+  type        = string
+  default     = ""
+}
+
+variable "stripe_price_pro_annual" {
+  description = "STRIPE_PRICE_PRO_ANNUAL: Pro, annual term (price id, not secret)."
   type        = string
   default     = ""
 }
@@ -256,4 +280,16 @@ variable "protect_resources" {
   description = "Deletion protection on ALB, final RDS snapshot, no force-destroy of buckets/repos, 30-day secret recovery."
   type        = bool
   default     = false
+}
+
+variable "agent_download_base_url" {
+  description = "AGENT_DOWNLOAD_BASE_URL: where agent installers are published, e.g. https://github.com/<org>/<repo>/releases/download/agent-v0.2.0. Empty: the web app says installers aren't published yet."
+  type        = string
+  default     = ""
+}
+
+variable "agent_version" {
+  description = "AGENT_VERSION: the published agent version offered for download, e.g. 0.2.0."
+  type        = string
+  default     = ""
 }

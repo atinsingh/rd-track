@@ -11,6 +11,7 @@ import type {
 } from '@rd/contracts';
 import { request, unwrapList } from './api';
 import { formatDuration } from './format';
+import { t } from './i18n';
 
 /** Typed client for the timesheet endpoints (kept apart from `rd` in api.ts). */
 
@@ -38,13 +39,8 @@ export const timesheetsApi = {
 
 // ───────────────────────── pure helpers ─────────────────────────
 
-export const STATUS_LABEL: Record<TimesheetStatus, string> = {
-  draft: 'Not submitted',
-  submitted: 'Waiting for review',
-  approved: 'Approved',
-  rejected: 'Sent back',
-  reopened: 'Reopened',
-};
+/** A week's status in the reader's language. */
+export const statusLabel = (s: TimesheetStatus): string => t(`ts.status.${s}`);
 
 /** Badge tone per status — neutral ink only, never red/green. */
 export function statusTone(s: TimesheetStatus): 'outline' | 'solid' | 'ink' {
@@ -53,7 +49,7 @@ export function statusTone(s: TimesheetStatus): 'outline' | 'solid' | 'ink' {
 
 /** "8h", "7h 30m", "No limit". */
 export function formatLimitMinutes(min: number | null): string {
-  if (min === null) return 'No limit';
+  if (min === null) return t('ts.noLimit');
   const h = Math.floor(min / 60);
   const m = min % 60;
   if (h === 0) return `${m}m`;
@@ -61,10 +57,10 @@ export function formatLimitMinutes(min: number | null): string {
 }
 
 export function limitsSummary(l: Pick<EffectiveWorkLimits, 'daily_minutes' | 'weekly_minutes'>): string {
-  if (l.daily_minutes === null && l.weekly_minutes === null) return 'No daily or weekly limit';
+  if (l.daily_minutes === null && l.weekly_minutes === null) return t('ts.noLimits');
   const parts: string[] = [];
-  if (l.daily_minutes !== null) parts.push(`${formatLimitMinutes(l.daily_minutes)} a day`);
-  if (l.weekly_minutes !== null) parts.push(`${formatLimitMinutes(l.weekly_minutes)} a week`);
+  if (l.daily_minutes !== null) parts.push(t('ts.aDay', { limit: formatLimitMinutes(l.daily_minutes) }));
+  if (l.weekly_minutes !== null) parts.push(t('ts.aWeek', { limit: formatLimitMinutes(l.weekly_minutes) }));
   return parts.join(' · ');
 }
 
