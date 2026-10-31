@@ -4,7 +4,6 @@ import {
   SUPPORT_SECTIONS,
   TRIAL_DAYS,
   loginRequest,
-  type OrgKind,
   mfaVerifyRequest,
   supportGrantRequest,
   type PlatformMe,
@@ -36,8 +35,8 @@ const createOrgRequest = z.strictObject({
   region: z.string().max(50).default('ca-central-1'),
   admin_email: z.email(),
   admin_name: z.string().min(1).max(200),
-  /** Start on a 14-day Pro trial (default) or directly on a plan. Families sign up themselves. */
-  plan: z.enum(PLAN_IDS.filter((p) => p !== 'family') as ['free', 'standard', 'pro']).optional(),
+  /** Start on a 14-day Pro trial (default) or directly on a plan. */
+  plan: z.enum(PLAN_IDS).optional(),
   seats: z.number().int().min(0).default(0),
 });
 
@@ -64,29 +63,23 @@ export async function createOrganization(
   q: Queryable,
   input: z.infer<typeof createOrgRequest>,
   actor: PlatformActor | { kind: 'system' },
-  opts: { adminPasswordHash?: string; adminTracking?: boolean; kind?: OrgKind } = {},
+  opts: { adminPasswordHash?: string; adminTracking?: boolean } = {},
 ): Promise<{ organization_id: string; admin_user_id: string }> {
   const exists = await one(q, 'SELECT 1 FROM organizations WHERE slug = $1', [input.slug]);
   if (exists) throw errors.conflict('slug_taken', 'An organization with this slug already exists');
-  const kind = opts.kind ?? 'business';
-  const o = await one<{ id: string }>(q, 'INSERT INTO organizations (name, slug, region, kind) VALUES ($1, $2, $3, $4) RETURNING id', [
+  const o = await one<{ id: string }>(q, 'INSERT INTO organizations (name, slug, region) VALUES ($1, $2, $3) RETURNING id', [
     input.name,
     input.slug,
     input.region,
-    kind,
   ]);
   const now = deps.now();
-  // A family is on the Family plan from the start, never on a (Pro) trial: it is free until
-  // family billing exists, and a trial would grant every workforce entitlement.
-  const family = kind === 'family';
-  const trial = input.plan === undefined && !family;
-  const trialPlan = 'pro';
+  const trial = input.plan === undefined;
   await q.query(
     `INSERT INTO subscriptions (organization_id, plan, status, seats, trial_ends_at, current_period_start)
      VALUES ($1, $2, $3, $4, $5, $6)`,
     [
       o!.id,
-      family ? 'family' : trial ? trialPlan : input.plan,
+      trial ? 'pro' : input.plan,
       trial ? 'trialing' : 'active',
       input.seats,
       trial ? new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString() : null,
@@ -107,7 +100,7 @@ export async function createOrganization(
     action: 'organization.create',
     targetType: 'organization',
     targetId: o!.id,
-    metadata: { plan: family ? 'family' : trial ? `${trialPlan}_trial` : input.plan, kind },
+    metadata: { plan: trial ? 'pro_trial' : input.plan },
   });
   return { organization_id: o!.id, admin_user_id: u!.id };
 }
@@ -236,12 +229,6 @@ export async function platformRoutes(app: FastifyInstance, deps: Deps) {
     const actor = verified(req);
     const body = parse(subscriptionPatch, req.body);
     return withTx(pool, async (tx) => {
-      if (body.plan) {
-        // The family plan is only for families, and families only have the family plan.
-        const o = await one<{ kind: OrgKind }>(tx, 'SELECT kind FROM organizations WHERE id = $1', [req.params.id]);
-        if (o && (o.kind === 'family') !== (body.plan === 'family'))
-          throw errors.validation(o.kind === 'family' ? 'A family can only be on the Family plan.' : 'The Family plan is only for families.');
-      }
       const r = await one(
         tx,
         `UPDATE subscriptions SET plan = COALESCE($2, plan), seats = COALESCE($3, seats), status = COALESCE($4, status),

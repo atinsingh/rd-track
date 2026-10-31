@@ -5,7 +5,6 @@ import {
   enrollRequest,
   eventBatchSchema,
   heartbeatRequest,
-  linkApprove,
   linkRequestCreate,
   linkTokenRequest,
   screenshotCompleteRequest,
@@ -68,8 +67,7 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
   app.post('/v1/devices/link-requests/:id/approve', { config: { auth: 'user' } }, async (req) => {
     const a = userOf(req);
     const { id } = parse(linkId, req.params);
-    const body = parse(linkApprove, req.body ?? {});
-    return withTx(pool, (tx) => approveLinkRequest(deps, tx, a, id, req.id, body.child_id));
+    return withTx(pool, (tx) => approveLinkRequest(deps, tx, a, id, req.id));
   });
   app.post('/v1/devices/link-requests/:id/deny', { config: { auth: 'user' } }, async (req) => {
     userOf(req);

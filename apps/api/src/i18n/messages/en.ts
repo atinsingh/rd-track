@@ -212,21 +212,6 @@ export const en = {
   'download.win.kind': 'Installer',
   'download.msi.label': 'Windows, for IT deployment',
   'download.msi.kind': 'MSI',
-  // Family (doc 08): what a child is told their parent can and can never see.
-  'family.see.apps': 'Which apps you use and for how long each day.',
-  'family.see.apps.teen': 'Which apps you use and for how long each day, as totals.',
-  'family.see.budget': 'How much of today’s screen time is left.',
-  'family.see.rules': 'The rules on this page: time limits, routines, blocked apps and websites.',
-  'family.see.devices': 'Whether your devices are on and checking in.',
-  'family.see.requests': 'When you ask for more time, and the answer.',
-  'family.see.web': 'Websites that were blocked, by category, never the pages you read.',
-  'family.see.web.teen': 'How many websites were blocked, never which sites or pages.',
-  'family.never.messages': 'Your messages, chats or emails.',
-  'family.never.screens': 'Screenshots, your camera or your microphone.',
-  'family.never.typing': 'Keystrokes or what you type.',
-  'family.never.pages': 'The pages you visit or what you search for.',
-  'family.routine.bedtime': 'Bedtime',
-  'family.never.contacts': 'Your contacts, photos or files.',
 } as const;
 
 export type ServerMessageKey = keyof typeof en;

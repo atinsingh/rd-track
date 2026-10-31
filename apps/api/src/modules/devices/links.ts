@@ -30,7 +30,6 @@ interface LinkRow {
   status: 'pending' | 'approved' | 'denied' | 'used';
   organization_id: string | null;
   user_id: string | null;
-  approved_by: string | null;
   expires_at: string;
 }
 
@@ -77,49 +76,27 @@ export async function viewLinkRequest(deps: Deps, q: Queryable, id: string): Pro
   return { request_id: r.id, device_name: r.device_name, os: r.os, user_code: r.user_code, status, expires_at: new Date(r.expires_at).toISOString() };
 }
 
-/**
- * The signed-in person confirms the request for themselves (never for someone else), except a
- * parent in a family (doc 08), who confirms it for one of their children (`childId`).
- */
-export async function approveLinkRequest(
-  deps: Deps,
-  q: Queryable,
-  actor: UserActor,
-  id: string,
-  requestId?: string,
-  childId?: string,
-): Promise<{ status: 'approved' }> {
+/** The signed-in person confirms the request for themselves (never for someone else). */
+export async function approveLinkRequest(deps: Deps, q: Queryable, actor: UserActor, id: string, requestId?: string): Promise<{ status: 'approved' }> {
   const r = await load(q, id, true);
   if (!r) throw errors.notFound('Connection request');
   if (r.status !== 'pending' || expired(r, deps.now())) throw gone();
-  const org = await one<{ kind: string }>(q, 'SELECT kind FROM organizations WHERE id = $1', [actor.organizationId]);
-  let target = actor.userId;
-  if (org?.kind === 'family') {
-    if (!childId) throw new AppError(422, 'child_required', 'Choose which child this computer belongs to.');
-    if (actor.orgRole !== 'org_admin' && actor.orgRole !== 'super_admin') throw errors.forbidden();
-    const child = await one(q, `SELECT 1 FROM users WHERE id = $1 AND organization_id = $2 AND org_role = 'child' AND status = 'active'`, [
-      childId,
-      actor.organizationId,
-    ]);
-    if (!child) throw errors.notFound('Child');
-    target = childId;
-  } else if (childId) {
-    throw new AppError(422, 'not_family', 'Only a family connects a computer for a child.');
-  }
-  await assertCanConnect(q, target, target === actor.userId);
-  await q.query(
-    `UPDATE device_link_requests SET status = 'approved', organization_id = $2, user_id = $3, approved_by = $4, approved_at = $5 WHERE id = $1`,
-    [r.id, actor.organizationId, target, actor.userId, deps.now().toISOString()],
-  );
+  await assertCanConnect(q, actor.userId, true);
+  await q.query(`UPDATE device_link_requests SET status = 'approved', organization_id = $2, user_id = $3, approved_at = $4 WHERE id = $1`, [
+    r.id,
+    actor.organizationId,
+    actor.userId,
+    deps.now().toISOString(),
+  ]);
   await audit(q, {
     organizationId: actor.organizationId,
     actor,
     action: 'device.link_approved',
     targetType: 'user',
-    targetId: target,
-    targetUserId: target,
+    targetId: actor.userId,
+    targetUserId: actor.userId,
     requestId,
-    metadata: { device_name: r.device_name, os: r.os, ...(target !== actor.userId ? { for_child: true } : {}) },
+    metadata: { device_name: r.device_name, os: r.os },
   });
   return { status: 'approved' };
 }
@@ -145,8 +122,7 @@ export async function collectLinkToken(deps: Deps, q: Queryable, id: string, pol
     [r.id, deps.now().toISOString()],
   );
   if (!used) throw gone();
-  // A public request, so this runs in the system scope; the code goes to the approver's org, for
-  // the approver themselves or (in a family) the child they chose.
-  const { code } = await issueEnrollmentCode(deps, q, r.organization_id!, r.user_id!, r.approved_by ?? r.user_id!);
+  // A public request, so this runs in the system scope; the code goes to the approver's org.
+  const { code } = await issueEnrollmentCode(deps, q, r.organization_id!, r.user_id!, r.user_id!);
   return { status: 'approved', enrollment_code: code };
 }

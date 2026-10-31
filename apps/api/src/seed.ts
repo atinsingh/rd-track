@@ -12,7 +12,7 @@ import { hashPassword, randomToken, sha256Hex } from './lib/crypto';
 import { createOrganization } from './modules/platform/routes';
 import { MemoryObjectStore } from './storage/object-store';
 import { recordIdleDecision } from './modules/idle/service';
-import { ConsoleEmailSender, childEmail } from './email/sender';
+import { ConsoleEmailSender } from './email/sender';
 
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'track-demo-2026';
 
@@ -128,150 +128,12 @@ async function main() {
   const deps: Deps = { pool, config, store: new MemoryObjectStore(), email: new ConsoleEmailSender(), now: () => new Date() };
 
   const existing = await one(pool, `SELECT 1 FROM organizations WHERE slug = 'rounddigital'`);
-  if (existing) console.log('Demo organization already exists.');
-  else await seedBusiness(deps);
-  if (await one(pool, `SELECT 1 FROM organizations WHERE slug = 'moreno-family'`)) console.log('Demo family already exists.');
-  else await seedFamily(deps);
+  if (existing) {
+    console.log('Demo organization already exists; nothing to do.');
+    await pool.end();
+    return;
+  }
 
-  console.log(`
-Demo sign-ins (password: ${DEMO_PASSWORD})
-  admin@rounddigital.example   org admin (set MFA_REQUIRED_FOR_ADMINS=false locally, or enroll TOTP on first sign-in)
-  priya@rounddigital.example   employee + Platform team manager
-  sam@rounddigital.example     Platform & Support manager, Client A project manager (viewer seat)
-  tom@rounddigital.example     employee
-  audit@rounddigital.example   auditor
-  parent@family.example        a parent in "The Moreno family" (RoundDigital Family)
-`);
-  await pool.end();
-}
-
-/**
- * Family (doc 08): "The Moreno family" in Toronto, with Maya (12) and Leo (9), a computer each,
- * family rules with a school routine, an override per child, and today's app use.
- */
-async function seedFamily(deps: Deps) {
-  await withTx(deps.pool, async (q) => {
-    const { organization_id: orgId, admin_user_id: parentId } = await createOrganization(
-      deps,
-      q,
-      { name: 'The Moreno family', slug: 'moreno-family', region: 'ca-central-1', admin_email: 'parent@family.example', admin_name: 'Ana Moreno', seats: 0 },
-      { kind: 'system' },
-      { kind: 'family', adminTracking: false },
-    );
-    await q.query(`UPDATE users SET password_hash = $2, timezone = 'America/Toronto' WHERE id = $1`, [parentId, await hashPassword(DEMO_PASSWORD)]);
-    const tz = 'America/Toronto';
-    const now = Date.now();
-    // Local midnight in Toronto today (the demo uses the offset that applies now).
-    const offsetMin = (() => {
-      const p = Object.fromEntries(
-        new Intl.DateTimeFormat('en-US', { timeZone: tz, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
-          .formatToParts(new Date(now))
-          .map((x) => [x.type, x.value]),
-      );
-      const local = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), Number(p.hour), Number(p.minute));
-      return Math.round((local - now) / 60_000);
-    })();
-    const localNow = now + offsetMin * 60_000;
-    const midnight = Math.floor(localNow / 86_400_000) * 86_400_000 - offsetMin * 60_000;
-
-    const kids: { name: string; year: number; month: number; color: string; device: string; os: string; seenAgo: number; apps: [string, string, number][] }[] = [
-      {
-        name: 'Maya',
-        year: 2014,
-        month: 5,
-        color: 'amber',
-        device: 'Maya’s MacBook',
-        os: 'macos',
-        seenAgo: 60_000,
-        apps: [
-          ['com.mojang.minecraftlauncher', 'Minecraft', 40],
-          ['com.google.Chrome', 'Chrome', 25],
-          ['com.roblox.client', 'Roblox', 15],
-          ['org.khanacademy.Khan-Academy', 'Khan Academy', 15],
-        ],
-      },
-      {
-        name: 'Leo',
-        year: 2017,
-        month: 9,
-        color: 'teal',
-        device: 'Leo’s PC',
-        os: 'windows',
-        seenAgo: 3 * 3600_000,
-        apps: [
-          ['Minecraft.exe', 'Minecraft', 25],
-          ['KhanAcademy.exe', 'Khan Academy', 15],
-        ],
-      },
-    ];
-    const ids: Record<string, string> = {};
-    for (const k of kids) {
-      const u = await one<{ id: string }>(
-        q,
-        `INSERT INTO users (organization_id, email, display_name, org_role, tracking_enabled, timezone)
-         VALUES ($1, 'pending-' || gen_random_uuid() || '@family.invalid', $2, 'child', true, $3) RETURNING id`,
-        [orgId, k.name, tz],
-      );
-      const id = u!.id;
-      ids[k.name] = id;
-      await q.query('UPDATE users SET email = $2 WHERE id = $1', [id, childEmail(id)]);
-      await q.query(`INSERT INTO child_profiles (user_id, organization_id, birth_year, birth_month, region, color) VALUES ($1, $2, $3, $4, 'CA-QC', $5)`, [
-        id,
-        orgId,
-        k.year,
-        k.month,
-        k.color,
-      ]);
-      const dev = await one<{ id: string }>(
-        q,
-        `INSERT INTO devices (organization_id, user_id, name, os, os_version, agent_version, credential_hash, last_seen_at, last_sync_at, applied_policy_revision)
-         VALUES ($1, $2, $3, $4, $5, '0.2.0', $6, $7, $7, 0) RETURNING id`,
-        [orgId, id, k.device, k.os, k.os === 'macos' ? '15.6' : 'Windows 11 24H2', sha256Hex(randomToken()), new Date(now - k.seenAgo).toISOString()],
-      );
-      // Today's use, laid out back to back so it ends before now (and never before midnight).
-      const total = k.apps.reduce((t, a) => t + a[2], 0) * 60_000;
-      const start = Math.max(midnight + 60_000, now - k.seenAgo - total - 10 * 60_000);
-      const sid = randomUUID();
-      await q.query(
-        `INSERT INTO work_sessions (id, organization_id, user_id, device_id, state, source, started_at, ended_at, stop_reason)
-         VALUES ($1, $2, $3, $4, 'stopped', 'agent', $5, $6, 'user')`,
-        [sid, orgId, id, dev!.id, new Date(start).toISOString(), new Date(Math.min(now, start + total)).toISOString()],
-      );
-      let cursor = start;
-      for (const [appId, appName, minutes] of k.apps) {
-        // Rows are at most an hour each; split into 15-minute segments.
-        for (let left = minutes; left > 0; left -= 15) {
-          const m = Math.min(15, left);
-          const at = Math.min(cursor, now - m * 60_000);
-          await q.query(
-            `INSERT INTO app_usage (organization_id, session_id, user_id, event_id, app_identifier, app_name, started_at, duration_seconds)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-            [orgId, sid, id, randomUUID(), appId, appName, new Date(at).toISOString(), m * 60],
-          );
-          cursor += m * 60_000;
-        }
-      }
-    }
-    const put = (child: string | null, document: object) =>
-      q.query(`INSERT INTO family_rules (organization_id, child_user_id, document, updated_by) VALUES ($1, $2, $3, $4)`, [orgId, child, JSON.stringify(document), parentId]);
-    await put(null, {
-      daily_budget: { mon: 90, tue: 90, wed: 90, thu: 90, fri: 120, sat: 180, sun: 150 },
-      routines: [
-        { id: 'bedtime', kind: 'bedtime', name: 'Bedtime', days: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], start: '20:30', end: '07:00', allow_apps: [] },
-        { id: 'school', kind: 'school', name: 'School', days: ['mon', 'tue', 'wed', 'thu', 'fri'], start: '08:30', end: '15:00', allow_apps: ['org.khanacademy.Khan-Academy', 'KhanAcademy.exe'] },
-      ],
-      web: { block_adult: true, safe_search: true, blocked_domains: [], allowed_domains: ['khanacademy.org'] },
-    });
-    // Maya is older: more time on school days.
-    await put(ids.Maya!, { daily_budget: { mon: 120, tue: 120, wed: 120, thu: 120, fri: 150, sat: 180, sun: 150 } });
-    await put(ids.Leo!, { blocked_apps: ['com.roblox.client', 'RobloxPlayerBeta.exe'] });
-    await q.query('UPDATE organizations SET policy_revision = policy_revision + 1 WHERE id = $1', [orgId]);
-    console.log(`Seeded family "The Moreno family" (${orgId}).`);
-  });
-}
-
-async function seedBusiness(deps: Deps) {
-  const { pool } = deps;
   await withTx(pool, async (q) => {
     const { organization_id: orgId, admin_user_id: adminId } = await createOrganization(
       deps,
@@ -380,6 +242,16 @@ async function seedBusiness(deps: Deps) {
     }
     console.log(`Seeded organization "RoundDigital" (${orgId}).`);
   });
+
+  console.log(`
+Demo sign-ins (password: ${DEMO_PASSWORD})
+  admin@rounddigital.example   org admin (set MFA_REQUIRED_FOR_ADMINS=false locally, or enroll TOTP on first sign-in)
+  priya@rounddigital.example   employee + Platform team manager
+  sam@rounddigital.example     Platform & Support manager, Client A project manager (viewer seat)
+  tom@rounddigital.example     employee
+  audit@rounddigital.example   auditor
+`);
+  await pool.end();
 }
 
 await main();

@@ -49,7 +49,7 @@ a web search on **2026-10-31**:
 | **Kinlight** | compound | the "lit-up sign" the UK children's code asks for: the family, with a light on | an LED maker (lighting, a different class); a 2026 student design project app | to run | to run | to run | to run | to run | to run | to run |
 | **Hearthlight** | metaphor | the light at the family hearth | a kitchen and meal planner app (App Store), a computer-vision company, a game | to run | to run | to run | to run | to run | to run | to run |
 
-**Recommendation:** launch as **Openkin by RoundDigital** if the trademark and app-store checks
+**Decided (2026-10-31): Openkin**, as its own app. The original recommendation was to launch as **Openkin by RoundDigital** if the trademark and app-store checks
 come back clean. Fall back to **RoundDigital Family**, which needs no new trademark and can
 be renamed later at the cost of a migration. Kinlight is a good third choice. Hearthlight
 collides with a live App Store app.

@@ -105,23 +105,6 @@ const SECTIONS: [section: string, entries: Entry[]][] = [
     ],
   ],
   ['Audit', [['GET', '/v1/audit-events', 'The audit log (`from`, `to`, `action`, `actor_id`, `subject_id`, `cursor`)']]],
-  // Families (doc 08) have no API tokens (the Family plan has no api_access); listed for reference.
-  [
-    'Family',
-    [
-      ['GET', '/v1/family/children', 'Your children'],
-      ['POST', '/v1/family/children', 'Add a child (under 18)'],
-      ['GET', '/v1/family/children/:id', 'One child'],
-      ['PATCH', '/v1/family/children/:id', "Change a child's name, birth month, region or colour"],
-      ['DELETE', '/v1/family/children/:id', 'Remove a child and erase their data'],
-      ['GET', '/v1/family/rules', "The family's rules"],
-      ['PUT', '/v1/family/rules', "Replace the family's rules"],
-      ['GET', '/v1/family/children/:id/rules', "A child's rules: their own document and the result"],
-      ['PUT', '/v1/family/children/:id/rules', "Replace a child's own rules"],
-      ['GET', '/v1/family/children/:id/today', "A child's screen time today, routine and devices"],
-      ['GET', '/v1/family/children/:id/transparency', 'What the child is told their parents can and can never see'],
-    ],
-  ],
 ];
 
 export const API_SURFACE: ApiEndpointDoc[] = SECTIONS.flatMap(([section, entries]) =>

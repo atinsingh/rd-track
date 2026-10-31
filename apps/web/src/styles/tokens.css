@@ -90,22 +90,3 @@
     --gutter: 16px;
   }
 }
-
-/*
- * The family app (doc 08; palette in replica/family/brand.md): a warm lamp orange instead of
- * Track's red. Set on the signed-in shell of family organizations only. Contrast (WCAG 2.x):
- * action and link #b4460c 5.49:1 on white and 5.17:1 on #fff7ec; hover #8f370a 7.7:1;
- * #ffb46b on ink 11.2:1. The lamp #f5a524 is for marks and fills, never text on light.
- */
-[data-org-kind='family'] {
-  --brand-red: #f5a524;
-  --action-red: #b4460c;
-  --action-red-hover: #8f370a;
-  --link: #b4460c;
-  --link-hover: #7a2f08;
-  --link-on-ink: #ffb46b;
-  --canvas: #fff7ec;
-  --backdrop: radial-gradient(1100px 620px at 8% -8%, rgb(245 165 36 / 0.2), transparent 62%),
-    radial-gradient(900px 560px at 100% 4%, rgb(180 70 12 / 0.08), transparent 58%), var(--canvas);
-  background: var(--backdrop);
-}

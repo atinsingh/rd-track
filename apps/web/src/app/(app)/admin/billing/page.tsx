@@ -46,12 +46,7 @@ const PLAN_FEATURES: Record<PlanId, { key: string; on: boolean }[]> = {
     { key: 'legalHold', on: true },
     { key: 'residency', on: true },
   ],
-  // The family plan is never offered to a business (doc 08); family orgs don't see this page.
-  family: [],
 };
-
-/** The plans a business can pick. */
-const BUSINESS_PLANS = PLAN_IDS.filter((id) => id !== 'family');
 
 const statusLabel = (st: SubscriptionDTO['status']) => t(`money.billing.status.${st}`);
 
@@ -343,7 +338,7 @@ export default function BillingPage() {
           </span>
         </div>
         <div className={s.plans}>
-          {BUSINESS_PLANS.map((id) => {
+          {PLAN_IDS.map((id) => {
             const p = PLANS[id];
             const perMonth = p.prices[viewTerm];
             // Free has no term; a paid plan is "current" only on the term being shown.

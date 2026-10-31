@@ -25,7 +25,6 @@ const ROLE_KEY: Record<OrgRole, MessageKey> = {
   auditor: 'role.auditor',
   super_admin: 'role.superAdmin',
   finance: 'role.finance',
-  child: 'role.child',
 };
 const roleLabel = (r: OrgRole) => t(ROLE_KEY[r]);
 

@@ -23,7 +23,7 @@ import { many, one, type Queryable } from '../../db/pool';
 import { signEd25519 } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
-import { currentPlan, currentSubscription, planInEffect } from '../billing/service';
+import { currentPlan, currentSubscription } from '../billing/service';
 import { notify } from '../engine/notify';
 
 interface ScopeRow {
@@ -247,7 +247,7 @@ export async function publishPolicy(
   if (scopeType === 'organization' && scopeId !== orgId) throw errors.notFound('Policy scope');
 
   const sub = await currentSubscription(q, orgId, deps.now());
-  const plan = planInEffect(sub);
+  const plan = sub.status === 'trialing' ? 'pro' : sub.plan;
   if (scopeType !== 'organization' && !hasEntitlement(plan, 'scoped_policies')) {
     throw errors.paymentRequired('Team, project and device policies are part of the Pro plan.');
   }

@@ -1,4 +1,4 @@
-import type { ChildDTO, Entitlement, Me, OrgRole } from '@rd/contracts';
+import type { Entitlement, Me, OrgRole } from '@rd/contracts';
 import { t, type MessageKey } from './i18n';
 
 export type Capability =
@@ -34,8 +34,6 @@ export interface Access {
   managesTeams: boolean;
   managesProjects: boolean;
   entitlements: readonly Entitlement[];
-  /** A family organization (doc 08): the family app replaces the workforce one. */
-  family: boolean;
 }
 
 export function accessFor(me: Me): Access {
@@ -49,7 +47,6 @@ export function accessFor(me: Me): Access {
     managesTeams: me.managed_team_ids.length > 0,
     managesProjects: me.managed_project_ids.length > 0,
     entitlements: me.entitlements,
-    family: me.organization.kind === 'family',
   };
 }
 
@@ -112,7 +109,7 @@ export interface NavItem {
   /** Extra words the ⌘K palette matches on. */
   keywords?: string;
 }
-export type NavGroupKey = 'me' | 'team' | 'money' | 'admin' | 'settings' | 'family' | 'children';
+export type NavGroupKey = 'me' | 'team' | 'money' | 'admin' | 'settings';
 export interface NavGroup {
   key: NavGroupKey;
   label: string;
@@ -192,41 +189,6 @@ const GROUPS: NavGroupDef[] = [
   },
 ];
 
-/**
- * The family app's navigation (doc 08): the family's day, each child, the rules, connecting a
- * computer, and the parent's own settings. Nothing from the workforce app.
- */
-export function familyNav(children: readonly Pick<ChildDTO, 'id' | 'display_name'>[]): NavGroup[] {
-  const groups: NavGroup[] = [
-    {
-      key: 'family',
-      label: t('fam.nav.group'),
-      items: [
-        { href: '/family', label: t('fam.nav.today'), capability: 'me', keywords: 'home children screen time' },
-        { href: '/family/rules', label: t('fam.nav.rules'), capability: 'me', keywords: 'limits routines bedtime apps web filter pause' },
-        { href: '/family/connect', label: t('fam.nav.connect'), capability: 'me', keywords: 'install app computer device add' },
-      ],
-    },
-  ];
-  if (children.length)
-    groups.push({
-      key: 'children',
-      label: t('fam.nav.children'),
-      items: children.map((c) => ({ href: `/family/children/${c.id}`, label: c.display_name, capability: 'me' as const })),
-    });
-  groups.push({
-    key: 'settings',
-    label: t('nav.group.settings'),
-    items: [{ href: '/me/settings', label: t('fam.nav.settings'), capability: 'me', keywords: 'account password language email notifications' }],
-  });
-  return groups;
-}
-
-/** Pages a family organization uses; everything else belongs to the workforce app. */
-export function isFamilyPath(pathname: string): boolean {
-  return ['/family', '/me/settings', '/connect'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
-
 /** Navigation filtered to what the signed-in user's roles allow. */
 export function navFor(a: Access): NavGroup[] {
   return GROUPS.map((g) => ({ ...g, label: t(g.label), items: g.items.filter((i) => can(a, i.capability)).map((i) => ({ ...i, label: t(i.label) })) })).filter(
@@ -252,7 +214,6 @@ export function activeHref(groups: NavGroup[], pathname: string): string | null 
 
 export function roleLabel(me: Me): string {
   const parts: string[] = [];
-  if (me.organization.kind === 'family') return me.user.org_role === 'child' ? t('role.child') : t('role.parent');
   switch (me.user.org_role) {
     case 'org_admin':
       parts.push(t('role.orgAdmin'));
@@ -265,9 +226,6 @@ export function roleLabel(me: Me): string {
       break;
     case 'finance':
       parts.push(t('role.finance'));
-      break;
-    case 'child':
-      parts.push(t('role.child'));
       break;
     default:
       parts.push(t('role.employee'));
@@ -292,7 +250,6 @@ export interface Home {
  * the fallback for everyone else.
  */
 export function homesFor(a: Access): Home[] {
-  if (a.family) return [{ href: '/family', label: t('fam.nav.today') }];
   const homes: Home[] = [];
   if (a.isAdmin) homes.push({ href: '/admin', label: t('nav.setup') });
   if (can(a, 'finance')) homes.push({ href: '/money', label: t('nav.periodClose') });

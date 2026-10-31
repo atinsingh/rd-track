@@ -57,10 +57,6 @@ export async function currentSubscription(q: Queryable, orgId: string, now: Date
   let sub = await one<SubscriptionRow>(q, 'SELECT * FROM subscriptions WHERE organization_id = $1', [orgId]);
   if (!sub) throw errors.notFound('Subscription');
 
-  if (sub.status === 'trialing' && sub.plan === 'family' && sub.trial_ends_at && new Date(sub.trial_ends_at) <= now) {
-    // A family never falls back to the workforce Free plan.
-    sub = (await one<SubscriptionRow>(q, `UPDATE subscriptions SET status = 'active', updated_at = now() WHERE organization_id = $1 RETURNING *`, [orgId]))!;
-  }
   if (sub.status === 'trialing' && sub.trial_ends_at && new Date(sub.trial_ends_at) <= now) {
     // Trial ends on Free; organizations with more than 2 tracked users get a grace period to choose a plan.
     const { billable } = await seatCounts(q, orgId);
@@ -87,11 +83,6 @@ export async function currentSubscription(q: Queryable, orgId: string, now: Date
     ))!;
   }
   return sub;
-}
-
-/** The plan whose entitlements apply: a trial counts as Pro, except for a family (doc 08). */
-export function planInEffect(sub: Pick<SubscriptionRow, 'status' | 'plan'>): PlanId {
-  return sub.status === 'trialing' && sub.plan !== 'family' ? 'pro' : sub.plan;
 }
 
 export async function currentPlan(q: Queryable, orgId: string, now: Date): Promise<PlanId> {
@@ -150,7 +141,7 @@ export async function subscriptionDTO(q: Queryable, orgId: string, now: Date): P
     current_period_end: sub.current_period_end,
     billing_provider: sub.provider,
     cancel_at_period_end: sub.cancel_at_period_end,
-    entitlements: [...PLANS[planInEffect(sub)].entitlements],
+    entitlements: sub.status === 'trialing' ? [...PLANS.pro.entitlements] : [...plan.entitlements],
   };
 }
 
@@ -170,7 +161,7 @@ function stripeFor(deps: Pick<Deps, 'config'>): StripeClient {
   return new StripeClient(deps.config.billing.stripe.secretKey, deps.config.billing.stripe.apiBase);
 }
 
-function stripePrice(deps: Pick<Deps, 'config'>, plan: Exclude<PlanId, 'free' | 'family'>, interval: BillingInterval): string {
+function stripePrice(deps: Pick<Deps, 'config'>, plan: Exclude<PlanId, 'free'>, interval: BillingInterval): string {
   const price = deps.config.billing.stripe.prices[plan][interval];
   if (!price) throw new AppError(500, 'billing_not_configured', `No Stripe price configured for ${plan} (${interval})`);
   return price;
@@ -219,9 +210,6 @@ export async function changePlan(
 ): Promise<ChangePlanResponse> {
   const now = deps.now();
   const orgId = actor.organizationId;
-  const kind = await one<{ kind: string }>(q, 'SELECT kind FROM organizations WHERE id = $1', [orgId]);
-  if (kind?.kind === 'family' || input.plan === 'family')
-    throw new AppError(403, 'not_business', 'Families stay on the Family plan; it can’t be changed here.');
   const before = await currentSubscription(q, orgId, now);
   const { billable } = await seatCounts(q, orgId);
   const seats = input.plan === 'free' ? 0 : input.seats;
@@ -440,7 +428,7 @@ export async function snapshotSeats(q: Queryable, now: Date): Promise<number> {
 /** 402 unless the organization's plan (trials count as Pro) includes `entitlement`. */
 export async function assertEntitlement(q: Queryable, orgId: string, entitlement: Entitlement, now: Date, what: string): Promise<void> {
   const sub = await currentSubscription(q, orgId, now);
-  const plan = planInEffect(sub);
+  const plan = sub.status === 'trialing' ? 'pro' : sub.plan;
   if (!PLANS[plan].entitlements.includes(entitlement)) throw errors.paymentRequired(`${what} is not included in your plan.`);
 }
 
