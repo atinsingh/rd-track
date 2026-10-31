@@ -39,6 +39,18 @@ variable "vpc_cidr" {
   type        = string
 }
 
+variable "az_count" {
+  description = "Availability zones to span (2 or 3)."
+  type        = number
+  default     = 3
+}
+
+variable "interface_endpoints" {
+  description = "AWS services reached through interface VPC endpoints instead of the NAT gateway (each about USD 8/month per AZ). Empty sends that traffic through NAT."
+  type        = list(string)
+  default     = ["ecr.api", "ecr.dkr", "secretsmanager", "logs"]
+}
+
 variable "single_nat_gateway" {
   description = "One NAT gateway instead of one per AZ."
   type        = bool

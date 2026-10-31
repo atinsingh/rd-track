@@ -1,6 +1,9 @@
 # Copy to terraform.tfvars (git-ignored by infra/terraform/.gitignore). Nothing here is
 # secret, but it names your account and domain.
 
+# Lowest-cost shape for an account running on credits (runbook §1.0).
+# lean = true
+
 aws_account_id = "111111111111"
 region         = "ca-central-1"
 

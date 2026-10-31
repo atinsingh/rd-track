@@ -61,6 +61,8 @@ module "network" {
   source                  = "../network"
   name                    = local.name
   cidr_block              = var.vpc_cidr
+  az_count                = var.az_count
+  interface_endpoints     = var.interface_endpoints
   single_nat_gateway      = var.single_nat_gateway
   enable_flow_logs        = var.enable_flow_logs
   flow_log_retention_days = var.log_retention_days

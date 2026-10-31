@@ -1,3 +1,9 @@
+variable "lean" {
+  description = "Lowest-cost shape for a trial account running on credits: two AZs, no interface endpoints (that traffic goes through the NAT gateway), one API and one web task, a smaller web task and db.t4g.micro. About half the monthly cost; no redundancy."
+  type        = bool
+  default     = false
+}
+
 variable "aws_account_id" {
   description = "AWS account that hosts staging. The provider refuses any other."
   type        = string
