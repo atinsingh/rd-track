@@ -5,6 +5,8 @@ import {
   enrollRequest,
   eventBatchSchema,
   heartbeatRequest,
+  linkRequestCreate,
+  linkTokenRequest,
   screenshotCompleteRequest,
   sessionCreateRequest,
   sessionStopRequest,
@@ -17,11 +19,12 @@ import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
-import { deviceOf } from '../http';
+import { deviceOf, userOf } from '../http';
 import { AppError, errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { assertLicensedForTracking } from './billing/service';
 import { enroll, heartbeat } from './devices/service';
+import { approveLinkRequest, collectLinkToken, createLinkRequest, denyLinkRequest, viewLinkRequest } from './devices/links';
 import { deviceUpdate } from './devices/updates';
 import { projectsForUser } from './org/service';
 import { deviceScheduleToday } from './scheduling/service';
@@ -42,6 +45,42 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
       const body = parse(enrollRequest, req.body);
       const res = await withTx(pool, (tx) => enroll(deps, tx, body, req.id));
       return reply.code(201).send(res);
+    },
+  );
+
+  // Signing in to connect: the app opens a request, the person confirms it on the web, the
+  // app collects a one-time enrollment code with its poll secret (see devices/links.ts).
+  app.post(
+    '/v1/devices/link-requests',
+    { config: { auth: 'public', rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const body = parse(linkRequestCreate, req.body);
+      return reply.code(201).send(await withTx(pool, (tx) => createLinkRequest(deps, tx, body)));
+    },
+  );
+  const linkId = z.object({ id: z.string().max(64) });
+  app.get('/v1/devices/link-requests/:id', { config: { auth: 'user' } }, async (req) => {
+    userOf(req);
+    const { id } = parse(linkId, req.params);
+    return viewLinkRequest(deps, pool, id);
+  });
+  app.post('/v1/devices/link-requests/:id/approve', { config: { auth: 'user' } }, async (req) => {
+    const a = userOf(req);
+    const { id } = parse(linkId, req.params);
+    return withTx(pool, (tx) => approveLinkRequest(deps, tx, a, id, req.id));
+  });
+  app.post('/v1/devices/link-requests/:id/deny', { config: { auth: 'user' } }, async (req) => {
+    userOf(req);
+    const { id } = parse(linkId, req.params);
+    return withTx(pool, (tx) => denyLinkRequest(deps, tx, id));
+  });
+  app.post(
+    '/v1/devices/link-requests/:id/token',
+    { config: { auth: 'public', rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req) => {
+      const { id } = parse(linkId, req.params);
+      const body = parse(linkTokenRequest, req.body);
+      return withTx(pool, (tx) => collectLinkToken(deps, tx, id, body.poll_secret));
     },
   );
 

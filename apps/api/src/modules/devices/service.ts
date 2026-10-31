@@ -22,22 +22,8 @@ export async function createEnrollmentCode(
   requestId?: string,
 ): Promise<EnrollmentCodeResponse> {
   await assertInOrg(q, actor.organizationId, 'users', userId, 'User');
-  const u = await one<{ status: string; tracking_enabled: boolean }>(q, 'SELECT status, tracking_enabled FROM users WHERE id = $1', [userId]);
-  if (u!.status !== 'active') throw errors.validation('User is deactivated');
-  if (!u!.tracking_enabled) {
-    // Viewer-only users are free seats; tracking (and its seat check) must be turned on first.
-    throw errors.validation(
-      userId === actor.userId
-        ? 'Tracking is off for your account, so there is nothing to connect. An org admin can turn it on.'
-        : 'Turn on tracking for this user before enrolling a device (it uses a licence seat).',
-    );
-  }
-  const code = enrollmentCode();
-  const expires = new Date(deps.now().getTime() + CODE_TTL_MIN * 60_000).toISOString();
-  await q.query(
-    `INSERT INTO enrollment_codes (organization_id, user_id, code_hash, created_by, expires_at) VALUES ($1, $2, $3, $4, $5)`,
-    [actor.organizationId, userId, sha256Hex(normalizeEnrollmentCode(code)), actor.userId, expires],
-  );
+  await assertCanConnect(q, userId, userId === actor.userId);
+  const { code, expires_at } = await issueEnrollmentCode(deps, q, actor.organizationId, userId, actor.userId);
   await audit(q, {
     organizationId: actor.organizationId,
     actor,
@@ -47,7 +33,38 @@ export async function createEnrollmentCode(
     targetUserId: userId,
     requestId,
   });
-  return { code, expires_at: expires, user_id: userId };
+  return { code, expires_at, user_id: userId };
+}
+
+/** Whether a computer may be connected for this person: active, and tracked (which takes a seat). */
+export async function assertCanConnect(q: Queryable, userId: string, self: boolean): Promise<void> {
+  const u = await one<{ status: string; tracking_enabled: boolean }>(q, 'SELECT status, tracking_enabled FROM users WHERE id = $1', [userId]);
+  if (!u || u.status !== 'active') throw errors.validation('User is deactivated');
+  if (!u.tracking_enabled) {
+    // Viewer-only users are free seats; tracking (and its seat check) must be turned on first.
+    throw errors.validation(
+      self
+        ? 'Tracking is off for your account, so there is nothing to connect. An org admin can turn it on.'
+        : 'Turn on tracking for this user before enrolling a device (it uses a licence seat).',
+    );
+  }
+}
+
+/** A one-time enrollment code for `userId`, stored only as a hash. */
+export async function issueEnrollmentCode(
+  deps: Deps,
+  q: Queryable,
+  organizationId: string,
+  userId: string,
+  createdBy: string,
+): Promise<{ code: string; expires_at: string }> {
+  const code = enrollmentCode();
+  const expires = new Date(deps.now().getTime() + CODE_TTL_MIN * 60_000).toISOString();
+  await q.query(
+    `INSERT INTO enrollment_codes (organization_id, user_id, code_hash, created_by, expires_at) VALUES ($1, $2, $3, $4, $5)`,
+    [organizationId, userId, sha256Hex(normalizeEnrollmentCode(code)), createdBy, expires],
+  );
+  return { code, expires_at: expires };
 }
 
 export function dashboardUrl(deps: Deps): string {

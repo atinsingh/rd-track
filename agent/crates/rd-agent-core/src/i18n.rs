@@ -233,6 +233,11 @@ messages! {
     setup_cant_reach: "Can't reach {server}. Check your connection and try again." => "Impossible de joindre {server}. Vérifiez votre connexion et réessayez.",
     setup_too_many: "Too many tries. Wait a minute, then ask again." => "Trop d’essais. Attendez une minute, puis redemandez.",
     setup_code_failed: "Couldn't ask for a code: {error}" => "Impossible de demander un code : {error}",
+    signin_unsupported: "{server} doesn't offer signing in from the app yet. Use a connection code from your administrator." => "{server} ne permet pas encore de se connecter depuis l’application. Utilisez un code de connexion de votre administrateur.",
+    signin_denied: "Signing in was cancelled in the browser." => "La connexion a été annulée dans le navigateur.",
+    signin_expired: "Signing in took too long. Start again." => "La connexion a pris trop de temps. Recommencez.",
+    signin_failed: "Couldn't sign in: {error}" => "Impossible de se connecter : {error}",
+    signin_already: "This computer is already connected." => "Cet ordinateur est déjà connecté.",
 }
 
 #[cfg(test)]

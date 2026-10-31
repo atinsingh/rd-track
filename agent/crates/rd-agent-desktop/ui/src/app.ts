@@ -83,6 +83,12 @@ interface AppView {
   server_url: string | null;
   enroll_prefill: { server_url: string; code: string } | null;
   deployment: { server_url: string } | null;
+  /** Signing in: waiting for the person to confirm in the browser. */
+  sign_in: { user_code: string; approve_url: string; expires_at: string } | null;
+  /** Why the last sign-in ended without connecting. */
+  sign_in_error: string | null;
+  /** The Track address this build connects to unless told otherwise. */
+  default_server_url: string | null;
   simulated: boolean;
   version: string;
   /** The person's language; every string above is already in it (G27). */
@@ -122,8 +128,10 @@ const enrollForm = { server: "", code: "", name: "" };
 // The enrolment link last applied to the form, so typing over it isn't undone on the next view.
 let appliedLink = "";
 let fromLink = false;
-// IT deployed this computer (G26): connect with a work email and an emailed code.
-const managed = { step: "email" as "email" | "code", email: "", useAdminCode: false };
+// IT deployed this computer (G26): sign in, or connect with a work email and an emailed code.
+const managed = { step: "signin" as "signin" | "email" | "code", email: "", useAdminCode: false };
+// Signing in is the main way to connect; the code form is the alternative.
+const signIn = { server: "", editing: false, useCode: false };
 
 /** "rdtrack://enroll?server=…&code=…" pasted into the code field fills in both fields. */
 function linkParts(text: string): { server: string; code: string } | null {
@@ -778,12 +786,19 @@ function managedEnrollView(v: AppView, server: string): HTMLElement {
       enrollForm.code = "";
     });
   };
+  const go = (step: typeof managed.step): void => {
+    managed.step = step;
+    error = null;
+    render();
+  };
+  if (managed.step === "signin")
+    return signInView(v, server, false, h("button", { class: "link", type: "button", onclick: () => go("email") }, t("signin.otherWays")));
   const other = h(
     "div",
     { class: "small-links" },
     managed.step === "code"
-      ? h("button", { class: "link", type: "button", onclick: () => { managed.step = "email"; error = null; render(); } }, t("managed.again"))
-      : h("span", {}),
+      ? h("button", { class: "link", type: "button", onclick: () => go("email") }, t("managed.again"))
+      : h("button", { class: "link", type: "button", onclick: () => go("signin") }, t("signin.instead")),
     h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, t("managed.adminCode")),
   );
   const head = [
@@ -817,6 +832,232 @@ function managedEnrollView(v: AppView, server: string): HTMLElement {
   );
 }
 
+/** "track.example.com" for the server line; the address itself when it isn't a URL. */
+function hostOf(server: string): string {
+  try {
+    return new URL(server).host || server;
+  } catch {
+    return server;
+  }
+}
+
+// ----- signing in to connect ---------------------------------------------------------
+
+/** A 24px stroke icon from path data (Lucide-style, drawn here; no icon font). */
+function icon(paths: string[], size = 18, cls = ""): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  const attrs: Record<string, string> = { width: String(size), height: String(size), viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true" };
+  if (cls) attrs.class = cls;
+  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
+  for (const d of paths) {
+    const path = document.createElementNS(SVG_NS, "path");
+    path.setAttribute("d", d);
+    svg.append(path);
+  }
+  return svg;
+}
+const ICONS = {
+  external: ["M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"],
+  lock: ["M7 11V7a5 5 0 0 1 10 0v4", "M5 11h14v10H5z"],
+  laptop: ["M4 5h16v10H4z", "M2 19h20"],
+  browser: ["M3 4h18v16H3z", "M3 9h18", "M7 6.5h.01", "M10 6.5h.01"],
+  check: ["M20 6 9 17l-5-5"],
+  alert: ["M12 8v5", "M12 16.5h.01", "M10.3 3.9 1.8 18.5A2 2 0 0 0 3.5 21.5h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"],
+};
+
+/** Signing in moves through three steps; the bar shows where the person is. */
+function stepsBar(at: 1 | 2 | 3): HTMLElement {
+  return h(
+    "div",
+    { class: "steps-bar", role: "img", "aria-label": t("signin.stepOf", { n: String(at) }) },
+    ...[1, 2, 3].map((n) => h("span", { class: n < at ? "done" : n === at ? "on" : "" })),
+  );
+}
+
+function brandHead(): HTMLElement {
+  return h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }));
+}
+
+function alertLine(text: string): HTMLElement {
+  return h("p", { class: "alert", role: "alert" }, icon(ICONS.alert, 16), h("span", {}, text));
+}
+
+/** "9:41" left until `expiresAt`, or null once it has passed. */
+function timeLeft(expiresAt: string): string | null {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const s = Math.ceil(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+// The countdown ticks on its own: the view only arrives when something changes.
+setInterval(() => {
+  const el = document.getElementById("signin-left");
+  const at = el?.dataset.expires;
+  if (el && at) el.textContent = t("signin.expiresIn", { left: timeLeft(at) ?? "0:00" });
+}, 1000);
+// "Browser didn't open?" shows the address to open by hand.
+let showLink = false;
+// A sign-in was waiting; when the app then starts, say "You're connected" once.
+let wasSigningIn = false;
+let justConnected = false;
+
+/** Waiting for the person to confirm in the browser: the code to compare, and a way out. */
+function signInWaitingView(s: NonNullable<AppView["sign_in"]>): HTMLElement {
+  const [a, b] = s.user_code.split("-");
+  const tiles = (part: string | undefined): HTMLElement[] => [...(part ?? "")].map((c) => h("span", { class: "tile" }, c));
+  return h(
+    "section",
+    { class: "popover signin" },
+    brandHead(),
+    stepsBar(2),
+    h("span", { class: "eyebrow" }, t("signin.step2")),
+    h("h1", { class: "title" }, t("signin.waitTitle")),
+    h(
+      "div",
+      { class: "link-visual", "aria-hidden": "true" },
+      h("span", { class: "end" }, icon(ICONS.laptop, 22)),
+      h("span", { class: "wire" }, h("span", { class: "spark" })),
+      h("span", { class: "end" }, icon(ICONS.browser, 22)),
+    ),
+    h(
+      "div",
+      { class: "code-card" },
+      h("span", { class: "hint" }, t("signin.codeLabel")),
+      h(
+        "div",
+        { class: "tiles mono", role: "text", "aria-label": s.user_code.split("").join(" ") },
+        ...tiles(a),
+        h("span", { class: "dash" }, "–"),
+        ...tiles(b),
+      ),
+      h("span", { class: "hint" }, t("signin.codeCheck")),
+    ),
+    h(
+      "p",
+      { class: "waiting", role: "status" },
+      h("span", { class: "pulse", "aria-hidden": "true" }),
+      h("span", {}, t("signin.waiting")),
+      h("span", { id: "signin-left", class: "left mono", "data-expires": s.expires_at }, t("signin.expiresIn", { left: timeLeft(s.expires_at) ?? "0:00" })),
+    ),
+    error && alertLine(error),
+    h(
+      "div",
+      { class: "actions one" },
+      h("button", { class: "btn-outline-light with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen")),
+    ),
+    showLink && h("p", { class: "manual-link" }, h("span", { class: "hint" }, t("signin.openByHand")), h("span", { class: "url mono" }, s.approve_url)),
+    h(
+      "div",
+      { class: "small-links" },
+      h("button", { class: "link", type: "button", disabled: busy, onclick: () => void run(async () => { showLink = false; wasSigningIn = false; view = await invoke<AppView>("cancel_sign_in"); }) }, t("signin.cancel")),
+      !showLink && h("button", { class: "link", type: "button", onclick: () => { showLink = true; render(); } }, t("signin.noBrowser")),
+    ),
+  );
+}
+
+/** Just connected by signing in: say so once, then the main view. */
+function connectedView(v: AppView): HTMLElement {
+  return h(
+    "section",
+    { class: "popover signin" },
+    brandHead(),
+    stepsBar(3),
+    h("div", { class: "success-mark", "aria-hidden": "true" }, icon(ICONS.check, 34, "draw")),
+    h("h1", { class: "title center" }, t("signin.doneTitle")),
+    h("p", { class: "muted center" }, t("signin.doneBody", { host: hostOf(v.server_url ?? "") })),
+    h(
+      "ul",
+      { class: "promise" },
+      h("li", {}, icon(ICONS.lock, 16), h("span", {}, t("signin.private"))),
+      h("li", {}, icon(ICONS.check, 16), h("span", {}, t("signin.doneWhat"))),
+    ),
+    h("div", { class: "actions one push" }, h("button", { class: "btn-action", type: "button", onclick: () => { justConnected = false; render(); } }, t("signin.doneButton"))),
+  );
+}
+
+/**
+ * The main way to connect: sign in on the web. `server` is the address to use, or "" when
+ * none is known yet (then the field shows); `changeable` lets the person pick another one.
+ * `left` is the footer's left link (the other way to connect).
+ */
+function signInView(v: AppView, server: string, changeable: boolean, left: HTMLElement): HTMLElement {
+  if (v.sign_in) return signInWaitingView(v.sign_in);
+  const editing = !server || signIn.editing;
+  const builtIn = v.default_server_url;
+  const submit = (e: Event): void => {
+    e.preventDefault();
+    const target = (editing ? signIn.server : server).trim();
+    void run(async () => {
+      showLink = false;
+      view = await invoke<AppView>("sign_in", { serverUrl: target, deviceName: null });
+      signIn.server = target;
+      signIn.editing = false;
+    });
+  };
+  const step = (n: string, title: string, body: string): HTMLElement =>
+    h("li", {}, h("span", { class: "num mono" }, n), h("span", { class: "text" }, h("strong", {}, title), h("span", {}, body)));
+  let serverPart: HTMLElement | null = null;
+  if (editing)
+    serverPart = h(
+      "div",
+      { class: "server-edit" },
+      h(
+        "label",
+        { class: "field" },
+        t("enroll.server"),
+        h("input", {
+          value: signIn.server,
+          type: "url",
+          placeholder: "https://track.example.com",
+          required: true,
+          autocomplete: "url",
+          spellcheck: false,
+          disabled: busy,
+          oninput: (e: Event) => (signIn.server = (e.target as HTMLInputElement).value),
+        }),
+      ),
+      builtIn &&
+        h("button", { class: "link inline", type: "button", disabled: busy, onclick: () => { signIn.server = builtIn; signIn.editing = false; error = null; render(); } }, t("signin.useDefault", { host: hostOf(builtIn) })),
+    );
+  else if (server !== builtIn || !changeable)
+    serverPart = h(
+      "p",
+      { class: "server-chip" },
+      h("span", { class: "label mono" }, t("signin.serverLabel")),
+      h("span", { class: "host" }, hostOf(server)),
+      changeable && h("button", { class: "link inline", type: "button", disabled: busy, onclick: () => { signIn.server = server; signIn.editing = true; render(); } }, t("signin.change")),
+    );
+  const otherServer =
+    changeable && !editing && server === builtIn
+      ? h("button", { class: "link", type: "button", disabled: busy, onclick: () => { signIn.server = ""; signIn.editing = true; render(); } }, t("signin.otherServer"))
+      : h("span", {});
+  const problem = (v.phase === "error" && v.error) || error || v.sign_in_error;
+  return h(
+    "form",
+    { class: "popover signin", onsubmit: submit },
+    brandHead(),
+    stepsBar(1),
+    h("h1", { class: "title" }, t("signin.title")),
+    h("p", { class: "muted" }, t("signin.intro")),
+    h(
+      "ol",
+      { class: "how" },
+      step("1", t("signin.s1"), t("signin.s1b")),
+      step("2", t("signin.s2"), t("signin.s2b")),
+      step("3", t("signin.s3"), t("signin.s3b")),
+    ),
+    serverPart,
+    problem && alertLine(problem),
+    h(
+      "div",
+      { class: "actions one" },
+      h("button", { class: "btn-action with-icon", type: "submit", disabled: busy }, busy ? t("signin.opening") : t("signin.button"), !busy && icon(ICONS.external, 16)),
+    ),
+    h("p", { class: "privacy" }, icon(ICONS.lock, 14), h("span", {}, t("signin.private"))),
+    h("div", { class: "small-links" }, left, otherServer),
+  );
+}
+
 function enrollView(v: AppView): HTMLElement {
   if (v.deployment && !managed.useAdminCode) return managedEnrollView(v, v.deployment.server_url);
   const p = v.enroll_prefill;
@@ -825,6 +1066,17 @@ function enrollView(v: AppView): HTMLElement {
     enrollForm.server = p.server_url;
     enrollForm.code = p.code;
     fromLink = true;
+    // A link brings a code: show the code form, filled in.
+    signIn.useCode = true;
+  }
+  if (!signIn.useCode || v.sign_in) {
+    const known = signIn.server || v.server_url || v.default_server_url || "";
+    return signInView(
+      v,
+      known,
+      true,
+      h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = true; error = null; if (!enrollForm.server) enrollForm.server = known; render(); } }, t("signin.haveCode")),
+    );
   }
   const input = (key: keyof typeof enrollForm, label: string, attrs: Record<string, unknown>): HTMLElement =>
     h(
@@ -876,6 +1128,12 @@ function enrollView(v: AppView): HTMLElement {
     input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }),
     error && h("p", { class: "error", role: "alert" }, error),
     h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
+    h(
+      "div",
+      { class: "small-links" },
+      h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = false; fromLink = false; error = null; render(); } }, t("signin.instead")),
+      h("span", {}),
+    ),
   );
 }
 
@@ -902,9 +1160,16 @@ function render(): void {
   const v = view;
   // The person's language from the Rust side; before the first view, the computer's (G27).
   setLang(v?.lang ?? browserLang());
+  if (v?.sign_in) wasSigningIn = true;
+  else if (v?.sign_in_error) wasSigningIn = false;
+  else if (wasSigningIn && v && (v.phase === "starting" || v.phase === "running")) {
+    wasSigningIn = false;
+    justConnected = true;
+  }
   let content: HTMLElement;
   if (!v) content = simpleView(t("app.starting"));
   else if (notice) content = noticeView(notice.data, notice.review);
+  else if (justConnected && v.phase !== "enroll" && v.phase !== "revoked") content = connectedView(v);
   else if (v.phase === "enroll" || (v.phase === "error" && !v.server_url)) content = enrollView(v);
   else if (v.phase === "revoked") content = revokedView();
   else if (v.phase === "error") content = simpleView(v.error ?? t("error.couldNotStart"));

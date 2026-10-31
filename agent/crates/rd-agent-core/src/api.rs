@@ -5,6 +5,20 @@
 //! fields default), so a server-side addition never breaks an agent in the field.
 //! Nothing here logs request or response bodies.
 
+/// The RoundDigital Track service this app connects to unless told otherwise. A build for
+/// another deployment sets `RD_DEFAULT_SERVER_URL` at build time (an empty value means no
+/// built-in server: the app then asks for one).
+pub const PRODUCTION_SERVER_URL: &str = "https://rounddigital.co";
+
+/// The server this build connects to unless told otherwise, if any (see
+/// [`PRODUCTION_SERVER_URL`]).
+pub fn default_server_url() -> Option<&'static str> {
+    match option_env!("RD_DEFAULT_SERVER_URL") {
+        Some(s) => Some(s.trim()).filter(|s| !s.is_empty()),
+        None => Some(PRODUCTION_SERVER_URL),
+    }
+}
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -54,6 +68,55 @@ pub struct EmailCodeRequest {
     pub deployment_key: String,
     /// The person's work email.
     pub email: String,
+}
+
+/// `POST /v1/devices/link-requests` request (public): the app asks to be connected by
+/// the person signing in on the web.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkRequestCreate {
+    /// Human-readable device name.
+    pub device_name: String,
+    /// Operating system.
+    pub os: Os,
+}
+
+/// `POST /v1/devices/link-requests` response (`201`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkRequestCreated {
+    /// The request to poll.
+    pub request_id: String,
+    /// Short code (`ABCD-2345`) shown both here and on the web page, to check they match.
+    pub user_code: String,
+    /// Only this app knows it; it alone can collect the result.
+    pub poll_secret: String,
+    /// Where the person signs in and confirms.
+    pub approve_url: String,
+    /// When the request lapses.
+    pub expires_at: DateTime<Utc>,
+    /// How often to poll, in seconds.
+    #[serde(default = "default_link_interval")]
+    pub interval_seconds: u64,
+}
+
+fn default_link_interval() -> u64 {
+    5
+}
+
+/// `POST /v1/devices/link-requests/{id}/token` request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkTokenRequest {
+    /// The secret from [`LinkRequestCreated`].
+    pub poll_secret: String,
+}
+
+/// `POST /v1/devices/link-requests/{id}/token` response (`200`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LinkTokenResponse {
+    /// `pending` until the person confirms, then `approved` (once).
+    pub status: String,
+    /// The one-time enrollment code, with `approved`.
+    #[serde(default)]
+    pub enrollment_code: Option<String>,
 }
 
 /// `POST /v1/devices/enroll` request.
@@ -654,6 +717,38 @@ impl ApiClient {
         Ok(())
     }
 
+    /// `POST /v1/devices/link-requests` (public): starts signing in from the browser.
+    pub fn create_link_request(
+        &self,
+        req: &LinkRequestCreate,
+    ) -> Result<LinkRequestCreated, ApiError> {
+        self.call(
+            Method::Post,
+            self.url("/devices/link-requests"),
+            Some(Self::json(req)?),
+            false,
+        )
+    }
+
+    /// `POST /v1/devices/link-requests/{id}/token` (public, authorised by the poll secret):
+    /// `pending` until the person confirms in the browser, then the enrollment code once.
+    /// `410 link_denied` / `410 link_expired` / `404 not_found` end the request.
+    pub fn poll_link_token(
+        &self,
+        request_id: &str,
+        req: &LinkTokenRequest,
+    ) -> Result<LinkTokenResponse, ApiError> {
+        self.call(
+            Method::Post,
+            self.url(&format!(
+                "/devices/link-requests/{}/token",
+                percent_encode(request_id)
+            )),
+            Some(Self::json(req)?),
+            false,
+        )
+    }
+
     /// `POST /v1/device/heartbeat`.
     pub fn heartbeat(&self, req: &HeartbeatRequest) -> Result<HeartbeatResponse, ApiError> {
         self.call(
@@ -793,6 +888,16 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn connects_to_rounddigital_unless_built_for_another_server() {
+        assert_eq!(PRODUCTION_SERVER_URL, "https://rounddigital.co");
+        match option_env!("RD_DEFAULT_SERVER_URL") {
+            None => assert_eq!(default_server_url(), Some(PRODUCTION_SERVER_URL)),
+            Some(s) if s.trim().is_empty() => assert_eq!(default_server_url(), None),
+            Some(s) => assert_eq!(default_server_url(), Some(s.trim())),
+        }
+    }
+
+    #[test]
     fn enroll_request_and_response_shapes() {
         let t = FakeTransport::new();
         t.push(
@@ -822,6 +927,81 @@ mod tests {
             json!({"enrollment_code": "ABCDEFGHJK", "device_name": "laptop", "os": "macos",
                    "os_version": "15.1", "agent_version": "0.1.0"})
         );
+    }
+
+    #[test]
+    fn link_requests_are_public_and_lenient() {
+        let t = FakeTransport::new();
+        let api = ApiClient::new("https://x.test", t.clone()).with_credential("never-sent");
+        t.push(
+            201,
+            json!({"request_id": "r/1", "user_code": "ABCD-2345", "poll_secret": "s3cret",
+                   "approve_url": "https://x.test/connect/r1", "expires_at": "2026-10-31T10:10:00Z",
+                   "interval_seconds": 3, "extra": 1}),
+        );
+        let created = api
+            .create_link_request(&LinkRequestCreate {
+                device_name: "laptop".into(),
+                os: Os::Windows,
+            })
+            .unwrap();
+        assert_eq!(created.user_code, "ABCD-2345");
+        assert_eq!(created.interval_seconds, 3);
+        assert_eq!(
+            created.expires_at,
+            Utc.with_ymd_and_hms(2026, 10, 31, 10, 10, 0).unwrap()
+        );
+        let req = t.requests().remove(0);
+        assert_eq!(req.url, "https://x.test/v1/devices/link-requests");
+        assert!(!req.headers.iter().any(|(k, _)| k == "authorization"));
+        let body: serde_json::Value = serde_json::from_slice(&req.body.unwrap()).unwrap();
+        assert_eq!(body, json!({"device_name": "laptop", "os": "windows"}));
+
+        // The interval defaults when the server leaves it out.
+        t.push(
+            201,
+            json!({"request_id": "r", "user_code": "A", "poll_secret": "s",
+                   "approve_url": "u", "expires_at": "2026-10-31T10:10:00Z"}),
+        );
+        let c = api
+            .create_link_request(&LinkRequestCreate {
+                device_name: "x".into(),
+                os: Os::Linux,
+            })
+            .unwrap();
+        assert_eq!(c.interval_seconds, 5);
+
+        let secret = LinkTokenRequest {
+            poll_secret: "s3cret".into(),
+        };
+        t.push(200, json!({"status": "pending"}));
+        t.push(
+            200,
+            json!({"status": "approved", "enrollment_code": "ABCDEFGHJK"}),
+        );
+        t.push(
+            410,
+            json!({"error": {"code": "link_denied", "message": "x"}}),
+        );
+        t.push(429, json!({"error": {"code": "rate_limited"}}));
+        let p = api.poll_link_token("r/1", &secret).unwrap();
+        assert_eq!(p.status, "pending");
+        assert_eq!(p.enrollment_code, None);
+        let a = api.poll_link_token("r/1", &secret).unwrap();
+        assert_eq!(a.enrollment_code.as_deref(), Some("ABCDEFGHJK"));
+        let e = api.poll_link_token("r/1", &secret).unwrap_err();
+        assert_eq!(e.code(), Some("link_denied"));
+        let e = api.poll_link_token("r/1", &secret).unwrap_err();
+        assert!(matches!(e, ApiError::Http { status: 429, .. }));
+        let reqs = t.requests();
+        let poll = &reqs[reqs.len() - 1];
+        assert_eq!(
+            poll.url,
+            "https://x.test/v1/devices/link-requests/r%2F1/token"
+        );
+        assert!(!poll.headers.iter().any(|(k, _)| k == "authorization"));
+        let body: serde_json::Value = serde_json::from_slice(poll.body.as_ref().unwrap()).unwrap();
+        assert_eq!(body, json!({"poll_secret": "s3cret"}));
     }
 
     #[test]

@@ -8,6 +8,7 @@
 
 mod controller;
 mod link;
+mod signin;
 mod tray;
 mod updates;
 mod view;
@@ -64,6 +65,38 @@ async fn enroll(
     })
     .await?;
     Ok(ctl.view())
+}
+
+/// Signing in (the main way to connect): opens the organization's sign-in page in the
+/// browser and connects by itself once the person confirms there.
+#[tauri::command]
+async fn sign_in(
+    app: AppHandle,
+    ctl: Ctl<'_>,
+    server_url: String,
+    device_name: Option<String>,
+) -> Result<AppView, String> {
+    let server_url = server_url.trim().to_owned();
+    if !link::acceptable_server(&server_url) {
+        return Err(ctl.lang().messages().err_server_https.into());
+    }
+    let c = ctl.inner().clone();
+    let a = app.clone();
+    blocking(move || c.sign_in(a, &server_url, device_name)).await?;
+    ctl.emit(&app);
+    Ok(ctl.view())
+}
+
+#[tauri::command]
+fn cancel_sign_in(app: AppHandle, ctl: Ctl<'_>) -> AppView {
+    ctl.cancel_sign_in();
+    ctl.emit(&app);
+    ctl.view()
+}
+
+#[tauri::command]
+fn reopen_sign_in(app: AppHandle, ctl: Ctl<'_>) -> Result<(), String> {
+    ctl.reopen_sign_in(&app)
 }
 
 #[tauri::command]
@@ -393,6 +426,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             get_view,
             enroll,
+            sign_in,
+            cancel_sign_in,
+            reopen_sign_in,
             list_projects,
             prepare_session,
             start_session,
@@ -472,4 +508,50 @@ fn main() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    /// Quoted names between `start` and the next `end` in `text`.
+    fn names(text: &str, start: &str, end: &str) -> BTreeSet<String> {
+        let from = text.find(start).expect("start marker") + start.len();
+        let body = &text[from..from + text[from..].find(end).expect("end marker")];
+        body.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    /// A command the popover calls must be registered, listed in build.rs (which makes
+    /// its permission) and granted in the capability; a missing one fails only at run time.
+    #[test]
+    fn every_command_is_registered_permitted_and_granted() {
+        let handler = names(include_str!("main.rs"), "generate_handler![", "]");
+        let built: BTreeSet<String> = names(include_str!("../build.rs"), "const COMMANDS", "];")
+            .into_iter()
+            .filter(|w| w.contains('_') || w.chars().all(|c| c.is_ascii_lowercase()))
+            .filter(|w| !matches!(w.as_str(), "str" | "const" | "COMMANDS"))
+            .collect();
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/main.json"))
+                .expect("capability JSON");
+        // The app's own commands; plugin and core permissions are "plugin:allow-…".
+        let granted: BTreeSet<String> = capability["permissions"]
+            .as_array()
+            .expect("permissions")
+            .iter()
+            .filter_map(|p| {
+                p.as_str()?
+                    .strip_prefix("allow-")
+                    .map(|c| c.replace('-', "_"))
+            })
+            .collect();
+        assert_eq!(handler, built, "build.rs COMMANDS vs generate_handler!");
+        assert_eq!(
+            handler, granted,
+            "capabilities/main.json vs generate_handler!"
+        );
+    }
 }

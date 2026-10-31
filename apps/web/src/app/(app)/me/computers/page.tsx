@@ -94,10 +94,13 @@ function Connect() {
   return (
     <Card title={t('comp.connect')} subtitle={t('comp.connectSub')}>
       {!code ? (
-        <div>
-          <Button variant="primary" onClick={get} disabled={action.busy}>
-            {action.busy ? t('comp.getting') : t('comp.getCode')}
-          </Button>
+        <div className="stack" style={{ gap: 12 }}>
+          <p style={{ margin: 0 }}>{t('connect.cardHow')}</p>
+          <div>
+            <Button variant="quiet" onClick={get} disabled={action.busy}>
+              {action.busy ? t('comp.getting') : t('connect.cardOr')}
+            </Button>
+          </div>
         </div>
       ) : (
         <>

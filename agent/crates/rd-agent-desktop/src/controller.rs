@@ -9,12 +9,12 @@ use rd_agent::config::{self, Paths};
 use rd_agent::native::logic::PromptLedger;
 use rd_agent::native::{self, NativePlatform, Permission};
 use rd_agent::{credentials, http, setup, simulated};
-use rd_agent_core::api::{ApiClient, ApiError, DeviceProject};
+use rd_agent_core::api::{ApiClient, ApiError, DeviceProject, Os};
 use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::describe::format_duration;
 use rd_agent_core::events::StopReason;
-use rd_agent_core::i18n::Lang;
+use rd_agent_core::i18n::{fill, Lang};
 use rd_agent_core::platform::CredentialStore;
 use rd_agent_core::policy::PolicySettings;
 use rd_agent_core::runtime::{
@@ -24,7 +24,9 @@ use rd_agent_core::runtime::{
 use serde::Serialize;
 
 use crate::link::EnrollPrefill;
+use crate::signin::{self, SignInSlot, SignInView};
 use tauri::{AppHandle, Emitter};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::view::{
     self, Banner, BannerContext, IdleView, ReminderView, RemindersInput, RemindersView,
@@ -102,6 +104,12 @@ pub struct AppView {
     pub enroll_prefill: Option<EnrollPrefill>,
     /// IT deployed this computer for an organization (G26): connect with a work email.
     pub deployment: Option<DeploymentView>,
+    /// Signing in: waiting for the person to confirm in the browser.
+    pub sign_in: Option<SignInView>,
+    /// Why the last sign-in ended without connecting (one line).
+    pub sign_in_error: Option<String>,
+    /// The Track address this build connects to unless told otherwise.
+    pub default_server_url: Option<&'static str>,
     /// Simulated platform (Linux development build).
     pub simulated: bool,
     /// App version.
@@ -126,6 +134,7 @@ struct Inner {
     update: Option<String>,
     enroll_prefill: Option<EnrollPrefill>,
     deployment: Option<config::Deployment>,
+    sign_in_error: Option<String>,
     /// The computer's own language (before the server says, or when the person has no choice).
     system_lang: Lang,
     /// The person's language from the server, remembered between starts.
@@ -162,6 +171,12 @@ pub struct Controller {
     inner: Mutex<Inner>,
     handle: Mutex<Option<AgentHandle>>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    sign_in: SignInSlot,
+}
+
+/// The Track address built in (rounddigital.co, or `RD_DEFAULT_SERVER_URL` at build time).
+pub fn default_server_url() -> Option<&'static str> {
+    rd_agent_core::api::default_server_url()
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -212,6 +227,7 @@ impl Controller {
             }),
             handle: Mutex::new(None),
             thread: Mutex::new(None),
+            sign_in: SignInSlot::default(),
         })
     }
 
@@ -358,6 +374,7 @@ impl Controller {
     /// Stops the session (if any), lets the runtime flush (bounded) and waits for the
     /// tick thread. Used by Quit and by OS shutdown.
     pub fn shutdown(&self) {
+        self.sign_in.cancel();
         {
             let mut i = lock(&self.inner);
             if i.phase == Some(Phase::Running) {
@@ -402,9 +419,118 @@ impl Controller {
             i.notices.clear();
             i.dismissed.clear();
             i.error = None;
+            i.sign_in_error = None;
         }
+        // A code from the administrator or a link connects too: stop waiting for the browser.
+        self.sign_in.cancel();
         self.spawn_runtime(app);
         Ok(())
+    }
+
+    /// Whether this computer is waiting to be connected (so signing in makes sense).
+    fn connectable(&self) -> bool {
+        let i = lock(&self.inner);
+        match i.phase {
+            Some(Phase::Enroll | Phase::Revoked) => true,
+            Some(Phase::Error) => i.server_url.is_none(),
+            _ => false,
+        }
+    }
+
+    /// Starts signing in (blocking: asks the server, then opens the browser) and waits for
+    /// the person to confirm on a poller thread, which then connects this computer.
+    pub fn sign_in(
+        self: &Arc<Self>,
+        app: AppHandle,
+        server: &str,
+        device_name: Option<String>,
+    ) -> Result<(), String> {
+        if !self.connectable() {
+            return Err(self.lang().messages().signin_already.into());
+        }
+        let start = setup::start_sign_in(server, device_name, Os::current(), self.lang())?;
+        if !signin::openable(&start.approve_url) {
+            return Err(fill(
+                self.lang().messages().signin_failed,
+                &[("error", "the sign-in page address is not a web page")],
+            ));
+        }
+        let generation = self.sign_in.begin(start.clone());
+        lock(&self.inner).sign_in_error = None;
+        self.open_sign_in_page(&app, &start.approve_url);
+        let me = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("rd-agent-sign-in".into())
+            .spawn(move || {
+                let end = setup::wait_for_sign_in(
+                    &start,
+                    || setup::poll_sign_in(&start, me.lang()),
+                    |d| me.sign_in.pause(generation, d),
+                    Utc::now,
+                );
+                me.finish_sign_in(&app, generation, &start, end);
+            });
+        if let Err(e) = spawned {
+            self.sign_in.cancel();
+            return Err(fill(
+                self.lang().messages().signin_failed,
+                &[("error", &e.to_string())],
+            ));
+        }
+        Ok(())
+    }
+
+    /// On the poller thread: connects with the code, or says why not. Ignored when this
+    /// sign-in was cancelled or replaced meanwhile.
+    fn finish_sign_in(
+        self: &Arc<Self>,
+        app: &AppHandle,
+        generation: u64,
+        start: &setup::LinkStart,
+        end: setup::SignInEnd,
+    ) {
+        if !self.sign_in.end(generation) {
+            return;
+        }
+        let error = match end {
+            setup::SignInEnd::Approved(code) => self
+                .enroll(
+                    app.clone(),
+                    &start.server,
+                    &code,
+                    Some(start.device_name.clone()),
+                )
+                .err(),
+            other => setup::sign_in_end_message(&other, self.lang()),
+        };
+        if let Some(e) = error {
+            log::info!("sign-in ended without connecting: {e}");
+            lock(&self.inner).sign_in_error = Some(e);
+        }
+        self.emit(app);
+    }
+
+    /// Stops waiting for the browser.
+    pub fn cancel_sign_in(&self) {
+        self.sign_in.cancel();
+        lock(&self.inner).sign_in_error = None;
+    }
+
+    /// Opens the sign-in page again (the person closed the tab).
+    pub fn reopen_sign_in(&self, app: &AppHandle) -> Result<(), String> {
+        let url = self
+            .sign_in
+            .approve_url()
+            .ok_or(self.lang().messages().signin_expired)?;
+        self.open_sign_in_page(app, &url);
+        Ok(())
+    }
+
+    fn open_sign_in_page(&self, app: &AppHandle, url: &str) {
+        // Best effort: the popover keeps "Open the browser again" for when this fails.
+        if let Err(e) = app.opener().open_url(url, None::<&str>) {
+            log::info!("could not open the browser: {e}");
+        }
     }
 
     /// Back to the enrollment screen after revocation.
@@ -797,6 +923,9 @@ impl Controller {
             deployment: i.deployment.as_ref().map(|d| DeploymentView {
                 server_url: d.server.clone(),
             }),
+            sign_in: self.sign_in.view(),
+            sign_in_error: i.sign_in_error.clone(),
+            default_server_url: default_server_url(),
             simulated: self.simulated,
             version: env!("CARGO_PKG_VERSION"),
         }

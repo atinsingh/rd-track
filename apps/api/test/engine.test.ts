@@ -196,9 +196,10 @@ describe('row-level security on the engine tables', () => {
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attname = 'organization_id' AND NOT a.attisdropped
       WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT (c.relrowsecurity AND c.relforcerowsecurity)
       ORDER BY 1`);
-    // Three exceptions, none read through a tenant session: signup_requests exist before
-    // their organization does, deletion_certificates outlive the organization they describe,
-    // and sso_login_states are read before anyone is signed in.
-    expect(r.rows.map((x) => x.relname)).toEqual(['deletion_certificates', 'signup_requests', 'sso_login_states']);
+    // The exceptions: signup_requests exist before their organization does,
+    // deletion_certificates outlive the organization they describe, sso_login_states are read
+    // before anyone is signed in, and device_link_requests belong to no organization until
+    // someone confirms one (the desktop app polls them signed out).
+    expect(r.rows.map((x) => x.relname)).toEqual(['deletion_certificates', 'device_link_requests', 'signup_requests', 'sso_login_states']);
   });
 });

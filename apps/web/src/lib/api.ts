@@ -21,6 +21,7 @@ import type {
   OrganizationLifecycle,
   SupportGrantDTO,
   AgentDownloadsResponse,
+  LinkRequestView,
   AdminProjectDTO,
   UserImportResponse,
   AdminOverview,
@@ -456,6 +457,10 @@ export const rd = {
     /** A one-time code to connect one of my own computers (self-enrolment, G12). */
     enrollmentCode: () => post<EnrollmentCodeResponse>('/v1/me/enrollment-code', {}),
     agentDownloads: (signal?: AbortSignal) => get<AgentDownloadsResponse>('/v1/agent/downloads', { signal }),
+    /** Signing in to connect: the request the desktop app opened, to confirm or cancel. */
+    linkRequest: (id: string, signal?: AbortSignal) => get<LinkRequestView>(`/v1/devices/link-requests/${enc(id)}`, { signal }),
+    approveLink: (id: string) => post<{ status: 'approved' }>(`/v1/devices/link-requests/${enc(id)}/approve`),
+    denyLink: (id: string) => post<{ status: 'denied' }>(`/v1/devices/link-requests/${enc(id)}/deny`),
     /** Everything Track holds about me, as a ZIP (G18). */
     dataExports: (signal?: AbortSignal) => list<DataExportDTO>('/v1/me/data-exports', { signal }),
     requestDataExport: () => post<DataExportDTO>('/v1/me/data-exports'),

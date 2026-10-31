@@ -7,12 +7,12 @@
 aws_account_id = "111111111111"
 region         = "ca-central-1"
 
-app_domain = "staging.track.rounddigital.example"
+app_domain = "staging.rounddigital.co"
 # Hosted zone in THIS account containing app_domain/ses_domain; omit to do DNS by hand.
 # route53_zone_id = "Z0123456789ABCDEFGHIJ"
 
-ses_domain = "staging.track.rounddigital.example"
-email_from = "RoundDigital Track (staging) <no-reply@staging.track.rounddigital.example>"
+ses_domain = "staging.rounddigital.co"
+email_from = "RoundDigital Track (staging) <no-reply@staging.rounddigital.co>"
 
 policy_signing_key_id = "staging-1"
 billing_provider      = "manual"

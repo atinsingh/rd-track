@@ -122,3 +122,38 @@ export interface DeviceScheduleTodayResponse {
   shift: { start_at: string; end_at: string } | null;
   day_off: 'holiday' | 'cancelled' | 'leave' | null;
 }
+
+// ───────────── signing in to connect a computer ─────────────
+
+/**
+ * `POST /v1/devices/link-requests` (public): the desktop app asks to be connected. The
+ * person then signs in on the web (`approve_url`), checks `user_code` matches the app and
+ * confirms; the app polls `…/token` with `poll_secret` and enrolls with the code it gets.
+ */
+export const linkRequestCreate = z.strictObject({
+  device_name: z.string().trim().min(1).max(200),
+  os: z.enum(['windows', 'macos', 'linux']),
+});
+export interface LinkRequestCreated {
+  request_id: string;
+  /** "ABCD-2345": shown in the app and on the web page, so the person can check they match. */
+  user_code: string;
+  /** Only the app knows it; it alone can collect the result. */
+  poll_secret: string;
+  approve_url: string;
+  expires_at: string;
+  interval_seconds: number;
+}
+export type LinkRequestStatus = 'pending' | 'approved' | 'denied' | 'used' | 'expired';
+/** `GET /v1/devices/link-requests/:id`, for the signed-in person's confirmation page. */
+export interface LinkRequestView {
+  request_id: string;
+  device_name: string;
+  os: 'windows' | 'macos' | 'linux';
+  user_code: string;
+  status: LinkRequestStatus;
+  expires_at: string;
+}
+export const linkTokenRequest = z.strictObject({ poll_secret: z.string().min(16).max(200) });
+/** `POST /v1/devices/link-requests/:id/token`: pending until approved, then a one-time enrollment code. */
+export type LinkTokenResponse = { status: 'pending' } | { status: 'approved'; enrollment_code: string };
