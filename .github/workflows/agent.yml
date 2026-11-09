@@ -98,6 +98,8 @@ jobs:
   bundle:
     name: Installers (${{ matrix.name }})
     needs: [fmt, check]
+    # Signing secrets live in the "release" environment: each run waits for approval.
+    environment: release
     if: github.event_name != 'pull_request'
     permissions:
       contents: write
