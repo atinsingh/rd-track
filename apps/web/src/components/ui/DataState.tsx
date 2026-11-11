@@ -1,26 +1,29 @@
 import type { ReactNode } from 'react';
 import { describeError, type ApiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { Button } from './Button';
 import s from './ui.module.css';
 
-export function Loading({ label = 'Loading' }: { label?: string }) {
+export function Loading({ label }: { label?: string }) {
+  const t = useT();
   return (
     <div className={s.state} role="status" aria-live="polite">
       <span className={s.loadingBar} aria-hidden="true" />
-      <span className="small">{label}…</span>
+      <span className="small">{label ?? t('common.loading')}…</span>
     </div>
   );
 }
 
 export function ErrorState({ error, onRetry, title }: { error: ApiError; onRetry?: () => void; title?: string }) {
+  const t = useT();
   return (
     <div className={s.state} role="alert">
-      <span className={s.stateTitle}>{title ?? "Couldn't load this"}</span>
+      <span className={s.stateTitle}>{title ?? t('common.couldNotLoad')}</span>
       <span>{describeError(error)}</span>
-      {error.requestId ? <span className={s.requestId}>Request ID {error.requestId}</span> : null}
+      {error.requestId ? <span className={s.requestId}>{t('common.requestId', { id: error.requestId })}</span> : null}
       {onRetry ? (
         <Button size="sm" variant="quiet" onClick={onRetry}>
-          Try again
+          {t('common.tryAgain')}
         </Button>
       ) : null}
     </div>
@@ -38,11 +41,12 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 
 /** Inline error after a failed action (form submit, button). */
 export function ActionError({ error }: { error: ApiError | null | undefined }) {
+  const t = useT();
   if (!error) return null;
   return (
     <p role="alert" className={s.fieldError}>
       {describeError(error)}
-      {error.requestId ? <span className={s.requestId}> · Request ID {error.requestId}</span> : null}
+      {error.requestId ? <span className={s.requestId}> · {t('common.requestId', { id: error.requestId })}</span> : null}
     </p>
   );
 }

@@ -101,10 +101,11 @@ describe('rates', () => {
     expect(ready.body.download_url).toBeTruthy();
     const csv = (await env.store.get(`payroll/${org.id}/${exp.body.id}.csv`))!.toString();
     const lines = csv.trim().split('\r\n');
-    expect(lines[0]).toBe('employee,email,period_from,period_to,hours,hourly_rate,currency,gross_pay,rate_effective_from');
-    expect(lines).toContain('money emp,emp@money.test,2026-10-24,2026-10-26,1.00,40.00,USD,40.00,2026-01-01');
-    expect(lines).toContain('money emp,emp@money.test,2026-10-24,2026-10-26,0.33,50.00,USD,16.50,2026-10-26');
-    expect(lines).toContain('money emp2,emp2@money.test,2026-10-24,2026-10-26,0.50,30.00,USD,15.00,2026-01-01');
+    // Reimbursements, bonus and deductions (F7, F8) are empty for people who have none.
+    expect(lines[0]).toBe('employee,email,period_from,period_to,hours,hourly_rate,currency,gross_pay,rate_effective_from,reimbursements,bonus,deductions');
+    expect(lines).toContain('money emp,emp@money.test,2026-10-24,2026-10-26,1.00,40.00,USD,40.00,2026-01-01,,,');
+    expect(lines).toContain('money emp,emp@money.test,2026-10-24,2026-10-26,0.33,50.00,USD,16.50,2026-10-26,,,');
+    expect(lines).toContain('money emp2,emp2@money.test,2026-10-24,2026-10-26,0.50,30.00,USD,15.00,2026-01-01,,,');
     // The list never hands out download links (each link is an audited single read).
     expect((await adm.get('/v1/admin/payroll-exports')).body.items[0].download_url).toBeNull();
   });

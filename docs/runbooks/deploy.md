@@ -56,6 +56,56 @@ must `SET rd.org_id` itself.
 
 ## 1. First-time bootstrap (once per environment)
 
+### 1.0 A brand-new AWS account, on credits
+
+Only the account owner can do this part: AWS needs a card, a phone number and identity
+checks.
+
+1. **Create the account** at aws.amazon.com with a team mailbox (e.g. `aws-staging@…`),
+   not a person's address. Pick the **Paid** plan, or upgrade to it before step 4:
+   Activate requires it, and Free-plan credits carry over when you upgrade. Don't join
+   it to an AWS Organization or Control Tower yet: that ends the sign-up credits at once.
+2. **Lock down root:** hardware or app MFA on the root user, no root access keys, then
+   sign in as root only for billing and account settings.
+3. **An admin to work as:** IAM Identity Center (or, for a single account, an IAM user
+   with MFA) with `AdministratorAccess`; configure it as the `AWS_PROFILE` used below.
+4. **Credits:**
+   * Sign-up credits: USD 100 on a new account, plus up to USD 100 more for completing
+     the activities listed in the console (Billing › Credits).
+   * **AWS Activate Founders** (aws.amazon.com/activate): for self-funded companies that
+     have a company website, were founded in the last 10 years and have an account on
+     the Paid plan. It starts at USD 1,000, and selected startups get up to USD 5,000.
+     Apply with the company's domain email and website.
+   * **Activate Portfolio** (up to USD 100–200k) needs a code from an accelerator, VC
+     or incubator that is an Activate provider; ask any you work with.
+   * Check the current terms on AWS's pages before applying: amounts and rules change.
+5. **Guard the spend:** in Billing › Budgets, a monthly cost budget with alerts at 50%,
+   80% and 100%, emailed to the team. Turn on Cost Explorer and, under Billing
+   preferences, *receive Free Tier usage alerts*.
+6. **Region:** `ca-central-1` (as everywhere in this runbook).
+
+**What staging costs** (USD per month, `ca-central-1`, rough on-demand estimates before
+credits; check with the AWS Pricing Calculator):
+
+| | default staging | `lean = true` |
+|---|---|---|
+| Fargate tasks | 5 × 0.5 vCPU / 1 GB ≈ 100 | API 0.5/1 GB + web and worker 0.25/0.5 GB ≈ 40 |
+| Interface VPC endpoints | 4 services × 3 AZs ≈ 95 | none (through NAT) |
+| NAT gateway | ≈ 35 + data | ≈ 35 + data |
+| Load balancer | ≈ 20–25 | ≈ 20–25 |
+| RDS PostgreSQL | db.t4g.small, 20 GB ≈ 30 | db.t4g.micro, 20 GB ≈ 15 |
+| Public IPv4, KMS, Secrets Manager, logs, S3, SES | ≈ 20 | ≈ 15 |
+| **Total** | **≈ 300** | **≈ 130** |
+
+`lean = true` in `envs/staging/terraform.tfvars` is meant for an account running on
+credits: two AZs, no interface endpoints, one API and one web task, smaller web and
+worker tasks, and `db.t4g.micro`. It has no redundancy (a task or AZ failure is an
+outage until ECS replaces it), which is fine for testing and demos, not for customers.
+On sign-up credits alone (USD 200) a lean staging runs about six weeks; Activate Founders
+covers it for many months. To stop paying between test rounds, scale the services to
+zero and stop the database (`aws rds stop-db-instance`, which restarts by itself after
+seven days); the NAT gateway and load balancer still cost about USD 2 a day.
+
 Do staging end to end first, then production. You need admin access to the target
 account (SSO), Terraform ≥ 1.6, AWS CLI v2, `openssl` and `jq`.
 
@@ -399,11 +449,9 @@ AWS Backup cross-region/cross-account copy).
 
 ## 7. Follow-ups / known gaps
 
-* `apps/web/next.config.ts`: needs `output: 'standalone'` (the web Dockerfile requires
-  it), and should send `Strict-Transport-Security` itself, as defence in depth with the ALB.
-* `apps/api/package.json`: bundle `src/cli/create-platform-admin.ts` (§1.8).
-* API `trustProxy: true` trusts the whole `X-Forwarded-For` chain, so a client can spoof
-  its IP and dodge the per-IP login rate limit. Behind exactly one ALB, use `trustProxy: 1`.
+* `apps/web/next.config.ts` should send `Strict-Transport-Security` itself, as defence in
+  depth with the ALB. (`output: 'standalone'`, bundling `create-platform-admin` and
+  trusting only the ALB's hop in `X-Forwarded-For` are done.)
 * Policy signing key dual-key rotation and `APP_ENCRYPTION_KEY` key ring (§6).
 * Cross-region/cross-account backup copies (AWS Backup) for regional DR.
 * AWS WAF on the ALB (rate-based rule on `/v1/auth/*`, AWS managed common rules).

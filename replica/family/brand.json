@@ -1,0 +1,16 @@
+{
+  "avoid": ["Qustodio", "Qustodio Kids", "Qustodio Family"],
+  "domains": ["qustodio.com", "help.qustodio.com", "static.qustodio.com"],
+  "colors": ["#35A777", "#6161FF", "#5C5CFF"],
+  "struck_names": ["Porchlight", "Kinlo", "Tandem", "Twofold", "Daylit", "Kinward", "Kinsee", "Ourglass", "Glasshouse", "Seesaw", "Lantern", "OurPact-like names"],
+  "palette": {
+    "primary": "#B4460C",
+    "primary_on_dark": "#FFB46B",
+    "lamp": "#F5A524",
+    "ink": "#0B0C0F",
+    "surface": "#FFFFFF",
+    "surface_warm": "#FFF7EC",
+    "muted": "#5B6370",
+    "info": "#0E7490"
+  }
+}

@@ -1,24 +1,34 @@
 import {
   MAX_BATCH_BYTES,
   devicePolicyQuery,
+  deviceWorkLimitsQuery,
   enrollRequest,
   eventBatchSchema,
   heartbeatRequest,
+  linkRequestCreate,
+  linkTokenRequest,
   screenshotCompleteRequest,
   sessionCreateRequest,
   sessionStopRequest,
   uploadIntentRequest,
   type DeviceProjectsResponse,
+  type DeviceScheduleTodayResponse,
+  type DeviceWorkLimitsResponse,
 } from '@rd/contracts';
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
-import { deviceOf } from '../http';
+import { deviceOf, userOf } from '../http';
 import { AppError, errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { assertLicensedForTracking } from './billing/service';
 import { enroll, heartbeat } from './devices/service';
+import { approveLinkRequest, collectLinkToken, createLinkRequest, denyLinkRequest, viewLinkRequest } from './devices/links';
+import { deviceUpdate } from './devices/updates';
 import { projectsForUser } from './org/service';
+import { deviceScheduleToday } from './scheduling/service';
+import { deviceWorkLimits } from './timesheets/service';
 import { ingestBatch } from './ingestion/service';
 import { signedPolicyForDevice } from './policy/service';
 import { completeUpload, createUploadIntent } from './screenshots/service';
@@ -38,9 +48,53 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
     },
   );
 
+  // Signing in to connect: the app opens a request, the person confirms it on the web, the
+  // app collects a one-time enrollment code with its poll secret (see devices/links.ts).
+  app.post(
+    '/v1/devices/link-requests',
+    { config: { auth: 'public', rateLimit: { max: 10, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const body = parse(linkRequestCreate, req.body);
+      return reply.code(201).send(await withTx(pool, (tx) => createLinkRequest(deps, tx, body)));
+    },
+  );
+  const linkId = z.object({ id: z.string().max(64) });
+  app.get('/v1/devices/link-requests/:id', { config: { auth: 'user' } }, async (req) => {
+    userOf(req);
+    const { id } = parse(linkId, req.params);
+    return viewLinkRequest(deps, pool, id);
+  });
+  app.post('/v1/devices/link-requests/:id/approve', { config: { auth: 'user' } }, async (req) => {
+    const a = userOf(req);
+    const { id } = parse(linkId, req.params);
+    return withTx(pool, (tx) => approveLinkRequest(deps, tx, a, id, req.id));
+  });
+  app.post('/v1/devices/link-requests/:id/deny', { config: { auth: 'user' } }, async (req) => {
+    userOf(req);
+    const { id } = parse(linkId, req.params);
+    return withTx(pool, (tx) => denyLinkRequest(deps, tx, id));
+  });
+  app.post(
+    '/v1/devices/link-requests/:id/token',
+    { config: { auth: 'public', rateLimit: { max: 120, timeWindow: '1 minute' } } },
+    async (req) => {
+      const { id } = parse(linkId, req.params);
+      const body = parse(linkTokenRequest, req.body);
+      return withTx(pool, (tx) => collectLinkToken(deps, tx, id, body.poll_secret));
+    },
+  );
+
   app.post('/v1/device/heartbeat', { config: { auth: 'device' } }, async (req) => {
     const body = parse(heartbeatRequest, req.body);
     return withTx(pool, (tx) => heartbeat(deps, tx, deviceOf(req), body));
+  });
+
+  // G10: the desktop app's updater asks here with its device credential.
+  const updateQuery = z.object({ target: z.string().max(20), arch: z.string().max(20), current_version: z.string().max(40) });
+  app.get('/v1/device/update', { config: { auth: 'device' } }, async (req, reply) => {
+    const q = parse(updateQuery, req.query);
+    const u = await deviceUpdate(deps.config.agentDownloads, pool, deviceOf(req), q, deps.now().getTime());
+    return u ? u : reply.code(204).send();
   });
 
   app.get('/v1/device/projects', { config: { auth: 'device' } }, async (req): Promise<DeviceProjectsResponse> => {
@@ -53,6 +107,16 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
     const { project_id } = parse(devicePolicyQuery, req.query);
     return signedPolicyForDevice(deps, pool, deviceOf(req), project_id ?? null);
   });
+
+  // Stage 4 F4 / F3: what the tray needs for limit warnings and reminders. Reads only the device's own user.
+  app.get('/v1/device/work-limits', { config: { auth: 'device' } }, async (req): Promise<DeviceWorkLimitsResponse> => {
+    const { exclude_session_id } = parse(deviceWorkLimitsQuery, req.query);
+    return deviceWorkLimits(deps, pool, deviceOf(req), exclude_session_id ?? null);
+  });
+
+  app.get('/v1/device/schedule-today', { config: { auth: 'device' } }, async (req): Promise<DeviceScheduleTodayResponse> =>
+    deviceScheduleToday(deps, pool, deviceOf(req)),
+  );
 
   app.post('/v1/ingestion/event-batches', { config: { auth: 'device' }, bodyLimit: MAX_BATCH_BYTES }, async (req) => {
     const batch = parse(eventBatchSchema, req.body);
@@ -110,6 +174,9 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
     // The discard is committed before the agent is told (SCR-02).
     if (r.status === 'discarded') {
       throw new AppError(403, 'session_not_active', 'The capture time is outside the active session; the image was discarded');
+    }
+    if (r.status === 'not_blurred') {
+      throw new AppError(403, 'blur_required', 'The policy blurs screenshots and this one was not blurred; it was discarded. Update the app.');
     }
     return r;
   });

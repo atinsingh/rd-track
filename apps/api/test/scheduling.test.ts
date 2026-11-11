@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { withScope } from '../src/db/tenant-scope';
 import { enqueue } from '../src/jobs/queue';
-import { runAccruals } from '../src/modules/scheduling/time-off';
+import { accrualDue, runAccruals } from '../src/modules/scheduling/time-off';
 import { login, makeOrg, type Org, type TestEnv, testEnv } from './helpers';
 
 /**
@@ -332,6 +332,34 @@ describe('time off', () => {
       ['accrual:10', 'accrual:10', 'accrual:5', 'accrual:10', 'carryover_expiry:-20'].sort(),
     );
     await at('2026-11-10T15:00:00Z');
+  });
+
+  it('credits on the 1st, the last day or the anniversary of the start date', async () => {
+    expect(accrualDue('per_month', 'first', '2025-06-17', '2026-10-01')).toBe('2026-10');
+    expect(accrualDue('per_month', 'last', '2025-06-17', '2026-10-30')).toBeNull();
+    expect(accrualDue('per_month', 'last', '2025-06-17', '2026-10-31')).toBe('2026-10');
+    expect(accrualDue('per_month', 'anniversary', '2025-06-17', '2026-10-16')).toBeNull();
+    expect(accrualDue('per_month', 'anniversary', '2025-06-17', '2026-10-17')).toBe('2026-10');
+    // The 31st falls on the last day of shorter months.
+    expect(accrualDue('per_month', 'anniversary', '2025-01-31', '2027-02-28')).toBe('2027-02');
+    expect(accrualDue('per_year', 'first', '2025-06-17', '2026-01-01')).toBe('2026');
+    expect(accrualDue('per_year', 'last', '2025-06-17', '2026-12-30')).toBeNull();
+    expect(accrualDue('per_year', 'last', '2025-06-17', '2026-12-31')).toBe('2026');
+    expect(accrualDue('per_year', 'anniversary', '2025-06-17', '2026-05-30')).toBeNull();
+    expect(accrualDue('per_year', 'anniversary', '2025-06-17', '2026-08-02')).toBe('2026');
+    expect(accrualDue('per_year', 'anniversary', '2024-02-29', '2026-02-28')).toBe('2026');
+
+    const p = await org.admin.post('/v1/admin/time-off/policies', { name: 'On the start day', kind: 'paid', accrual: 'per_month', accrual_hours: 8, accrual_day: 'anniversary' });
+    expect(p.body.accrual_day).toBe('anniversary');
+    await org.admin.post('/v1/admin/time-off/assignments', { policy_id: p.body.id, user_id: id('emp2'), start_date: '2026-09-20' });
+    const bal = async () => (await balance('emp2', p.body.id)).balance_hours;
+    await runAccruals(env.deps, new Date('2026-10-19T12:00:00Z'));
+    expect(await bal()).toBe(0);
+    await runAccruals(env.deps, new Date('2026-10-20T12:00:00Z'));
+    await runAccruals(env.deps, new Date('2026-10-28T12:00:00Z'));
+    expect(await bal()).toBe(8);
+    const changed = await org.admin.req('PATCH', `/v1/admin/time-off/policies/${p.body.id}`, { accrual_day: 'last' });
+    expect(changed.body.accrual_day).toBe('last');
   });
 
   it('admins can adjust a balance with a note the employee sees', async () => {

@@ -6,7 +6,7 @@ export default function NotFound() {
       <span className="eyebrow">Not found</span>
       <h1>This page doesn&apos;t exist</h1>
       <p className="secondary">
-        It may have moved. <Link href="/me">Go to My day</Link>
+        It may have moved. <Link href="/">Go to your home page</Link>
       </p>
     </main>
   );

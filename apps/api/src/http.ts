@@ -1,9 +1,9 @@
 import type { OrgRole } from '@rd/contracts';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import type { DeviceActor, PlatformActor, UserActor } from './context';
+import type { ClientActor, DeviceActor, DirectoryActor, PlatformActor, UserActor } from './context';
 import { errors } from './lib/errors';
 
-export type AuthMode = 'user' | 'device' | 'platform' | 'public';
+export type AuthMode = 'user' | 'device' | 'platform' | 'directory' | 'client' | 'public';
 
 declare module 'fastify' {
   interface FastifyContextConfig {
@@ -16,11 +16,17 @@ declare module 'fastify' {
     user?: UserActor;
     device?: DeviceActor;
     platform?: PlatformActor;
+    directory?: DirectoryActor;
+    /** A client contact in the client portal (F9). */
+    client?: ClientActor;
+    /** The API token's caller (F5), set as soon as the token is recognised, for the audit. */
+    apiCaller?: UserActor;
   }
 }
 
 export const SESSION_COOKIE = 'rd_session';
 export const PLATFORM_COOKIE = 'rd_platform';
+export const CLIENT_COOKIE = 'rd_client';
 
 export function userOf(req: FastifyRequest): UserActor {
   if (!req.user) throw errors.unauthenticated();
@@ -37,6 +43,16 @@ export function platformOf(req: FastifyRequest): PlatformActor {
   return req.platform;
 }
 
+export function clientOf(req: FastifyRequest): ClientActor {
+  if (!req.client) throw errors.unauthenticated();
+  return req.client;
+}
+
+export function directoryOf(req: FastifyRequest): DirectoryActor {
+  if (!req.directory) throw errors.unauthenticated();
+  return req.directory;
+}
+
 export function requireRole(req: FastifyRequest, roles: readonly OrgRole[]): UserActor {
   const u = userOf(req);
   if (!roles.includes(u.orgRole)) throw errors.forbidden();
@@ -45,6 +61,8 @@ export function requireRole(req: FastifyRequest, roles: readonly OrgRole[]): Use
 
 export const ADMIN_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin'];
 export const AUDIT_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'auditor'];
+/** Money (rates, budgets, invoices, payroll): admins and the finance role (slice 4, G21). */
+export const MONEY_ROLES: readonly OrgRole[] = ['org_admin', 'super_admin', 'finance'];
 
 export function setSessionCookie(reply: FastifyReply, name: string, token: string, secure: boolean, maxAgeSec: number) {
   reply.setCookie(name, token, { httpOnly: true, secure, sameSite: 'strict', path: '/', maxAge: maxAgeSec });

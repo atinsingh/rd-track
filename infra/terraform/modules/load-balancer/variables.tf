@@ -50,7 +50,7 @@ variable "web_port" {
 variable "api_path_patterns" {
   description = "Paths routed to the API; everything else goes to the web app. At most five per rule."
   type        = list(string)
-  default     = ["/v1/*", "/platform/*", "/healthz"]
+  default     = ["/v1/*", "/platform/*", "/scim/*", "/healthz"]
 }
 
 variable "ssl_policy" {

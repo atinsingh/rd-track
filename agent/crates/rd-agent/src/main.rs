@@ -1,10 +1,13 @@
 //! `rd-agent`: the RoundDigital Track desktop agent (headless) and developer CLI.
 //!
 //! ```text
+//! rd-agent login                         # sign in from the browser (rounddigital.co)
+//! rd-agent login --server https://track.example.com   # … to another server
 //! rd-agent enroll --server https://track.example.com --code ABCDEFGHJK
 //! rd-agent run --project <id>            # native collectors (Windows, macOS)
 //! rd-agent run --project <id> --simulate # simulated platform (any OS, CI)
 //! rd-agent status
+//! rd-agent chrome-extension://<id>/     # started by a browser: the extension's native host
 //! ```
 
 use std::io::BufRead;
@@ -16,7 +19,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 use rd_agent::config::{self, Paths};
 use rd_agent::setup::{credential_store, open_outbox};
-use rd_agent::{http, native, setup, simulated};
+use rd_agent::{browser_host, http, native, setup, simulated};
+use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::events::StopReason;
 use rd_agent_core::platform::{secret_names, ForegroundApp, InputCounter, ScreenCapturer};
@@ -38,6 +42,18 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Cmd {
+    /// Connect this device by signing in from the browser (no code needed).
+    Login {
+        /// Server base URL (default: https://rounddigital.co).
+        #[arg(long)]
+        server: Option<String>,
+        /// Device name shown to administrators (default: host name).
+        #[arg(long)]
+        device_name: Option<String>,
+        /// Re-enroll even if this device is already enrolled (wipes local data).
+        #[arg(long)]
+        force: bool,
+    },
     /// Enroll this device with a one-time code from your administrator.
     Enroll {
         /// Server base URL, e.g. https://track.example.com
@@ -68,6 +84,10 @@ enum Cmd {
         /// Seed for the simulated platform and screenshot slots.
         #[arg(long)]
         seed: Option<u64>,
+        /// With --simulate: report this app in the foreground all the time (e.g.
+        /// `com.google.Chrome`, to try the browser extension).
+        #[arg(long, value_name = "APP_ID", requires = "simulate")]
+        foreground_app: Option<String>,
         /// Stop the session and exit after this many seconds.
         #[arg(long, value_name = "SECS")]
         duration: Option<u64>,
@@ -90,9 +110,28 @@ fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_target(false)
         .init();
+    // Started by a browser as the extension's native messaging host.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(family) = browser_host::host_family(&args) {
+        return match browser_host::run(&config::data_dir(None), family) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                log::error!("browser host: {e}");
+                ExitCode::from(1)
+            }
+        };
+    }
     let cli = Cli::parse();
     let paths = Paths::new(config::data_dir(cli.data_dir));
     let result = match cli.command {
+        Cmd::Login {
+            server,
+            device_name,
+            force,
+        } => match server.or_else(|| rd_agent_core::api::default_server_url().map(String::from)) {
+            Some(server) => login(&paths, &server, device_name, force),
+            None => Err("no server built in: pass --server <url>".into()),
+        },
         Cmd::Enroll {
             server,
             code,
@@ -104,6 +143,7 @@ fn main() -> ExitCode {
             task,
             simulate,
             seed,
+            foreground_app,
             duration,
             no_auto_start,
             stdin_control,
@@ -114,6 +154,7 @@ fn main() -> ExitCode {
                 task,
                 simulate,
                 seed,
+                foreground_app,
                 duration,
                 auto_start: !no_auto_start,
                 stdin_control,
@@ -146,11 +187,88 @@ fn enroll(
     Ok(ExitCode::SUCCESS)
 }
 
+/// Signs in from the browser: prints the page and the code to check, opens the browser
+/// when it can, waits for the confirmation and then enrolls with the code it brings.
+fn login(
+    paths: &Paths,
+    server: &str,
+    device_name: Option<String>,
+    force: bool,
+) -> Result<ExitCode, String> {
+    let creds = credential_store(paths);
+    if setup::is_enrolled(paths, creds.as_ref())? && !force {
+        return Err("this device is already enrolled (use --force to re-enroll)".into());
+    }
+    let lang = rd_agent_core::i18n::Lang::En;
+    let os = rd_agent_core::api::Os::current();
+    let start = setup::start_sign_in(server, device_name, os, lang)?;
+    println!(
+        "To connect this computer, sign in at:\n\n    {}\n",
+        start.approve_url
+    );
+    println!(
+        "Your browser will show the code {} \u{2014} check they match, then confirm.",
+        start.user_code
+    );
+    if !open_browser(&start.approve_url) {
+        println!("(Open the address above in your browser.)");
+    }
+    println!("Waiting for you to confirm in the browser… (Ctrl-C to stop)");
+    let end = setup::wait_for_sign_in(
+        &start,
+        || setup::poll_sign_in(&start, lang),
+        |d| {
+            std::thread::sleep(d);
+            true
+        },
+        chrono::Utc::now,
+    );
+    match end {
+        setup::SignInEnd::Approved(code) => enroll(
+            paths,
+            &start.server,
+            &code,
+            Some(start.device_name.clone()),
+            force,
+        ),
+        other => {
+            Err(setup::sign_in_end_message(&other, lang)
+                .unwrap_or_else(|| "signing in stopped".into()))
+        }
+    }
+}
+
+/// Opens `url` in the default browser, best effort (only web pages).
+fn open_browser(url: &str) -> bool {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return false;
+    }
+    let mut cmd = if cfg!(target_os = "windows") {
+        let mut c = std::process::Command::new("rundll32");
+        c.args(["url.dll,FileProtocolHandler", url]);
+        c
+    } else if cfg!(target_os = "macos") {
+        let mut c = std::process::Command::new("open");
+        c.arg(url);
+        c
+    } else {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(url);
+        c
+    };
+    cmd.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok()
+}
+
 struct RunArgs {
     project: Option<String>,
     task: Option<String>,
     simulate: bool,
     seed: Option<u64>,
+    foreground_app: Option<String>,
     duration: Option<u64>,
     auto_start: bool,
     stdin_control: bool,
@@ -169,7 +287,10 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
     let (input, foreground, capturer, platform_name): Collectors = if args.simulate {
         (
             Box::new(simulated::SimInput::new(seed)),
-            Box::new(simulated::SimForeground::new(seed)),
+            Box::new(match &args.foreground_app {
+                Some(id) => simulated::SimForeground::pinned(id),
+                None => simulated::SimForeground::new(seed),
+            }),
             Arc::new(simulated::SimCapturer::new(seed)),
             "simulated platform",
         )
@@ -186,7 +307,7 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
         RuntimeDeps {
             clock: Arc::new(SystemClock::new()),
             input,
-            foreground,
+            foreground: Box::new(BrowserAware::new(foreground, &paths.root)),
             capturer,
             transport: Arc::new(http::UreqTransport::new()),
             credentials: creds.clone(),

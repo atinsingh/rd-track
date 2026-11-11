@@ -11,6 +11,7 @@ import { rd } from '@/lib/api';
 import { formatDuration } from '@/lib/format';
 import { addDays, formatDayLabel, formatTime, toZonedInputs, todayInTz, zonedTimeToMs } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 
 export interface CorrectionDraft {
   date: string;
@@ -74,9 +75,9 @@ export function CorrectionSheet({
       open={open}
       onClose={onClose}
       variant="sheet"
-      eyebrow={session ? 'Correction' : 'Manual time'}
-      title={session ? 'Propose a correction' : 'Add manual time'}
-      description="Original values are kept and shown to your manager together with your reason."
+      eyebrow={session ? t('corr.eyebrowCorrection') : t('corr.eyebrowManual')}
+      title={session ? t('corr.titleCorrection') : t('corr.titleManual')}
+      description={t('corr.description')}
     >
       {open ? (
         <SheetForm
@@ -116,11 +117,11 @@ function SheetForm({
     e.preventDefault();
     setError(null);
     const { body, seconds } = draftToRequest(d, tz, session?.id);
-    if (seconds > 24 * 3600) return setError('A single entry can be at most 24 hours.');
+    if (seconds > 24 * 3600) return setError(t('corr.max24'));
     const parsed = timeCorrectionRequest.safeParse(body);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
-      return setError(issue?.path.includes('reason') ? 'Give a reason of at least 3 characters.' : (issue?.message ?? 'Check the values.'));
+      return setError(issue?.path.includes('reason') ? t('corr.reasonShort') : (issue?.message ?? t('corr.check')));
     }
     const res = await action.run(() => rd.my.proposeCorrection(body));
     if (res) onSubmitted(res);
@@ -138,48 +139,48 @@ function SheetForm({
     <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }} noValidate>
       {session ? (
         <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: '90px 1fr', gap: '4px 12px', background: 'var(--canvas)', padding: '10px 12px' }}>
-          <dt className="muted">Session</dt>
+          <dt className="muted">{t('corr.session')}</dt>
           <dd style={{ margin: 0 }}>
             {formatDayLabel(toZonedInputs(session.started_at, tz).date)},{' '}
             <span className="mono">
-              {formatTime(session.started_at, tz)} → {session.ended_at ? formatTime(session.ended_at, tz) : 'now'}
+              {formatTime(session.started_at, tz)} → {session.ended_at ? formatTime(session.ended_at, tz) : t('session.now')}
             </span>
             {session.project_name ? `, ${session.project_name}` : ''}
           </dd>
         </dl>
       ) : null}
       <div className={formGridClass}>
-        <TextField label="Date" type="date" required value={d.date} onChange={(e) => set({ date: e.target.value })} />
-        <TextField label={session ? 'New start' : 'Start'} type="time" required value={d.start} onChange={(e) => set({ start: e.target.value })} />
+        <TextField label={t('corr.date')} type="date" required value={d.date} onChange={(e) => set({ date: e.target.value })} />
+        <TextField label={session ? t('corr.newStart') : t('corr.start')} type="time" required value={d.start} onChange={(e) => set({ start: e.target.value })} />
         <TextField
-          label={session ? 'New end' : 'End'}
+          label={session ? t('corr.newEnd') : t('corr.end')}
           type="time"
           required
           value={d.end}
           onChange={(e) => set({ end: e.target.value })}
-          hint={preview !== null ? `${formatDuration(preview)}${d.end <= d.start ? ' · ends next day' : ''} · ${tz}` : undefined}
+          hint={preview !== null ? `${formatDuration(preview)}${d.end <= d.start ? t('corr.endsNextDay') : ''} · ${tz}` : undefined}
         />
       </div>
       {projects.error ? (
-        <ErrorState error={projects.error} onRetry={projects.reload} title="Couldn't load your projects" />
+        <ErrorState error={projects.error} onRetry={projects.reload} title={t('corr.projectsFailed')} />
       ) : (
         <div className={formGridClass}>
           <SelectField
-            label="Project"
+            label={t('corr.project')}
             value={d.projectId}
             onChange={(e) => set({ projectId: e.target.value, taskId: '' })}
             disabled={!projects.data}
           >
-            <option value="">No project</option>
+            <option value="">{t('corr.noProject')}</option>
             {projects.data?.map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name}
               </option>
             ))}
-            {d.projectId && projects.data && !project ? <option value={d.projectId}>{session?.project_name ?? 'Current project'}</option> : null}
+            {d.projectId && projects.data && !project ? <option value={d.projectId}>{session?.project_name ?? t('corr.currentProject')}</option> : null}
           </SelectField>
-          <SelectField label="Task" value={d.taskId} onChange={(e) => set({ taskId: e.target.value })} disabled={!project || project.tasks.length === 0}>
-            <option value="">No task</option>
+          <SelectField label={t('corr.task')} value={d.taskId} onChange={(e) => set({ taskId: e.target.value })} disabled={!project || project.tasks.length === 0}>
+            <option value="">{t('corr.noTask')}</option>
             {project?.tasks.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -189,12 +190,12 @@ function SheetForm({
         </div>
       )}
       <TextArea
-        label="Reason (required)"
+        label={t('corr.reason')}
         required
         rows={3}
         maxLength={1000}
         value={d.reason}
-        placeholder="For example: forgot to start the timer before the stand-up"
+        placeholder={t('corr.reasonPlaceholder')}
         onChange={(e) => set({ reason: e.target.value })}
       />
       {error ? (
@@ -204,9 +205,9 @@ function SheetForm({
       ) : null}
       <ActionError error={action.error} />
       <div className={formActionsClass}>
-        <Button onClick={onCancel}>Cancel</Button>
+        <Button onClick={onCancel}>{t('common.cancel')}</Button>
         <Button type="submit" variant="primary" disabled={action.busy}>
-          {action.busy ? 'Submitting…' : 'Submit for approval'}
+          {action.busy ? t('ts.submitting') : t('ts.submit')}
         </Button>
       </div>
     </form>

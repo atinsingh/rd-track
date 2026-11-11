@@ -14,6 +14,7 @@ import { useMe } from '@/lib/me';
 import { addDays, formatDayMonth, todayInTz } from '@/lib/time';
 import { formatLimitMinutes, overtimeText, timesheetsApi } from '@/lib/timesheets';
 import { useAction, useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { NoAccess } from '../../../NoAccess';
 
 export default function MyTimesheetPage() {
@@ -31,7 +32,7 @@ export default function MyTimesheetPage() {
   const limits = useApi(entitled ? 'me:work-limits' : null, (signal) => timesheetsApi.myLimits(signal));
   const submit = useAction();
 
-  if (!entitled) return <NoAccess what="Timesheets are part of the Standard and Pro plans. An org admin can change the plan in Billing." />;
+  if (!entitled) return <NoAccess what={t('ts.noAccess')} />;
 
   const doSubmit = async () => {
     const r = await submit.run(() => timesheetsApi.submit(week, note.trim() || undefined));
@@ -45,9 +46,9 @@ export default function MyTimesheetPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Employee · Time records"
-        title="My time"
-        description="Submit each week for approval. Once approved the week is locked for payroll; your manager can reopen it if something needs fixing."
+        eyebrow={t('time.eyebrow')}
+        title={t('time.title')}
+        description={t('ts.description')}
         actions={
           <DateSwitcher
             date={day}
@@ -56,7 +57,7 @@ export default function MyTimesheetPage() {
             step={7}
             unit="week"
             max={today}
-            label={`${week === isoWeekStart(today) ? 'This week · ' : ''}${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
+            label={`${week === isoWeekStart(today) ? t('ts.thisWeekPrefix') : ''}${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
           />
         }
       />
@@ -65,23 +66,23 @@ export default function MyTimesheetPage() {
       {limits.data && (limits.data.limits.daily_minutes !== null || limits.data.limits.weekly_minutes !== null) ? (
         <Banner tag="LIMITS">
           {limits.data.limits.daily_minutes !== null
-            ? `Today ${formatDuration(limits.data.today.worked_seconds)} of ${formatLimitMinutes(limits.data.limits.daily_minutes)}. `
+            ? t('ts.limitsToday', { worked: formatDuration(limits.data.today.worked_seconds), limit: formatLimitMinutes(limits.data.limits.daily_minutes) })
             : ''}
           {limits.data.limits.weekly_minutes !== null
-            ? `This week ${formatDuration(limits.data.week.worked_seconds)} of ${formatLimitMinutes(limits.data.limits.weekly_minutes)}.`
+            ? t('ts.limitsWeek', { worked: formatDuration(limits.data.week.worked_seconds), limit: formatLimitMinutes(limits.data.limits.weekly_minutes) })
             : ''}
-          {limits.data.week.overtime_seconds > 0 ? ` ${formatDuration(limits.data.week.overtime_seconds)} over so far.` : ''}
+          {limits.data.week.overtime_seconds > 0 ? t('ts.overSoFar', { over: formatDuration(limits.data.week.overtime_seconds) }) : ''}
         </Banner>
       ) : null}
 
-      <Resource {...sheet} label="Loading your timesheet">
-        {(t) => (
+      <Resource {...sheet} label={t('ts.loading')}>
+        {(ts) => (
           <>
-            <TimesheetView sheet={t} tz={tz} self />
-            {t.can_submit ? (
-              <Card title="Submit this week" subtitle="Your manager reviews it; you'll get a notification with the decision">
+            <TimesheetView sheet={ts} tz={tz} self />
+            {ts.can_submit ? (
+              <Card title={t('ts.submitTitle')} subtitle={t('ts.submitSub')}>
                 <TextArea
-                  label="Note for your manager (optional)"
+                  label={t('ts.noteLabel')}
                   rows={2}
                   maxLength={1000}
                   value={note}
@@ -90,7 +91,7 @@ export default function MyTimesheetPage() {
                 <ActionError error={submit.error} />
                 <div className={formActionsClass}>
                   <Button variant="primary" onClick={doSubmit} disabled={submit.busy}>
-                    {submit.busy ? 'Submitting…' : 'Submit for approval'}
+                    {submit.busy ? t('ts.submitting') : t('ts.submit')}
                   </Button>
                 </div>
               </Card>
@@ -99,23 +100,23 @@ export default function MyTimesheetPage() {
         )}
       </Resource>
 
-      <Card title="Recent weeks">
-        <Resource {...recent} label="Loading recent weeks">
+      <Card title={t('ts.recent')}>
+        <Resource {...recent} label={t('ts.loadingRecent')}>
           {(list) => (
-            <TableBox label="Recent weeks">
+            <TableBox label={t('ts.recent')}>
               <table className={tableClass} style={{ minWidth: 560 }}>
                 <thead>
                   <tr>
-                    <th scope="col">Week</th>
-                    <th scope="col">Status</th>
+                    <th scope="col">{t('ts.col.week')}</th>
+                    <th scope="col">{t('ts.col.status')}</th>
                     <th scope="col" className={numClass}>
-                      Total
+                      {t('ts.col.total')}
                     </th>
                     <th scope="col" className={numClass}>
-                      Over limit
+                      {t('ts.col.over')}
                     </th>
                     <th scope="col">
-                      <span className="visually-hidden">Open</span>
+                      <span className="visually-hidden">{t('ts.col.open')}</span>
                     </th>
                   </tr>
                 </thead>
@@ -134,10 +135,10 @@ export default function MyTimesheetPage() {
                         <td className={numClass}>{overtimeText(w.overtime_seconds)}</td>
                         <td style={{ textAlign: 'right' }}>
                           {w.period_start === week ? (
-                            <span className="small muted">Showing</span>
+                            <span className="small muted">{t('ts.showing')}</span>
                           ) : (
                             <Button size="sm" variant="quiet" onClick={() => setDay(w.period_start)}>
-                              Open
+                              {t('ts.open')}
                             </Button>
                           )}
                         </td>

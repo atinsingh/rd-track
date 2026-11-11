@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import type { InvoiceGrouping } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
@@ -11,9 +11,11 @@ import { Badge, Banner, Card, PageHeader, TableBox, formActionsClass, formGridCl
 import { rd } from '@/lib/api';
 import { formatMoney } from '@/lib/format';
 import { useMe } from '@/lib/me';
-import { INVOICE_STATUS_LABEL, parsePercentBp } from '@/lib/money';
+import { invoiceStateLabel, parsePercentBp } from '@/lib/money';
 import { addDays, formatDayLabel, startOfMonth, todayInTz } from '@/lib/time';
 import { useAction, useApi } from '@/lib/useApi';
+import { invoiceState } from '@/lib/workspaces';
+import { t } from '@/lib/i18n';
 import { MoneyGate } from '../MoneyGate';
 import m from '../money.module.css';
 
@@ -23,9 +25,13 @@ function NewDraft() {
   const today = todayInTz(tz);
   const clients = useApi('money:clients', (signal) => rd.money.clients(signal));
   const create = useAction();
-  const [clientId, setClientId] = useState('');
-  const [from, setFrom] = useState(() => startOfMonth(addDays(startOfMonth(today), -1)));
-  const [to, setTo] = useState(() => addDays(startOfMonth(today), -1));
+  // ?client=&from= comes from "Not yet invoiced" on Period close.
+  const params = useSearchParams();
+  const qFrom = params.get('from');
+  const fromParam = qFrom && /^\d{4}-\d{2}-\d{2}$/.test(qFrom) && qFrom <= today ? qFrom : null;
+  const [clientId, setClientId] = useState(() => params.get('client') ?? '');
+  const [from, setFrom] = useState(() => fromParam ?? startOfMonth(addDays(startOfMonth(today), -1)));
+  const [to, setTo] = useState(() => (fromParam ? today : addDays(startOfMonth(today), -1)));
   const [groupBy, setGroupBy] = useState<InvoiceGrouping>('project');
   const [tax, setTax] = useState('0');
   const taxBp = parsePercentBp(tax);
@@ -42,52 +48,54 @@ function NewDraft() {
   };
 
   return (
-    <Card title="New draft invoice">
+    <Card title={t('money.inv.newDraft')}>
       {clients.data && active.length === 0 ? (
         <Banner tag="NOTE">
-          Create a client and assign its projects first, in <Link href="/admin/clients">Clients</Link>.
+          {t('money.inv.noClients')} <Link href="/admin/clients">{t('money.inv.clientsLink')}</Link>.
         </Banner>
       ) : null}
       <form onSubmit={submit} className={m.stack}>
         <div className={formGridClass}>
-          <SelectField label="Client" value={clientId} onChange={(e) => setClientId(e.target.value)} hint={client ? `Billed in ${client.currency}` : undefined}>
-            <option value="">Choose a client…</option>
+          <SelectField
+            label={t('money.inv.client')}
+            value={clientId}
+            onChange={(e) => setClientId(e.target.value)}
+            hint={client ? t('money.inv.billedIn', { currency: client.currency }) : undefined}
+          >
+            <option value="">{t('money.inv.chooseClient')}</option>
             {active.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
           </SelectField>
-          <TextField label="Period from" type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
+          <TextField label={t('money.inv.periodFrom')} type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} />
           <TextField
-            label="To"
+            label={t('money.inv.to')}
             type="date"
             value={to}
             min={from}
             onChange={(e) => setTo(e.target.value)}
-            hint={`Whole days in ${tz}`}
-            error={from > to ? 'The end date is before the start date.' : null}
+            hint={t('money.inv.wholeDays', { tz })}
+            error={from > to ? t('money.payroll.endBefore') : null}
           />
-          <SelectField label="Lines" value={groupBy} onChange={(e) => setGroupBy(e.target.value as InvoiceGrouping)}>
-            <option value="project">One per project</option>
-            <option value="project_person">One per project and person</option>
+          <SelectField label={t('money.inv.lines')} value={groupBy} onChange={(e) => setGroupBy(e.target.value as InvoiceGrouping)}>
+            <option value="project">{t('money.inv.perProject')}</option>
+            <option value="project_person">{t('money.inv.perProjectPerson')}</option>
           </SelectField>
           <TextField
-            label="Tax rate (%)"
+            label={t('money.inv.taxRate')}
             inputMode="decimal"
             value={tax}
             onChange={(e) => setTax(e.target.value)}
-            error={taxBp === null ? 'Enter a percentage between 0 and 100' : null}
+            error={taxBp === null ? t('money.inv.taxInvalid') : null}
           />
         </div>
-        <p className="small muted">
-          Lines use each project&apos;s bill rate in effect on the day a session started. Hours are rounded to the minute, then to two decimals. You can edit
-          every line before issuing.
-        </p>
+        <p className="small muted">{t('money.inv.howBuilt')}</p>
         <ActionError error={create.error} />
         <div className={formActionsClass}>
           <Button type="submit" variant="primary" disabled={!clientId || from > to || taxBp === null || create.busy}>
-            {create.busy ? 'Building…' : 'Build draft →'}
+            {create.busy ? t('money.inv.building') : t('money.inv.build')}
           </Button>
         </div>
       </form>
@@ -96,31 +104,33 @@ function NewDraft() {
 }
 
 function InvoicesContent() {
+  const { timezone: tz } = useMe();
+  const today = todayInTz(tz);
   const invoices = useApi('money:invoices', (signal) => rd.money.invoices(signal));
   return (
     <>
       <PageHeader
-        eyebrow="Admin · Money"
-        title="Invoices"
-        description="Build invoices from time recorded on a client's projects. Issuing gives the invoice its number and locks it; an issued invoice can only be voided."
+        eyebrow={t('money.inv.eyebrow')}
+        title={t('money.inv.title')}
+        description={t('money.inv.description')}
       />
       <NewDraft />
-      <Card title="All invoices">
-        <Resource {...invoices} label="Loading invoices">
+      <Card title={t('money.inv.all')}>
+        <Resource {...invoices} label={t('money.inv.loading')}>
           {(list) =>
             list.length === 0 ? (
-              <Empty title="No invoices yet" />
+              <Empty title={t('money.inv.none')} />
             ) : (
-              <TableBox label="Invoices">
+              <TableBox label={t('money.inv.table')}>
                 <table className={tableClass} style={{ minWidth: 680 }}>
                   <thead>
                     <tr>
-                      <th scope="col">Invoice</th>
-                      <th scope="col">Client</th>
-                      <th scope="col">Period</th>
-                      <th scope="col">Status</th>
+                      <th scope="col">{t('money.col.invoice')}</th>
+                      <th scope="col">{t('money.col.client')}</th>
+                      <th scope="col">{t('money.col.period')}</th>
+                      <th scope="col">{t('money.inv.status')}</th>
                       <th scope="col" className={numClass}>
-                        Total
+                        {t('money.col.total')}
                       </th>
                     </tr>
                   </thead>
@@ -128,14 +138,16 @@ function InvoicesContent() {
                     {list.map((i) => (
                       <tr key={i.id}>
                         <td>
-                          <Link href={`/admin/invoices/${i.id}`}>{i.number ?? 'Draft'}</Link>
+                          <Link href={`/admin/invoices/${i.id}`}>{i.number ?? t('money.draft')}</Link>
                         </td>
                         <td>{i.client_name}</td>
                         <td>
                           {formatDayLabel(i.period_from)} – {formatDayLabel(i.period_to)}
                         </td>
                         <td>
-                          <Badge tone={i.status === 'issued' ? 'solid' : 'outline'}>{INVOICE_STATUS_LABEL[i.status]}</Badge>
+                          <Badge tone={invoiceState(i, today) === 'overdue' ? 'warn' : i.status === 'issued' ? 'solid' : 'outline'}>
+                            {invoiceStateLabel(invoiceState(i, today))}
+                          </Badge>
                         </td>
                         <td className={numClass}>{formatMoney(i.total_cents, i.currency)}</td>
                       </tr>
@@ -153,7 +165,7 @@ function InvoicesContent() {
 
 export default function InvoicesPage() {
   return (
-    <MoneyGate title="Invoices">
+    <MoneyGate title={t('money.inv.title')}>
       <InvoicesContent />
     </MoneyGate>
   );

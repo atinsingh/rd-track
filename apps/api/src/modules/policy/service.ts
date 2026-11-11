@@ -24,6 +24,7 @@ import { signEd25519 } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { currentPlan, currentSubscription } from '../billing/service';
+import { notify } from '../engine/notify';
 
 interface ScopeRow {
   scope_type: ScopeType;
@@ -139,7 +140,7 @@ export async function listPolicies(q: Queryable, orgId: string): Promise<PolicyL
   const rows = await many<{ scope_type: ScopeType; scope_id: string; scope_name: string }>(
     q,
     `SELECT 'organization' AS scope_type, id AS scope_id, name AS scope_name, 0 AS ord FROM organizations WHERE id = $1
-     UNION ALL SELECT 'team', id, name, 1 FROM teams WHERE organization_id = $1
+     UNION ALL SELECT 'team', id, name, 1 FROM teams WHERE organization_id = $1 AND archived_at IS NULL
      UNION ALL SELECT 'project', id, name, 2 FROM projects WHERE organization_id = $1 AND status = 'active'
      UNION ALL SELECT 'device', d.id, d.name || ' (' || u.display_name || ')', 3
        FROM devices d JOIN users u ON u.id = d.user_id
@@ -304,17 +305,13 @@ export async function publishPolicy(
   );
   await q.query('UPDATE policies SET current_version = $2 WHERE id = $1', [policy!.id, version]);
 
-  for (const userId of expandedFor) {
-    await q.query(
-      `INSERT INTO notifications (organization_id, user_id, kind, title, body) VALUES ($1, $2, 'policy_expansion', $3, $4)`,
-      [
-        orgId,
-        userId,
-        'What is collected about you has changed',
-        `${actor.displayName} published a policy change: ${input.change_note}. See "What's collected" for details.`,
-      ],
-    );
-  }
+  await notify(q, orgId, expandedFor, {
+    kind: 'policy_expansion',
+    category: 'privacy',
+    title: (l) => l.t('policy.changed.title'),
+    body: (l) => l.t('policy.changed.body', { name: actor.displayName, note: input.change_note }),
+    link: '/me/privacy',
+  });
   await audit(q, {
     organizationId: orgId,
     actor,

@@ -14,6 +14,7 @@ import { many, one, type Queryable } from '../../db/pool';
 import { errors } from '../../lib/errors';
 import { visibilityFor } from '../authz';
 import { categoryMap } from '../insights/service';
+import { idleAdjustmentsFor } from '../idle/service';
 
 interface Range {
   from: string;
@@ -65,8 +66,10 @@ export async function sessionsFor(deps: Deps, q: Queryable, orgId: string, userI
     [orgId, userId, r.from, r.to],
   );
   const pauses = await pauseIntervals(q, rows.map((s) => s.id), { from: '1970-01-01T00:00:00Z', to: '9999-01-01T00:00:00Z' }, deps.now());
+  const idle = await idleAdjustmentsFor(q, rows.map((s) => s.id));
   return rows.map((s) => ({
     ...s,
+    idle_adjustments: idle.get(s.id) ?? [],
     paused_seconds: Math.round(
       pauses.filter((p) => p.session_id === s.id).reduce((n, p) => n + (new Date(p.to).getTime() - new Date(p.from).getTime()), 0) / 1000,
     ),
@@ -232,6 +235,7 @@ export async function teamReport(
       paused_seconds: Math.round(pausedBy.get(m.user_id) ?? 0),
       manual_seconds: manual.find((x) => x.user_id === m.user_id)?.seconds ?? 0,
       days_active: a?.days ?? 0,
+      permission_missing_minutes: a?.missing ?? 0,
       notes,
     });
   }

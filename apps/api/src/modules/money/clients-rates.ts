@@ -20,7 +20,7 @@ const todayUtc = (now: Date) => now.toISOString().slice(0, 10);
 // ───────────────────────── clients ─────────────────────────
 
 const CLIENT_SELECT = `
-  SELECT c.id, c.name, c.contact_email, c.currency, c.address, c.archived, c.created_at,
+  SELECT c.id, c.name, c.contact_email, c.currency, c.address, c.archived, c.created_at, c.portal_show_people,
          COALESCE((SELECT json_agg(json_build_object('id', p.id, 'name', p.name) ORDER BY p.name)
                    FROM projects p WHERE p.client_id = c.id), '[]'::json) AS projects
   FROM clients c`;

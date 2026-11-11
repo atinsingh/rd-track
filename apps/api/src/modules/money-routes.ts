@@ -5,9 +5,13 @@ import {
   invoiceDraftRequest,
   invoiceIssueRequest,
   invoiceLinesRequest,
+  invoicePaidRequest,
+  invoiceSendRequest,
   invoiceUpdateRequest,
   invoiceVoidRequest,
   payRateCreateRequest,
+  payrollAdjustmentEndRequest,
+  payrollAdjustmentRequest,
   payrollExportRequest,
   projectBudgetRequest,
   projectClientRequest,
@@ -16,18 +20,20 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Deps, UserActor } from '../context';
 import { withTx } from '../db/pool';
-import { ADMIN_ROLES, requireRole, userOf } from '../http';
+import { MONEY_ROLES, requireRole, userOf } from '../http';
 import { errors } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { deleteProjectBudget, getProjectBudget, listBudgets, putProjectBudget } from './money/budgets';
 import * as cr from './money/clients-rates';
 import * as inv from './money/invoices';
+import * as adj from './money/adjustments';
 import { createPayrollExport, getPayrollExport, listPayrollExports } from './money/payroll';
+import { logoUrl, orgLocale } from './branding/service';
 import { assertMoneyPlan } from './money/time';
 
 /**
  * Stage 3 money: clients, pay and bill rates, project budgets, invoices and payroll export.
- * Org admins manage everything; project managers read budgets of their projects; employees
+ * Org admins and the finance role manage everything; project managers read budgets of their projects; employees
  * read their own pay rate only. Every route is gated on the `budgets_invoicing` entitlement
  * (402 plan_upgrade_required otherwise), checked after the role check.
  */
@@ -43,9 +49,9 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
     return r.data;
   };
 
-  /** Org admin with the Pro entitlement. */
+  /** Org admin or finance, with the Pro entitlement. */
   const admin = async (req: FastifyRequest): Promise<UserActor> => {
-    const a = requireRole(req, ADMIN_ROLES);
+    const a = requireRole(req, MONEY_ROLES);
     await assertMoneyPlan(deps, pool, a.organizationId);
     return a;
   };
@@ -125,9 +131,10 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
     const body = parse(invoiceDraftRequest, req.body);
     return reply.code(201).send(await withTx(pool, (tx) => inv.createDraftInvoice(deps, tx, a, body, req.id)));
   });
-  app.get<{ Params: { id: string } }>('/v1/admin/invoices/:id', user, async (req) =>
-    inv.getInvoice(pool, (await admin(req)).organizationId, id(req)),
-  );
+  app.get<{ Params: { id: string } }>('/v1/admin/invoices/:id', user, async (req) => {
+    const orgId = (await admin(req)).organizationId;
+    return { ...(await inv.getInvoice(pool, orgId, id(req))), organization_logo_url: await logoUrl(deps, pool, orgId), organization_locale: await orgLocale(pool, orgId) };
+  });
   app.patch<{ Params: { id: string } }>('/v1/admin/invoices/:id', user, async (req) => {
     const a = await admin(req);
     const body = parse(invoiceUpdateRequest, req.body);
@@ -152,6 +159,23 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
     const { reason } = parse(invoiceVoidRequest, req.body ?? {});
     return withTx(pool, (tx) => inv.voidInvoice(deps, tx, a, id(req), reason, req.id));
   });
+  app.post<{ Params: { id: string } }>('/v1/admin/invoices/:id/paid', user, async (req) => {
+    const a = await admin(req);
+    const { paid_on, note } = parse(invoicePaidRequest, req.body);
+    return withTx(pool, (tx) => inv.markInvoicePaid(tx, a, id(req), paid_on, note, req.id));
+  });
+  app.delete<{ Params: { id: string } }>('/v1/admin/invoices/:id/paid', user, async (req) => {
+    const a = await admin(req);
+    return withTx(pool, (tx) => inv.markInvoiceUnpaid(tx, a, id(req), req.id));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/invoices/:id/send', user, async (req) => {
+    const a = await admin(req);
+    const body = parse(invoiceSendRequest, req.body ?? {});
+    const { invoice, message } = await withTx(pool, (tx) => inv.prepareInvoiceEmail(deps, tx, a, id(req), body, req.id));
+    // After commit, like invites: a failed send leaves sent_at recorded, and sending again is safe.
+    await deps.email.send(message);
+    return invoice;
+  });
   app.get<{ Params: { id: string } }>('/v1/admin/invoices/:id/csv', user, async (req, reply) => {
     const a = await admin(req);
     const { filename, csv } = await withTx(pool, (tx) => inv.invoiceCsv(tx, a, id(req), req.id));
@@ -171,5 +195,31 @@ export async function moneyRoutes(app: FastifyInstance, deps: Deps) {
   app.get<{ Params: { id: string } }>('/v1/admin/payroll-exports/:id', user, async (req) => {
     const a = await admin(req);
     return withTx(pool, (tx) => getPayrollExport(deps, tx, a, id(req), req.id));
+  });
+
+  // ───────── payroll adjustments (F8) ─────────
+  app.get<{ Querystring: { user_id?: string } }>('/v1/admin/payroll-adjustments', user, async (req) => {
+    const a = await admin(req);
+    return { items: await withTx(pool, (tx) => adj.listAdjustmentsAsAdmin(tx, a, parse(optionalUuid, req.query).user_id, req.id)) };
+  });
+  app.post('/v1/admin/payroll-adjustments', user, async (req, reply) => {
+    const a = await admin(req);
+    const body = parse(payrollAdjustmentRequest, req.body);
+    return reply.code(201).send(await withTx(pool, (tx) => adj.createAdjustment(tx, a, body, req.id)));
+  });
+  app.post<{ Params: { id: string } }>('/v1/admin/payroll-adjustments/:id/end', user, async (req) => {
+    const a = await admin(req);
+    const { effective_to } = parse(payrollAdjustmentEndRequest, req.body);
+    return withTx(pool, (tx) => adj.endAdjustment(tx, a, id(req), effective_to, req.id));
+  });
+  app.delete<{ Params: { id: string } }>('/v1/admin/payroll-adjustments/:id', user, async (req) => {
+    const a = await admin(req);
+    await withTx(pool, (tx) => adj.deleteAdjustment(tx, a, id(req), req.id));
+    return { ok: true };
+  });
+  app.get('/v1/me/payroll-adjustments', user, async (req) => {
+    const a = userOf(req);
+    await assertMoneyPlan(deps, pool, a.organizationId);
+    return { items: await adj.listAdjustments(pool, a.organizationId, a.userId) };
   });
 }

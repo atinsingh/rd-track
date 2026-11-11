@@ -57,12 +57,15 @@ pub enum EventBody {
     /// `data_gap.v1`
     #[serde(rename = "data_gap.v1")]
     DataGap(DataGap),
+    /// `idle.decision.v1`
+    #[serde(rename = "idle.decision.v1")]
+    IdleDecision(IdleDecisionPayload),
 }
 
 /// Whether an event may be dropped when the outbox is over its storage cap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Retention {
-    /// Session lifecycle and data-gap events: never dropped.
+    /// Session lifecycle, data-gap and idle-decision events: never dropped.
     Protected,
     /// Activity buckets and app usage: oldest are dropped first when over cap.
     Droppable,
@@ -79,6 +82,7 @@ impl EventBody {
             EventBody::ActivityBucket(_) => "activity_bucket.v1",
             EventBody::AppUsage(_) => "app_usage.v1",
             EventBody::DataGap(_) => "data_gap.v1",
+            EventBody::IdleDecision(_) => "idle.decision.v1",
         }
     }
 
@@ -242,6 +246,44 @@ pub struct DataGap {
     pub reason: GapReason,
 }
 
+/// What the person chose for an idle run when they came back (Stage 4 F1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IdleDecision {
+    /// Leave the time as recorded (idle seconds stay in the session).
+    Keep,
+    /// Remove that span's idle seconds from the session.
+    Discard,
+    /// Move the span to another project (becomes a time correction on the server).
+    Reassign,
+}
+
+/// Longest span one `idle.decision.v1` may cover (contract `MAX_IDLE_SPAN_MS`).
+pub const MAX_IDLE_SPAN_SECONDS: i64 = 12 * 3600;
+
+/// `idle.decision.v1` payload. Only the span and the choice travel — never what
+/// happened in it. Invariants (contract): `idle_ended_at > idle_started_at`, the span is
+/// at most [`MAX_IDLE_SPAN_SECONDS`], and `project_id` is present exactly when
+/// `decision` is `reassign`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct IdleDecisionPayload {
+    /// First second of the idle run (UTC).
+    #[serde(with = "crate::ts")]
+    pub idle_started_at: DateTime<Utc>,
+    /// When the person came back: the end of the last idle second (UTC).
+    #[serde(with = "crate::ts")]
+    pub idle_ended_at: DateTime<Utc>,
+    /// The choice.
+    pub decision: IdleDecision,
+    /// Target project for `reassign` (required then, omitted otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<String>,
+    /// Target task for `reassign`, if any. Omitted when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +392,89 @@ mod tests {
             assert!(b.is_lifecycle());
             assert_eq!(b.retention(), Retention::Protected);
         }
+    }
+
+    #[test]
+    fn idle_decision_matches_wire_shape_and_omits_optionals() {
+        let at = |h, m, s| Utc.with_ymd_and_hms(2026, 10, 28, h, m, s).unwrap();
+        let keep = envelope(EventBody::IdleDecision(IdleDecisionPayload {
+            idle_started_at: at(9, 12, 30),
+            idle_ended_at: at(9, 41, 0),
+            decision: IdleDecision::Keep,
+            project_id: None,
+            task_id: None,
+        }));
+        let v = serde_json::to_value(&keep).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "event_id": "00000000-0000-0000-0000-000000000000",
+                "organization_id": "org",
+                "device_id": "dev",
+                "session_id": "00000000-0000-0000-0000-000000000000",
+                "policy_version": 12,
+                "event_type": "idle.decision.v1",
+                "occurred_at": "2026-10-28T09:41:00Z",
+                "sequence": 1842,
+                "monotonic_ms": 5523000,
+                "payload": {
+                    "idle_started_at": "2026-10-28T09:12:30Z",
+                    "idle_ended_at": "2026-10-28T09:41:00Z",
+                    "decision": "keep"
+                }
+            })
+        );
+        assert_eq!(serde_json::from_value::<Envelope>(v).unwrap(), keep);
+
+        let discard = IdleDecisionPayload {
+            idle_started_at: at(9, 12, 30),
+            idle_ended_at: at(9, 41, 0),
+            decision: IdleDecision::Discard,
+            project_id: None,
+            task_id: None,
+        };
+        assert_eq!(
+            serde_json::to_value(&discard).unwrap(),
+            json!({
+                "idle_started_at": "2026-10-28T09:12:30Z",
+                "idle_ended_at": "2026-10-28T09:41:00Z",
+                "decision": "discard"
+            })
+        );
+
+        let reassign = IdleDecisionPayload {
+            decision: IdleDecision::Reassign,
+            project_id: Some("7d3c2a8e-1b4f-4c6d-9e0a-2f5b8c1d3e4f".into()),
+            task_id: Some("0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d".into()),
+            ..discard
+        };
+        let v = serde_json::to_value(&reassign).unwrap();
+        assert_eq!(
+            v,
+            json!({
+                "idle_started_at": "2026-10-28T09:12:30Z",
+                "idle_ended_at": "2026-10-28T09:41:00Z",
+                "decision": "reassign",
+                "project_id": "7d3c2a8e-1b4f-4c6d-9e0a-2f5b8c1d3e4f",
+                "task_id": "0b1c2d3e-4f50-4a6b-8c7d-9e0f1a2b3c4d"
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<IdleDecisionPayload>(v).unwrap(),
+            reassign
+        );
+
+        // Strict like every other payload.
+        assert!(serde_json::from_value::<IdleDecisionPayload>(json!({
+            "idle_started_at": "2026-10-28T09:12:30Z",
+            "idle_ended_at": "2026-10-28T09:41:00Z",
+            "decision": "keep",
+            "seconds": 1710
+        }))
+        .is_err());
+        let b = EventBody::IdleDecision(reassign);
+        assert_eq!(b.event_type(), "idle.decision.v1");
+        assert_eq!(b.retention(), Retention::Protected);
+        assert!(!b.is_lifecycle());
     }
 }

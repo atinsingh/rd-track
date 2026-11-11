@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { dailyInsights, focusBlocks, summarize, type InsightBucket } from '../src/modules/insights/compute';
+import { dailyInsights, focusBlocks, summarize, typicalDay, type InsightBucket } from '../src/modules/insights/compute';
 import { assertPublicHttps } from '../src/modules/webhooks/service';
 import {
   bucket,
@@ -70,6 +70,26 @@ describe('insight computation', () => {
     const s = summarize([d!, ...sat]);
     expect(s).toMatchObject({ long_days: 1, breakless_days: 1, weekend_seconds: 30 * 60 });
   });
+
+  it('averages the typical day over days with at least half an hour tracked', () => {
+    const tz = 'Europe/London';
+    const hours = { start: '08:00', end: '18:00' };
+    // Mon 08:50–17:30 local (BST is over), Tue 09:10–17:50, Wed a 10-minute check-in that doesn't count.
+    const idle = (b: InsightBucket[]) => b.map((x, i) => (i % 10 === 0 ? { ...x, active_seconds: 0, idle_seconds: 60 } : x));
+    const days = dailyInsights(
+      [...idle(run('a', '2026-10-26T08:50:00Z', 520, 60)), ...idle(run('b', '2026-10-27T09:10:00Z', 520, 60)), ...run('c', '2026-10-28T20:00:00Z', 10)],
+      tz,
+      hours,
+    );
+    expect(days.map((d) => [d.first_start, d.last_stop])).toEqual([
+      ['08:50', '17:30'],
+      ['09:10', '17:50'],
+      ['20:00', '20:10'],
+    ]);
+    expect(days[0]!.idle_seconds).toBe(52 * 60);
+    expect(typicalDay(days)).toEqual({ days: 2, start: '09:00', stop: '17:40', idle_seconds: 52 * 60 });
+    expect(typicalDay([])).toEqual({ days: 0, start: null, stop: null, idle_seconds: null });
+  });
 });
 
 describe('insights, categories and webhooks over the API', () => {
@@ -125,6 +145,21 @@ describe('insights, categories and webhooks over the API', () => {
     const apps = await org.users.emp!.client.get(`/v1/me/apps?${q}`);
     expect(apps.body.apps.find((a: { app_name: string }) => a.app_name === 'Code').category).toBe('core_work');
     expect((await org.users.emp!.client.get(`/v1/me/insights?${q.replace('America/Toronto', 'Mars/Base')}`)).status).toBe(400);
+    expect(mine.body.typical_day).toEqual({ days: 1, start: '10:00', stop: '10:45', idle_seconds: 45 * 15 });
+  });
+
+  it('applies the AI-tools preset as ordinary rules, all or a chosen few', async () => {
+    const some = await org.admin.post('/v1/admin/app-categories/presets', { preset: 'ai_tools', category: 'supporting', identifiers: ['com.openai.chat', 'Cursor.exe'] });
+    expect(some.body).toEqual({ applied: 2 });
+    const all = await org.admin.post('/v1/admin/app-categories/presets', { preset: 'ai_tools', category: 'core_work' });
+    expect(all.body.applied).toBe(12);
+    const rules = (await org.admin.get('/v1/admin/app-categories')).body.items as { app_identifier: string; category: string }[];
+    expect(rules.find((r) => r.app_identifier === 'com.openai.chat')!.category).toBe('core_work');
+    expect(rules.filter((r) => r.category === 'core_work')).toHaveLength(13); // the preset and VS Code
+    const bad = await org.admin.post('/v1/admin/app-categories/presets', { preset: 'ai_tools', category: 'core_work', identifiers: ['Spotify.exe'] });
+    expect(bad.status).toBe(400);
+    expect((await org.users.emp!.client.post('/v1/admin/app-categories/presets', { preset: 'ai_tools', category: 'core_work' })).status).toBe(403);
+    expect((await org.admin.get('/v1/audit-events?action=app_category.preset_applied')).body.items).toHaveLength(2);
   });
 
   it('shows team insights only as aggregates, and only for five or more people', async () => {

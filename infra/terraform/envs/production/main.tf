@@ -31,13 +31,17 @@ module "stack" {
   web_max_count      = 6
   log_retention_days = 90
 
-  policy_signing_key_id = var.policy_signing_key_id
-  ses_domain            = var.ses_domain
-  email_from            = var.email_from
-  billing_provider      = var.billing_provider
-  stripe_price_standard = var.stripe_price_standard
-  stripe_price_pro      = var.stripe_price_pro
-  extra_app_environment = var.extra_app_environment
+  policy_signing_key_id        = var.policy_signing_key_id
+  ses_domain                   = var.ses_domain
+  email_from                   = var.email_from
+  billing_provider             = var.billing_provider
+  stripe_price_standard        = var.stripe_price_standard
+  stripe_price_pro             = var.stripe_price_pro
+  stripe_price_standard_annual = var.stripe_price_standard_annual
+  stripe_price_pro_annual      = var.stripe_price_pro_annual
+  agent_download_base_url      = var.agent_download_base_url
+  agent_version                = var.agent_version
+  extra_app_environment        = var.extra_app_environment
 
   alarm_topic_arn = var.alarm_topic_arn
   alarm_emails    = var.alarm_emails

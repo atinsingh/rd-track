@@ -173,6 +173,10 @@ async function applyOrValidate(
       from = new Date(e.payload.gap_start).getTime() + shift;
       to = new Date(e.payload.gap_end).getTime() + shift;
       break;
+    case 'idle.decision.v1':
+      from = new Date(e.payload.idle_started_at).getTime() + shift;
+      to = new Date(e.payload.idle_ended_at).getTime() + shift;
+      break;
   }
   if (to <= start - 5_000 || from >= end + 5_000) return { ok: false, reason: 'outside_session_window' };
   return { ok: true, deferred: true };

@@ -1,0 +1,9 @@
+{
+  "name": { "message": "RoundDigital Track" },
+  "description": { "message": "Indique à l’application de bureau RoundDigital Track sur quel site Web vous êtes pendant une session de travail — le domaine seulement, et seulement si la politique de votre organisation l’enregistre." },
+  "popupTitle": { "message": "RoundDigital Track" },
+  "stateSharing": { "message": "Une session de travail enregistre les domaines de sites Web : le site à l’avant-plan (p. ex. github.com) est transmis à l’application de bureau." },
+  "stateIdle": { "message": "Rien n’est transmis pour l’instant. Les domaines ne sont transmis que pendant une session de travail dont la politique les enregistre." },
+  "stateNoApp": { "message": "L’application de bureau RoundDigital Track n’est pas installée ou ne fonctionne pas sur cet ordinateur; rien n’est donc transmis." },
+  "popupPrivacy": { "message": "Seul le domaine quitte ce navigateur — jamais la page, son adresse, son contenu ni ce que vous tapez. Les fenêtres privées ne sont jamais consultées." }
+}

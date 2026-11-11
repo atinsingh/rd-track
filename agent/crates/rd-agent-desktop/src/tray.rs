@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rd_agent_core::events::StopReason;
+use rd_agent_core::i18n::Lang;
 use rd_agent_core::runtime::Command;
 use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -44,14 +45,27 @@ fn icon(state: TrayState) -> Option<Image<'static>> {
     Image::from_bytes(bytes).ok()
 }
 
-/// Creates the tray icon and its menu.
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, "open", "Open RoundDigital Track", true, None::<&str>)?;
-    let pause = MenuItem::with_id(app, "pause", "Pause / resume", true, None::<&str>)?;
-    let stop = MenuItem::with_id(app, "stop", "Stop session", true, None::<&str>)?;
+/// The tray menu in `lang`.
+fn menu(app: &AppHandle, lang: Lang) -> tauri::Result<Menu<tauri::Wry>> {
+    let m = lang.messages();
+    let open = MenuItem::with_id(app, "open", m.menu_open, true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", m.menu_pause, true, None::<&str>)?;
+    let stop = MenuItem::with_id(app, "stop", m.menu_stop, true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit (stops the session)", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &pause, &stop, &sep, &quit])?;
+    let quit = MenuItem::with_id(app, "quit", m.menu_quit, true, None::<&str>)?;
+    Menu::with_items(app, &[&open, &pause, &stop, &sep, &quit])
+}
+
+/// Rewrites the tray menu after the language changed.
+pub fn relabel(app: &AppHandle, lang: Lang) {
+    if let (Some(tray), Ok(menu)) = (app.tray_by_id(TRAY_ID), menu(app, lang)) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+/// Creates the tray icon and its menu.
+pub fn create(app: &AppHandle, lang: Lang) -> tauri::Result<()> {
+    let menu = menu(app, lang)?;
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("RoundDigital Track")
         .menu(&menu)
@@ -116,6 +130,28 @@ pub fn show_centered(app: &AppHandle) {
     }
 }
 
+/// Shows the popover for the idle-return prompt: under (or above) the tray icon when
+/// its position is known, else centred. It does not take focus, so keys the person is
+/// typing as they come back stay in their own app (and cannot pick a choice).
+pub fn show_for_prompt(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("main") else {
+        return;
+    };
+    if w.is_visible().unwrap_or(false) {
+        return;
+    }
+    match app
+        .tray_by_id(TRAY_ID)
+        .and_then(|t| t.rect().ok().flatten())
+    {
+        Some(rect) => place_at(app, &w, rect),
+        None => {
+            let _ = w.center();
+        }
+    }
+    let _ = w.show();
+}
+
 fn toggle_at(app: &AppHandle, rect: Rect) {
     let Some(w) = app.get_webview_window("main") else {
         return;
@@ -127,6 +163,13 @@ fn toggle_at(app: &AppHandle, rect: Rect) {
     if now_ms().saturating_sub(LAST_BLUR_HIDE_MS.load(Ordering::Relaxed)) < 300 {
         return;
     }
+    place_at(app, &w, rect);
+    let _ = w.show();
+    let _ = w.set_focus();
+}
+
+/// Positions the popover next to the tray icon at `rect`.
+fn place_at(app: &AppHandle, w: &tauri::WebviewWindow, rect: Rect) {
     let scale = w.scale_factor().unwrap_or(1.0);
     let pos = rect.position.to_physical::<f64>(scale);
     let size = rect.size.to_physical::<f64>(scale);
@@ -157,6 +200,4 @@ fn toggle_at(app: &AppHandle, rect: Rect) {
             let _ = w.center();
         }
     }
-    let _ = w.show();
-    let _ = w.set_focus();
 }

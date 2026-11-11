@@ -28,6 +28,7 @@ interface ScreenshotRow {
   sha256: string | null;
   captured_at: string | null;
   intent_expires_at: string;
+  blurred: boolean;
 }
 
 export async function createUploadIntent(
@@ -67,12 +68,12 @@ export async function createUploadIntent(
   ]);
   await q.query(
     `INSERT INTO screenshots (id, organization_id, session_id, user_id, device_id, object_key, content_type, status,
-       policy_revision, intent_expires_at, retention_after, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11)`,
-    [id, device.organizationId, session.id, device.userId, device.deviceId, objectKey, input.content_type, policyRev!.policy_revision, expires, retention, now.toISOString()],
+       policy_revision, intent_expires_at, retention_after, created_at, blurred)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10, $11, $12)`,
+    [id, device.organizationId, session.id, device.userId, device.deviceId, objectKey, input.content_type, policyRev!.policy_revision, expires, retention, now.toISOString(), settings.screenshots.blur],
   );
   const put = await deps.store.presignPut(objectKey, input.content_type, INTENT_TTL_SEC);
-  return { screenshot_id: id, upload_url: put.url, upload_headers: put.headers, expires_at: expires };
+  return { screenshot_id: id, upload_url: put.url, upload_headers: put.headers, expires_at: expires, blur: settings.screenshots.blur };
 }
 
 /** Was the session active (not paused, not stopped) at `at`? */
@@ -89,8 +90,8 @@ export async function completeUpload(
   deps: Deps,
   q: Queryable,
   device: DeviceActor,
-  input: { screenshot_id: string; captured_at: string; sha256: string; bytes: number; width: number; height: number },
-): Promise<{ status: 'verifying' | 'discarded' }> {
+  input: { screenshot_id: string; captured_at: string; sha256: string; bytes: number; width: number; height: number; blurred?: boolean },
+): Promise<{ status: 'verifying' | 'discarded' | 'not_blurred' }> {
   const row = await one<ScreenshotRow>(q, 'SELECT * FROM screenshots WHERE id = $1 AND device_id = $2 FOR UPDATE', [
     input.screenshot_id,
     device.deviceId,
@@ -103,6 +104,12 @@ export async function completeUpload(
   const intentIssued = new Date(row.intent_expires_at).getTime() - INTENT_TTL_SEC * 1000;
   const plausible = capturedAt.getTime() >= intentIssued - 5_000 && capturedAt.getTime() <= now.getTime() + 5_000;
 
+  // SCR-12: the policy blurs screenshots, and this one wasn't (an older agent): never stored.
+  if (row.blurred && input.blurred !== true) {
+    await deps.store.delete(row.object_key);
+    await q.query(`UPDATE screenshots SET status = 'deleted', deleted_at = now(), deletion_reason = 'not_blurred' WHERE id = $1`, [row.id]);
+    return { status: 'not_blurred' };
+  }
   // SCR-02: a capture after stop/pause, or claiming an implausible time, is deleted, not stored.
   if (!plausible || !(await sessionActiveAt(q, row.session_id, capturedAt.toISOString()))) {
     await deps.store.delete(row.object_key);
@@ -138,7 +145,7 @@ export async function verifyScreenshot(deps: Deps, q: Queryable, screenshotId: s
 export async function listScreenshots(q: Queryable, orgId: string, userId: string, r: { from: string; to: string }): Promise<ScreenshotDTO[]> {
   return many<ScreenshotDTO>(
     q,
-    `SELECT s.id, s.session_id, s.user_id, s.captured_at, s.status, s.width, s.height, s.retention_after,
+    `SELECT s.id, s.session_id, s.user_id, s.captured_at, s.status, s.width, s.height, s.retention_after, s.blurred,
             (SELECT d.status FROM deletion_requests d WHERE d.target_id = s.id ORDER BY d.created_at DESC LIMIT 1) AS deletion_request_status,
             (SELECT a.app_name FROM app_usage a WHERE a.session_id = s.session_id AND a.started_at <= s.captured_at
                AND a.started_at + make_interval(secs => a.duration_seconds) > s.captured_at

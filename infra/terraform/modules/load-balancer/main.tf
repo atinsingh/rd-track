@@ -1,6 +1,6 @@
 # One public host, one ALB:
 #   :80   → 301 to https
-#   :443  → /v1/*, /platform/*, /healthz → api target group
+#   :443  → /v1/*, /platform/*, /scim/*, /healthz → api target group
 #           everything else            → web target group
 # Browser and agent traffic to /v1 goes straight to the API; the web app's own /v1
 # rewrite (next.config.ts) is therefore only a fallback behind this ALB, and the

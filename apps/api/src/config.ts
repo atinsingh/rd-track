@@ -1,4 +1,5 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, type KeyObject } from 'node:crypto';
+import type { BillingInterval } from '@rd/contracts';
 
 export interface Config {
   env: 'development' | 'test' | 'production';
@@ -17,9 +18,17 @@ export interface Config {
   /** Public URL of the web app, used in emails and billing redirects. */
   webUrl: string;
   email: { provider: 'console' | 'ses' | 'memory'; from: string; region: string };
+  /**
+   * Where the desktop agent's installers are published (G10): a base URL and the current
+   * version, e.g. a GitHub release (…/releases/download/agent-v0.2.0) or a CDN folder.
+   * Unset: the download page says installers aren't published yet.
+   */
+  agentDownloads: { baseUrl: string | null; version: string | null };
+  /** Store listings of the Track browser extension (website domains, Pro), where published. */
+  browserExtensions: { chrome: string | null; edge: string | null; firefox: string | null };
   billing: {
     provider: 'manual' | 'stripe';
-    stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: { standard: string; pro: string } };
+    stripe: { secretKey: string; webhookSecret: string; apiBase: string; prices: Record<'standard' | 'pro', Record<BillingInterval, string>> };
   };
   storage: {
     bucket: string;
@@ -76,6 +85,15 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     cookieSecure: env === 'production',
     authRateLimitPerMinute: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE ?? 10),
     webUrl: (process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    agentDownloads: {
+      baseUrl: process.env.AGENT_DOWNLOAD_BASE_URL?.replace(/\/$/, '') || null,
+      version: process.env.AGENT_VERSION || null,
+    },
+    browserExtensions: {
+      chrome: process.env.BROWSER_EXTENSION_CHROME_URL || null,
+      edge: process.env.BROWSER_EXTENSION_EDGE_URL || null,
+      firefox: process.env.BROWSER_EXTENSION_FIREFOX_URL || null,
+    },
     email: {
       provider: (process.env.EMAIL_PROVIDER as Config['email']['provider']) ?? (env === 'production' ? 'ses' : 'console'),
       from: process.env.EMAIL_FROM ?? 'RoundDigital Track <no-reply@track.example>',
@@ -87,7 +105,17 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
         secretKey: process.env.STRIPE_SECRET_KEY ?? '',
         webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
         apiBase: process.env.STRIPE_API_BASE ?? 'https://api.stripe.com',
-        prices: { standard: process.env.STRIPE_PRICE_STANDARD ?? '', pro: process.env.STRIPE_PRICE_PRO ?? '' },
+        // One Stripe price per plan and term. The *_MONTHLY names fall back to the older single-price names.
+        prices: {
+          standard: {
+            month: process.env.STRIPE_PRICE_STANDARD_MONTHLY ?? process.env.STRIPE_PRICE_STANDARD ?? '',
+            year: process.env.STRIPE_PRICE_STANDARD_ANNUAL ?? '',
+          },
+          pro: {
+            month: process.env.STRIPE_PRICE_PRO_MONTHLY ?? process.env.STRIPE_PRICE_PRO ?? '',
+            year: process.env.STRIPE_PRICE_PRO_ANNUAL ?? '',
+          },
+        },
       },
     },
     storage: {

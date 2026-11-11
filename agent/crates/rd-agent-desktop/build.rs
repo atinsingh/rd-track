@@ -11,9 +11,12 @@ fn main() {
 }
 
 /// Must match `generate_handler!` in `src/main.rs`.
-const COMMANDS: [&str; 17] = [
+const COMMANDS: [&str; 26] = [
     "get_view",
     "enroll",
+    "sign_in",
+    "cancel_sign_in",
+    "reopen_sign_in",
     "list_projects",
     "prepare_session",
     "start_session",
@@ -21,6 +24,9 @@ const COMMANDS: [&str; 17] = [
     "pause_session",
     "resume_session",
     "stop_session",
+    "resolve_idle",
+    "resolve_reminder",
+    "set_reminder_settings",
     "dismiss_banner",
     "open_dashboard",
     "open_permission_settings",
@@ -29,4 +35,7 @@ const COMMANDS: [&str; 17] = [
     "quit_app",
     "reenroll",
     "install_update",
+    "request_email_code",
+    "get_open_at_login",
+    "set_open_at_login",
 ];

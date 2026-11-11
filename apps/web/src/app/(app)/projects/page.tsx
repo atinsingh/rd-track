@@ -1,5 +1,6 @@
 'use client';
 
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { ProjectBudgetCard } from '@/components/ProjectBudgetCard';
@@ -12,11 +13,16 @@ import { byName, formatDuration } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { useApi } from '@/lib/useApi';
+import { t } from '@/lib/i18n';
 import { NoAccess } from '../NoAccess';
 
 export default function ProjectsPage() {
   const { access, timezone: tz } = useMe();
-  const [projectId, setProjectId] = useState<string | null>(null);
+  // ?project= (from ⌘K) picks the project; choosing in the page wins until the link changes again.
+  const requested = useSearchParams().get('project');
+  const [choice, setChoice] = useState<{ from: string | null; id: string | null }>({ from: requested, id: requested });
+  const projectId = choice.from === requested ? choice.id : requested;
+  const setProjectId = (id: string | null) => setChoice({ from: requested, id });
   const [day, setDay] = useState(() => todayInTz(tz));
   const week = startOfWeek(day);
   const range = daysRange(week, 7, tz);
@@ -27,23 +33,23 @@ export default function ProjectsPage() {
     rd.projects.report(current!.id, { from: range.from, to: range.to }, signal),
   );
 
-  if (!access.managesProjects) return <NoAccess what="Project reports are for project managers." />;
+  if (!access.managesProjects) return <NoAccess what={t('mgr.proj.noAccess')} />;
   if (projects.error) return <ErrorState error={projects.error} onRetry={projects.reload} />;
-  if (!projects.data) return <Loading label="Loading your projects" />;
-  if (!current) return <Empty title="You don't manage any projects yet" />;
+  if (!projects.data) return <Loading label={t('mgr.proj.loading')} />;
+  if (!current) return <Empty title={t('mgr.proj.none')} />;
 
   const total = report.data?.members.reduce((a, m) => a + m.seconds, 0) ?? 0;
 
   return (
     <>
       <PageHeader
-        eyebrow={`Project manager${current.client_ref ? ` · ${current.client_ref}` : ''}`}
-        title={`Project · ${current.name}`}
-        description="Time per person on this project. Project managers see time only — no computer activity, apps or screenshots."
+        eyebrow={`${t('mgr.proj.eyebrow')}${current.client_ref ? ` · ${current.client_ref}` : ''}`}
+        title={t('mgr.proj.title', { name: current.name })}
+        description={t('mgr.proj.description')}
         actions={
           <>
             {sorted.length > 1 ? (
-              <InlineSelect label="Project" value={current.id} onChange={(e) => setProjectId(e.target.value)}>
+              <InlineSelect label={t('mgr.project')} value={current.id} onChange={(e) => setProjectId(e.target.value)}>
                 {sorted.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.name}
@@ -62,27 +68,27 @@ export default function ProjectsPage() {
           </>
         }
       />
-      <Banner tag="NOTE">Sorted by name. Hours include agent-tracked and approved manual time.</Banner>
+      <Banner tag="NOTE">{t('mgr.proj.note')}</Banner>
       <ProjectBudgetCard key={current.id} projectId={current.id} />
       {report.error ? (
         <ErrorState error={report.error} onRetry={report.reload} />
       ) : !report.data ? (
-        <Loading label="Loading the project report" />
+        <Loading label={t('mgr.proj.loadingReport')} />
       ) : (
         <>
-          <Card title="People on this project" subtitle={`${formatDuration(total)} in total`}>
+          <Card title={t('mgr.proj.people')} subtitle={t('mgr.proj.total', { total: formatDuration(total) })}>
             {report.data.members.length === 0 ? (
-              <Empty title="No time on this project in this period" />
+              <Empty title={t('mgr.proj.noTime')} />
             ) : (
-              <TableBox label="Time per person">
+              <TableBox label={t('mgr.proj.perPerson')}>
                 <table className={tableClass} style={{ minWidth: 420 }}>
                   <thead>
                     <tr>
                       <th scope="col" aria-sort="ascending">
-                        Name ▴
+                        {t('mgr.col.nameSorted')}
                       </th>
                       <th scope="col" className={numClass}>
-                        Time on project
+                        {t('mgr.proj.timeOn')}
                       </th>
                     </tr>
                   </thead>
@@ -99,7 +105,7 @@ export default function ProjectsPage() {
             )}
           </Card>
           <StackedDailyChart
-            title="Hours on this project, per day"
+            title={t('mgr.proj.chart')}
             tz={tz}
             singleSeriesName={current.name}
             daily={report.data.daily.map((d) => ({

@@ -27,7 +27,8 @@
   color: var(--text-2);
 }
 .keep {
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* Labels keep room in longer languages; long values wrap. */
+  grid-template-columns: minmax(9em, 1fr) minmax(0, auto);
 }
 .links {
   display: flex;
