@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { QRCodeSVG } from 'qrcode.react';
 import { Suspense, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
@@ -146,11 +147,19 @@ function Enroll({ next, chosen = false }: { next: string; chosen?: boolean }) {
           <ol className={s.steps}>
             <li>{t('mfa.step1')}</li>
           </ol>
-          <div className={s.secret} aria-label={t('mfa.secretKey')}>
-            {enroll.data.secret_base32.replace(/(.{4})/g, '$1 ').trim()}
+          {/* Rendered in the browser: the secret must never go to a QR image service. */}
+          <div className={s.qr}>
+            <QRCodeSVG value={enroll.data.otpauth_url} size={176} level="M" title={t('mfa.qrTitle')} />
           </div>
-          <p className={s.fine}>{t('mfa.otpauth')}</p>
-          <div className={s.otpauth}>{enroll.data.otpauth_url}</div>
+          <details className={s.manual}>
+            <summary>{t('mfa.cantScan')}</summary>
+            <p className={s.fine}>{t('mfa.secretKey')}</p>
+            <div className={s.secret} aria-label={t('mfa.secretKey')}>
+              {enroll.data.secret_base32.replace(/(.{4})/g, '$1 ').trim()}
+            </div>
+            <p className={s.fine}>{t('mfa.otpauth')}</p>
+            <div className={s.otpauth}>{enroll.data.otpauth_url}</div>
+          </details>
           <ol className={s.steps} start={2}>
             <li>{t('mfa.step2')}</li>
           </ol>

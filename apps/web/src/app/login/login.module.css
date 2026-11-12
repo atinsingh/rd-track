@@ -159,6 +159,26 @@
   padding: 10px 12px;
   user-select: all;
 }
+.qr {
+  /* Always dark-on-white, whatever the theme: phone cameras need the contrast. */
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid var(--rule);
+  padding: 12px;
+  line-height: 0;
+}
+.manual {
+  font-size: 13px;
+  color: var(--text-2);
+}
+.manual summary {
+  cursor: pointer;
+}
+.manual[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .steps {
   margin: 0;
   padding-left: 18px;

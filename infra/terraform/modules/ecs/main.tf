@@ -141,7 +141,11 @@ data "aws_iam_policy_document" "app_task" {
       actions = ["ses:SendEmail", "ses:SendRawEmail"]
       # Every identity in the account, not just the sending one: while the account is in
       # the SES sandbox, SES also authorizes the call against each recipient's identity.
-      resources = [replace(var.ses_identity_arn, "/identity\\/.*$/", "identity/*")]
+      # SES also authorizes the call against the configuration set the identity sends through.
+      resources = [
+        replace(var.ses_identity_arn, "/identity\\/.*$/", "identity/*"),
+        replace(var.ses_identity_arn, "/identity\\/.*$/", "configuration-set/${var.name}-transactional"),
+      ]
       # The wildcard is only for recipients: mail may still only be sent from the app's domain.
       condition {
         test     = "StringLike"
