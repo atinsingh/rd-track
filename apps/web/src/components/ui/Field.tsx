@@ -4,6 +4,8 @@ import s from './ui.module.css';
 
 interface FieldChrome {
   label: ReactNode;
+  /** A small control inside the right edge of the input (e.g. show/hide password). */
+  trailing?: ReactNode;
   hint?: ReactNode;
   error?: string | null;
   className?: string;
@@ -20,20 +22,30 @@ function describedBy(hint: unknown, error: unknown, hintId: string, errId: strin
   return ids.length ? ids.join(' ') : undefined;
 }
 
-export function TextField({ label, hint, error, className, id, ...rest }: FieldChrome & InputHTMLAttributes<HTMLInputElement>) {
+export function TextField({ label, hint, error, trailing, className, id, ...rest }: FieldChrome & InputHTMLAttributes<HTMLInputElement>) {
   const { fid, hintId, errId } = useFieldIds(id);
+  const input = (
+    <input
+      id={fid}
+      className={s.input}
+      aria-invalid={error ? true : undefined}
+      aria-describedby={describedBy(hint, error, hintId, errId)}
+      {...rest}
+    />
+  );
   return (
     <div className={cx(s.field, className)}>
       <label htmlFor={fid} className={s.fieldLabel}>
         {label}
       </label>
-      <input
-        id={fid}
-        className={s.input}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={describedBy(hint, error, hintId, errId)}
-        {...rest}
-      />
+      {trailing ? (
+        <div className={s.inputWrap}>
+          {input}
+          {trailing}
+        </div>
+      ) : (
+        input
+      )}
       {hint ? (
         <span id={hintId} className={s.fieldHint}>
           {hint}

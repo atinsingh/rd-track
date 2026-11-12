@@ -575,15 +575,22 @@ export interface ChangePlanResponse {
 
 // ───────────────────────── signup ─────────────────────────
 
+const signupOrgName = z.string().trim().min(2).max(200);
+const signupDisplayName = z.string().trim().min(1).max(200);
 export const signupRequest = z.strictObject({
-  org_name: z.string().trim().min(2).max(200),
-  display_name: z.string().trim().min(1).max(200),
+  /** The two names may be left for the confirmation step (signupVerifyRequest). */
+  org_name: signupOrgName.optional(),
+  display_name: signupDisplayName.optional(),
   email: z.email().max(320),
   password: z.string().min(12).max(200),
   /** The subscription terms and data processing agreement (TERMS_VERSION). */
   accept_terms: z.literal(true, { error: 'Accept the terms and the data processing agreement to continue.' }),
 });
-export const signupVerifyRequest = z.strictObject({ token: z.string().min(20).max(200) });
+export const signupVerifyRequest = z.strictObject({
+  token: z.string().min(20).max(200),
+  org_name: signupOrgName.optional(),
+  display_name: signupDisplayName.optional(),
+});
 export const changePlanRequest = z.strictObject({
   plan: z.enum(['free', 'standard', 'pro']),
   seats: z.number().int().min(0).max(100_000),

@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TERMS_VERSION } from '@rd/contracts';
 import { encodeForm, signStripePayload } from '../src/billing/stripe';
 import { makeOrg, testEnv, type TestEnv } from './helpers';
@@ -106,6 +106,42 @@ describe('self-serve signup', () => {
     const org = await env.deps.pool.query(`SELECT o.terms_version, o.terms_accepted_at IS NOT NULL AS accepted, u.email = 'ada@acme.test' AS by_signer
       FROM organizations o JOIN users u ON u.id = o.terms_accepted_by WHERE o.name = 'Acme Studio'`);
     expect(org.rows[0]).toEqual({ terms_version: TERMS_VERSION, accepted: true, by_signer: true });
+  });
+
+  it('takes the names at the confirmation step when signup left them out', async () => {
+    const res = await env.app.inject({
+      method: 'POST',
+      url: '/v1/signup',
+      payload: { email: 'cy@later.test', password: 'a-long-enough-password', accept_terms: true },
+    });
+    expect(res.statusCode).toBe(202);
+    const token = /token=([A-Za-z0-9_-]+)/.exec(env.email.sent.at(-1)!.text)![1]!;
+
+    const bare = await env.app.inject({ method: 'POST', url: '/v1/signup/verify', payload: { token } });
+    expect(bare.statusCode).toBe(400);
+    expect(JSON.parse(bare.body).error.code).toBe('signup_details_required');
+
+    // The failed attempt didn't use up the link.
+    const verify = await env.app.inject({ method: 'POST', url: '/v1/signup/verify', payload: { token, org_name: 'Later Ltd', display_name: 'Cy' } });
+    expect(verify.statusCode).toBe(201);
+    const cookie = String(verify.headers['set-cookie']).split(';')[0]!;
+    const me = JSON.parse((await env.app.inject({ method: 'GET', url: '/v1/me', headers: { cookie } })).body);
+    expect(me.user).toMatchObject({ email: 'cy@later.test', display_name: 'Cy' });
+    expect(me.organization.name).toBe('Later Ltd');
+  });
+
+  it('answers a failed confirmation email with a retryable error, and the retry works', async () => {
+    const payload = { email: 'di@flaky.test', password: 'a-long-enough-password', accept_terms: true };
+    const send = vi.spyOn(env.email, 'send').mockRejectedValueOnce(new Error('SES is down'));
+    const failed = await env.app.inject({ method: 'POST', url: '/v1/signup', payload });
+    send.mockRestore();
+    expect(failed.statusCode).toBe(503);
+    expect(JSON.parse(failed.body).error.code).toBe('email_unavailable');
+
+    const retry = await env.app.inject({ method: 'POST', url: '/v1/signup', payload });
+    expect(retry.statusCode).toBe(202);
+    expect(env.email.sent.at(-1)).toMatchObject({ to: 'di@flaky.test' });
+    expect(env.email.sent.at(-1)!.text).toContain('token=');
   });
 
   it("doesn't reveal whether an email already has an account", async () => {

@@ -16,7 +16,7 @@ const TOKEN_TTL_MS = 24 * 3600_000;
 export async function requestSignup(
   deps: Deps,
   q: Queryable,
-  input: { org_name: string; display_name: string; email: string; password: string; accept_terms: true },
+  input: { org_name?: string | undefined; display_name?: string | undefined; email: string; password: string; accept_terms: true },
 ): Promise<{ to: string; subject: string; text: string }> {
   const existing = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [input.email]);
   if (existing) {
@@ -32,8 +32,9 @@ export async function requestSignup(
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
     [
       input.email,
-      input.display_name,
-      input.org_name,
+      // Empty until the confirmation step supplies them.
+      input.display_name ?? '',
+      input.org_name ?? '',
       await hashPassword(input.password),
       sha256Hex(token),
       new Date(deps.now().getTime() + TOKEN_TTL_MS).toISOString(),
@@ -44,7 +45,7 @@ export async function requestSignup(
   return {
     to: input.email,
     subject: 'Confirm your RoundDigital Track account',
-    text: `Welcome to RoundDigital Track.\n\nConfirm your email address to start a 14-day Pro trial for ${input.org_name}:\n${deps.config.webUrl}/signup/verify?token=${token}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.`,
+    text: `Welcome to RoundDigital Track.\n\nConfirm your email address to start a 14-day Pro trial${input.org_name ? ` for ${input.org_name}` : ''}:\n${deps.config.webUrl}/signup/verify?token=${token}\n\nThe link expires in 24 hours. If you didn't sign up, ignore this email.`,
   };
 }
 
@@ -59,7 +60,12 @@ function slugify(name: string): string {
 }
 
 /** Verifies the token once and creates the organization (Pro trial) with its first admin. */
-export async function completeSignup(deps: Deps, q: Queryable, token: string): Promise<{ userId: string; organizationId: string }> {
+export async function completeSignup(
+  deps: Deps,
+  q: Queryable,
+  token: string,
+  names: { org_name?: string | undefined; display_name?: string | undefined } = {},
+): Promise<{ userId: string; organizationId: string }> {
   const req = await one<{ id: string; email: string; display_name: string; org_name: string; password_hash: string; terms_version: string | null }>(
     q,
     `UPDATE signup_requests SET completed_at = $2
@@ -68,13 +74,17 @@ export async function completeSignup(deps: Deps, q: Queryable, token: string): P
     [sha256Hex(token), deps.now().toISOString()],
   );
   if (!req) throw new AppError(400, 'signup_link_invalid', 'This link is invalid, expired or already used. Sign up again to get a new one.');
+  // Thrown inside the caller's transaction, so the link is not used up and can be retried.
+  const orgName = names.org_name ?? req.org_name;
+  const displayName = names.display_name ?? req.display_name;
+  if (!orgName || !displayName) throw new AppError(400, 'signup_details_required', 'Add your name and your organization’s name to finish.');
   const taken = await one(q, 'SELECT 1 FROM users WHERE lower(email) = lower($1)', [req.email]);
   if (taken) throw new AppError(400, 'signup_link_invalid', 'An account with this email already exists. Sign in instead.');
 
   const created = await createOrganization(
     deps,
     q,
-    { name: req.org_name, slug: slugify(req.org_name), region: 'ca-central-1', admin_email: req.email, admin_name: req.display_name, seats: 0 },
+    { name: orgName, slug: slugify(orgName), region: 'ca-central-1', admin_email: req.email, admin_name: displayName, seats: 0 },
     { kind: 'system' },
     // The person signing up usually tracks their own time too; that's one of the two free seats.
     { adminPasswordHash: req.password_hash, adminTracking: true },

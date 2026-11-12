@@ -6,6 +6,7 @@ import { SSO_ERRORS, type SsoDiscoverResponse, type SsoErrorCode } from '@rd/con
 import { Button } from '@/components/ui/Button';
 import { ActionError } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
+import { PasswordField } from '@/components/ui/PasswordField';
 import { Banner } from '@/components/ui/Layout';
 import { ApiError, rd } from '@/lib/api';
 import { ssoErrorText, useT } from '@/lib/i18n';
@@ -79,7 +80,7 @@ function LoginForm() {
   return (
     <form className={s.form} onSubmit={submit} noValidate>
       <span className="eyebrow">{t('login.eyebrow')}</span>
-      <h1 style={{ fontSize: 28 }}>{t('login.title')}</h1>
+      <h1 className={s.title}>{t('login.title')}</h1>
       {ssoError && SSO_ERRORS[ssoError] ? (
         <Banner tone="warn" role="alert" title={t('login.ssoFailed')}>
           {ssoErrorText(t, ssoError)}
@@ -90,6 +91,8 @@ function LoginForm() {
         type="email"
         name="email"
         autoComplete="username"
+        inputMode="email"
+        autoFocus
         required
         value={email}
         onChange={(e) => {
@@ -98,9 +101,8 @@ function LoginForm() {
         }}
       />
       {showPassword ? (
-        <TextField
+        <PasswordField
           label={t('login.password')}
-          type="password"
           name="password"
           autoComplete="current-password"
           required
@@ -129,14 +131,12 @@ function LoginForm() {
       ) : null}
       {showPassword ? (
         <p className={s.fine}>
-          <a href="/reset">{t('login.forgot')}</a>
+          <a href="/reset">{t('login.forgot')}</a> · {t('login.mfaNote')}
         </p>
       ) : null}
-      <p className={s.fine}>{t('login.mfaNote')}</p>
-      <p className={s.fine}>
+      <p className={s.alt}>
         {t('login.newPrefix')} <a href="/signup">{t('login.newLink')}</a> {t('login.newSuffix')}
-      </p>
-      <p className={s.fine}>
+        <br />
         {t('login.clientPrefix')} <a href="/client/login">{t('login.clientLink')}</a>.
       </p>
     </form>

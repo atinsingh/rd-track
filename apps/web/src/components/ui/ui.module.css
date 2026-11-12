@@ -191,6 +191,32 @@
 .input[aria-invalid='true'] {
   border-color: var(--danger-text);
 }
+.inputWrap {
+  position: relative;
+}
+.inputWrap .input {
+  padding-right: 68px;
+}
+.reveal {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  min-height: var(--target-sm);
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.reveal:hover {
+  background: var(--canvas);
+  color: var(--text);
+}
 textarea.input {
   padding: 10px 12px;
   resize: vertical;

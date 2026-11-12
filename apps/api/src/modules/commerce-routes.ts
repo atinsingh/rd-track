@@ -4,6 +4,7 @@ import { verifyStripeSignature } from '../billing/stripe';
 import type { Deps } from '../context';
 import { withTx } from '../db/pool';
 import { ADMIN_ROLES, SESSION_COOKIE, requireRole, setSessionCookie } from '../http';
+import { AppError } from '../lib/errors';
 import { parse } from '../lib/validate';
 import { audit } from './audit/service';
 import { applyStripeEvent, billingPortalUrl, changePlan, subscriptionDTO } from './billing/service';
@@ -18,14 +19,20 @@ export async function commerceRoutes(app: FastifyInstance, deps: Deps) {
     const body = parse(signupRequest, req.body);
     const message = await withTx(pool, (tx) => requestSignup(deps, tx, body));
     // Sent after commit; the same response whether or not the address already has an account.
-    await deps.email.send(message);
+    // The request is already saved, so sending the same form again just issues a new link.
+    try {
+      await deps.email.send(message);
+    } catch (err) {
+      req.log.error({ err }, 'signup email failed');
+      throw new AppError(503, 'email_unavailable', 'We couldn’t send the confirmation email. Try again in a moment.');
+    }
     return reply.code(202).send({ ok: true });
   });
 
   app.post('/v1/signup/verify', limited(Math.max(10, deps.config.authRateLimitPerMinute)), async (req, reply) => {
-    const { token } = parse(signupVerifyRequest, req.body);
+    const { token, ...names } = parse(signupVerifyRequest, req.body);
     const session = await withTx(pool, async (tx) => {
-      const { userId, organizationId } = await completeSignup(deps, tx, token);
+      const { userId, organizationId } = await completeSignup(deps, tx, token, names);
       await audit(tx, {
         organizationId,
         actor: { kind: 'system' },

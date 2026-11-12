@@ -14,7 +14,7 @@ export function AuthFrame({ children, about }: { children: ReactNode; about?: Re
         <Image src="/brand/rd-logo-reversed.png" alt="RoundDigital" width={112} height={24} className={s.reversed} />
         {about ?? (
           <>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div className={s.pitch}>
               <h2>{t('auth.headline')}</h2>
               <ul>
                 <li>{t('auth.point1')}</li>
@@ -22,9 +22,7 @@ export function AuthFrame({ children, about }: { children: ReactNode; about?: Re
                 <li>{t('auth.point3')}</li>
               </ul>
             </div>
-            <p className={s.fine} style={{ color: 'var(--ink-muted)' }}>
-              {t('auth.neverRecorded', { list: t('auth.neverList') })}
-            </p>
+            <p className={s.never}>{t('auth.neverRecorded', { list: t('auth.neverList') })}</p>
           </>
         )}
       </aside>

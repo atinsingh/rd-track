@@ -137,9 +137,11 @@ data "aws_iam_policy_document" "app_task" {
   dynamic "statement" {
     for_each = var.ses_identity_arn == null ? [] : [1]
     content {
-      sid       = "SendEmail"
-      actions   = ["ses:SendEmail", "ses:SendRawEmail"]
-      resources = [var.ses_identity_arn]
+      sid     = "SendEmail"
+      actions = ["ses:SendEmail", "ses:SendRawEmail"]
+      # Every identity in the account, not just the sending one: while the account is in
+      # the SES sandbox, SES also authorizes the call against each recipient's identity.
+      resources = [replace(var.ses_identity_arn, "/identity\\/.*$/", "identity/*")]
     }
   }
 }

@@ -389,9 +389,10 @@ export const rd = {
   auth: {
     login: (email: string, password: string) =>
       post<LoginResponse>('/v1/auth/login', { email, password }, { redirectOnAuth: false }),
-    signup: (body: { org_name: string; display_name: string; email: string; password: string; accept_terms: true }) =>
+    signup: (body: { email: string; password: string; accept_terms: true }) =>
       post<{ ok: true }>('/v1/signup', body, { redirectOnAuth: false }),
-    verifySignup: (token: string) => post<{ ok: true }>('/v1/signup/verify', { token }, { redirectOnAuth: false }),
+    verifySignup: (body: { token: string; org_name: string; display_name: string }) =>
+      post<{ ok: true }>('/v1/signup/verify', body, { redirectOnAuth: false }),
     mfaVerify: (code: string) => ok(post('/v1/auth/mfa/verify', { code }, { redirectOnAuth: false })),
     mfaEnroll: () => post<MfaEnrollResponse>('/v1/auth/mfa/enroll', {}, { redirectOnAuth: false }),
     mfaEnrollConfirm: (code: string) => post<RecoveryCodesResponse>('/v1/auth/mfa/enroll/confirm', { code }, { redirectOnAuth: false }),
@@ -657,6 +658,8 @@ export function describeError(e: ApiError): string {
       return t('error.inactive');
     case 'network_error':
       return t('error.network');
+    case 'email_unavailable':
+      return t('error.emailUnavailable');
     default:
       return e.message || t('error.generic');
   }
