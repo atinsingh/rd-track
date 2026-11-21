@@ -90,7 +90,7 @@ jobs:
             [ -n "${!v}" ] || { echo "::error::GitHub environment $ENVIRONMENT is missing variable for $v"; exit 1; }
           done
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           ref: ${{ env.SHA }}
           fetch-depth: 0

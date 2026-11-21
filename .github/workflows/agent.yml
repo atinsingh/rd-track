@@ -35,13 +35,13 @@ jobs:
     name: Format and UI build check
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --check
         working-directory: agent
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       # public/*.js is committed so `cargo build` needs no Node; make sure it matches src/
@@ -59,7 +59,7 @@ jobs:
           node build.mjs
           (cd dist/chromium && zip -qr ../rd-track-extension-chromium.zip .)
           (cd dist/firefox && zip -qr ../rd-track-extension-firefox.zip .)
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: browser-extension
           path: agent/browser-extension/dist/*.zip
@@ -76,7 +76,7 @@ jobs:
       run:
         working-directory: agent
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -133,7 +133,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.rust_targets }}
@@ -141,7 +141,7 @@ jobs:
         with:
           workspaces: agent
           key: bundle
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
@@ -229,7 +229,7 @@ jobs:
           codesign --verify --deep --strict --verbose=2 "$app" || true
           spctl --assess --type execute --verbose "$app" || echo "Not notarized (expected without Apple secrets)."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: rd-track-${{ runner.os }}-${{ github.sha }}
           if-no-files-found: error
