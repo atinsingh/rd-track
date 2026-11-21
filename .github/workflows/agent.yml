@@ -44,6 +44,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: false # the agent jobs use npx only; pnpm is not installed here
       # public/*.js is committed so `cargo build` needs no Node; make sure it matches src/
       # (a changed or a new, uncommitted file both fail).
       - name: UI type-check and compiled output up to date
@@ -144,6 +145,7 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          package-manager-cache: false # the agent jobs use npx only; pnpm is not installed here
 
       - name: Version from tag
         if: startsWith(github.ref, 'refs/tags/agent-v')
