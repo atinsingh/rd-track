@@ -16,6 +16,11 @@ on:
       - "agent/**"
       - ".github/workflows/agent.yml"
   workflow_dispatch:
+    inputs:
+      notarize:
+        description: "Notarize the macOS app with Apple (untick for a signed test build when the Apple ID secrets are not ready)"
+        type: boolean
+        default: true
 
 concurrency:
   group: agent-${{ github.ref }}
@@ -207,11 +212,14 @@ jobs:
           # Updater signatures (.sig files next to each installer).
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          SKIP_NOTARIZE: ${{ github.event_name == 'workflow_dispatch' && !inputs.notarize }}
         run: |
           # Empty secrets must not reach the bundler as empty strings.
           for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -z "${!v}" ]; then unset "$v"; fi
           done
+          # A manual test build may skip notarization; a tagged release never does.
+          if [ "$SKIP_NOTARIZE" = "true" ]; then unset APPLE_ID APPLE_PASSWORD; fi
           npx --yes @tauri-apps/cli@${TAURI_CLI_VERSION} build ${{ matrix.tauri_args }} --config ci.tauri.json
 
       - name: Verify macOS signature
