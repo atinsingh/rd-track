@@ -45,8 +45,13 @@ pub const OWN_APP_IDENTIFIERS: [&str; 3] = [
     "rd-agent-desktop",
 ];
 
-/// `true` if `app` is RoundDigital Track itself (identifier, case-insensitive).
+/// `true` if `app` is RoundDigital Track itself. When the platform reports a pid,
+/// only this process counts: another app renamed to our bundle id or exe name is
+/// still tracked. The identifier match is a fallback for sources without a pid.
 pub fn is_own_app(app: &ForegroundAppInfo) -> bool {
+    if let Some(pid) = app.pid {
+        return pid == std::process::id();
+    }
     let id = app.app_identifier.trim();
     OWN_APP_IDENTIFIERS
         .iter()
@@ -101,6 +106,8 @@ impl AppTracker {
                         name
                     },
                     app_identifier,
+                    // Segments compare by app, not process: a restart isn't a new app.
+                    pid: None,
                 }
             })
             .filter(|a| !a.app_identifier.is_empty());
@@ -172,6 +179,7 @@ mod tests {
         Some(ForegroundAppInfo {
             app_identifier: id.into(),
             app_name: id.to_uppercase(),
+            pid: None,
         })
     }
 
@@ -191,6 +199,17 @@ mod tests {
         ] {
             assert!(!is_own_app(&app(id).unwrap()), "{id}");
         }
+    }
+
+    #[test]
+    fn a_renamed_app_with_another_pid_is_not_ours() {
+        let me = std::process::id();
+        let mut spoof = app("digital.round.track").unwrap();
+        spoof.pid = Some(me.wrapping_add(1));
+        assert!(!is_own_app(&spoof));
+        let mut real = app("com.example.anything").unwrap();
+        real.pid = Some(me);
+        assert!(is_own_app(&real));
     }
 
     fn t0() -> DateTime<Utc> {
@@ -288,6 +307,7 @@ mod tests {
             Some(ForegroundAppInfo {
                 app_identifier: " \n".into(),
                 app_name: "ghost".into(),
+                pid: None,
             }),
         );
         assert!(out.is_empty());
@@ -299,6 +319,7 @@ mod tests {
             Some(ForegroundAppInfo {
                 app_identifier: "svc.exe".into(),
                 app_name: "\u{7}".into(),
+                pid: None,
             }),
         );
         assert_eq!(tr.flush()[0].app_name, "svc.exe");

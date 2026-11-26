@@ -113,6 +113,7 @@ impl SimForeground {
         s.pinned = Some(ForegroundAppInfo {
             app_identifier: app_identifier.into(),
             app_name: app_identifier.into(),
+            pid: None,
         });
         s
     }
@@ -132,6 +133,7 @@ impl ForegroundApp for SimForeground {
         Some(ForegroundAppInfo {
             app_identifier: id.into(),
             app_name: name.into(),
+            pid: None,
         })
     }
 

@@ -168,6 +168,7 @@ impl FakeForeground {
         *self.0.lock().unwrap() = id.map(|i| ForegroundAppInfo {
             app_identifier: i.into(),
             app_name: format!("{i} app"),
+            pid: None,
         });
     }
 }

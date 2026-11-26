@@ -219,7 +219,7 @@ impl Drop for HookInputCounter {
 // ----- foreground app ---------------------------------------------------------------
 
 /// Image path of the process owning the foreground window. Never reads the title.
-fn foreground_image_path() -> Option<String> {
+fn foreground_image_path() -> Option<(String, u32)> {
     // SAFETY: no arguments; may return null (secure desktop, no foreground window).
     let hwnd: HWND = unsafe { GetForegroundWindow() };
     if hwnd.is_null() {
@@ -250,7 +250,7 @@ fn foreground_image_path() -> Option<String> {
         return None;
     }
     let len = (len as usize).min(buf.len());
-    Some(String::from_utf16_lossy(&buf[..len]))
+    Some((String::from_utf16_lossy(&buf[..len]), pid))
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -318,7 +318,7 @@ impl Default for WinForeground {
 
 impl ForegroundApp for WinForeground {
     fn current(&mut self) -> Option<ForegroundAppInfo> {
-        let path = foreground_image_path()?;
+        let (path, pid) = foreground_image_path()?;
         let identifier = file_name(&path).to_owned();
         if identifier.is_empty() {
             return None;
@@ -336,6 +336,7 @@ impl ForegroundApp for WinForeground {
         Some(ForegroundAppInfo {
             app_identifier: identifier,
             app_name: name,
+            pid: Some(pid),
         })
     }
 }

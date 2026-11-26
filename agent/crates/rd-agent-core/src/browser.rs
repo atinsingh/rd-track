@@ -446,6 +446,7 @@ mod tests {
         ForegroundAppInfo {
             app_identifier: id.into(),
             app_name: id.into(),
+            pid: None,
         }
     }
 

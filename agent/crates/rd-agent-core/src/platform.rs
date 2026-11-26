@@ -60,6 +60,9 @@ pub struct ForegroundAppInfo {
     pub app_identifier: String,
     /// Display name of the application.
     pub app_name: String,
+    /// Process id of the foreground app, when the platform reports one. Used to
+    /// recognise RoundDigital Track itself without trusting its (spoofable) name.
+    pub pid: Option<u32>,
 }
 
 /// Reports the foreground application.

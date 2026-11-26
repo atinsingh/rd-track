@@ -6,8 +6,8 @@
 //!   so no keystroke ever reaches this process. If the counters stay flat while the idle
 //!   timer shows input (some macOS releases may gate them behind Input Monitoring),
 //!   counts are reported unavailable — see [`super::logic::CounterHealth`].
-//!   Once counters are known to work, an idle timer that keeps saying "input just
-//!   now" while they stay flat (background or synthetic events) is ignored — see
+//!   Once counters are known to work, an idle timer kept near zero by background or
+//!   synthetic events while they stay flat cannot keep the person active — see
 //!   [`super::logic::IdleTimerGuard`].
 //! * [`MacForeground`]: `NSWorkspace.sharedWorkspace.frontmostApplication` →
 //!   `bundleIdentifier` / `localizedName`. Window titles are never read.
@@ -155,9 +155,11 @@ impl ForegroundApp for MacForeground {
             let bundle = app.bundleIdentifier().map(|s| s.to_string());
             let name = app.localizedName().map(|s| s.to_string());
             let identifier = bundle.clone().or_else(|| name.clone())?;
+            let pid = u32::try_from(app.processIdentifier()).ok();
             Some(ForegroundAppInfo {
                 app_name: name.unwrap_or_else(|| identifier.clone()),
                 app_identifier: identifier,
+                pid,
             })
         })
     }
