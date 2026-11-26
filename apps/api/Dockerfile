@@ -22,12 +22,18 @@ COPY --from=build /out /app
 RUN mkdir -p /usr/local/share/rds
 ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/rds/rds-global-bundle.pem
 # Work location (policy `location.capture`): DB-IP "IP to City Lite" (CC BY 4.0, no key), read
-# offline so no employee IP leaves the server. Monthly file; bump GEOIP_MONTH to refresh (see
-# docs/runbooks/deploy.md). Missing or unreadable: IPs are stored without a city.
-ARG GEOIP_MONTH=2026-11
-RUN mkdir -p /usr/local/share/geoip
-ADD --chmod=0644 https://download.db-ip.com/free/dbip-city-lite-${GEOIP_MONTH}.mmdb.gz /usr/local/share/geoip/dbip-city-lite.mmdb.gz
-RUN gunzip /usr/local/share/geoip/dbip-city-lite.mmdb.gz
+# offline so no employee IP leaves the server. DB-IP only serves the current month (older
+# files 404), so this month's file is fetched, else last month's. Best effort: a failed fetch
+# never fails the build; IPs are then stored without a city (docs/runbooks/deploy.md §2.1).
+RUN mkdir -p /usr/local/share/geoip && node -e "\
+  const zlib = require('node:zlib'), fs = require('node:fs');\
+  const month = (back) => { const d = new Date(); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() - back); return d.toISOString().slice(0, 7); };\
+  (async () => { for (const m of [month(0), month(1)]) {\
+    const r = await fetch('https://download.db-ip.com/free/dbip-city-lite-' + m + '.mmdb.gz');\
+    if (!r.ok) continue;\
+    fs.writeFileSync('/usr/local/share/geoip/dbip-city-lite.mmdb', zlib.gunzipSync(Buffer.from(await r.arrayBuffer())));\
+    return console.log('GeoIP ' + m);\
+  } console.warn('GeoIP database not downloaded'); })().catch((e) => console.warn('GeoIP database not downloaded', e));"
 ENV GEOIP_DB_PATH=/usr/local/share/geoip/dbip-city-lite.mmdb
 USER node
 EXPOSE 4000

@@ -70,7 +70,7 @@ export async function sessionsFor(deps: Deps, q: Queryable, orgId: string, userI
   );
   const pauses = await pauseIntervals(q, rows.map((s) => s.id), { from: '1970-01-01T00:00:00Z', to: '9999-01-01T00:00:00Z' }, deps.now());
   const idle = await idleAdjustmentsFor(q, rows.map((s) => s.id));
-  const usual = (await usualLocations(q, orgId, [userId], r.to)).get(userId);
+  const usual = (await usualLocations(q, orgId, [userId], deps.now().toISOString())).get(userId);
   return rows.map((s) => ({
     ...s,
     location_changed: locationChanged(s, usual),
@@ -335,7 +335,7 @@ export async function teamReport(
      WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND project_id IS NOT NULL AND started_at > $3::timestamptz - interval '90 days'`,
     [orgId, ids, deps.now().toISOString()],
   );
-  const usual = await usualLocations(q, orgId, ids, r.to);
+  const usual = await usualLocations(q, orgId, ids, deps.now().toISOString());
   const located = await many<{ user_id: string; city: string | null; country_code: string }>(
     q,
     `SELECT user_id, city, country_code FROM work_sessions
@@ -417,7 +417,7 @@ export async function teamReport(
 
 /**
  * Each person's usual work location: the (country, city) their sessions most often started from
- * in the 30 days before `until` (ties: the most recent). Sessions without a location don't count.
+ * in the 30 days before `until` (now, so the Team count and the day view agree; ties: the most recent). Sessions without a location don't count.
  */
 async function usualLocations(q: Queryable, orgId: string, userIds: string[], until: string): Promise<Map<string, WorkLocation>> {
   const rows = await many<{ user_id: string } & WorkLocation>(

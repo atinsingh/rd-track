@@ -335,9 +335,10 @@ Policy `location.capture` stores the public IP a session starts from plus the ci
 region and country, looked up **offline** from DB-IP's "IP to City Lite" file (CC BY 4.0,
 no licence key). No employee IP is sent to a third party.
 
-* The API image downloads it at build time (`ARG GEOIP_MONTH` in `apps/api/Dockerfile`)
-  and sets `GEOIP_DB_PATH`. DB-IP publishes a new file each month: bump `GEOIP_MONTH`
-  (format `YYYY-MM`) every month or two. An old file still works, only less precisely.
+* The API image downloads it at build time (`apps/api/Dockerfile`: this month's file, else
+  last month's; DB-IP serves no older ones) and sets `GEOIP_DB_PATH`. Each deploy builds a
+  fresh image, so the file stays current. A failed download only logs a warning in the build;
+  check for the `GeoIP YYYY-MM` line in the build log.
 * Local or non-Docker runs: fetch it yourself and point the env var at it.
 
   ```bash

@@ -310,7 +310,7 @@ export interface MemberReportRow {
   target_seconds_per_day: number;
   /** Latest work location in the range (from the session's IP), if captured. */
   location: WorkLocation | null;
-  /** Most common location over the 30 days before the range ends. */
+  /** Most common location over the last 30 days (from now). */
   usual_location: WorkLocation | null;
   /** Sessions in the range whose city or country differs from `usual_location`. */
   location_changes: number;
