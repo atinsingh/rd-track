@@ -137,8 +137,8 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     const projects = await many<{ project_id: string }>(
       pool,
       `SELECT DISTINCT project_id FROM work_sessions
-       WHERE user_id = $1 AND project_id IS NOT NULL AND started_at > now() - interval '90 days'`,
-      [req.params.id],
+       WHERE user_id = $1 AND project_id IS NOT NULL AND started_at > $2::timestamptz`,
+      [req.params.id, new Date(deps.now().getTime() - 90 * 86_400_000).toISOString()],
     );
     let screenshots = v.screenshots;
     for (const p of projects) {

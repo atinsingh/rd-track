@@ -157,19 +157,21 @@ export async function listPolicies(q: Queryable, orgId: string): Promise<PolicyL
 }
 
 /** Users the scope's policy applies to (current members; project members for project scopes). */
-async function affectedUsers(q: Queryable, orgId: string, scopeType: ScopeType, scopeId: string): Promise<string[]> {
+async function affectedUsers(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, scopeType: ScopeType, scopeId: string): Promise<string[]> {
+  // The app's clock (deps.now), not the database's: the two differ under test.
+  const since = new Date(deps.now().getTime() - 30 * 86_400_000).toISOString();
   const sql = {
-    organization: `SELECT id FROM users WHERE organization_id = $1 AND status = 'active' AND $2::uuid IS NOT NULL`,
+    organization: `SELECT id FROM users WHERE organization_id = $1 AND status = 'active' AND $2::uuid IS NOT NULL AND $3::timestamptz IS NOT NULL`,
     team: `SELECT m.user_id AS id FROM team_memberships m JOIN users u ON u.id = m.user_id
-           WHERE m.organization_id = $1 AND m.team_id = $2 AND m.valid_to IS NULL AND u.status = 'active'`,
+           WHERE m.organization_id = $1 AND m.team_id = $2 AND m.valid_to IS NULL AND u.status = 'active' AND $3::timestamptz IS NOT NULL`,
     project: `SELECT DISTINCT id FROM (
                 SELECT m.user_id AS id FROM project_memberships m WHERE m.organization_id = $1 AND m.project_id = $2 AND m.valid_to IS NULL
                 UNION SELECT s.user_id FROM work_sessions s WHERE s.organization_id = $1 AND s.project_id = $2
-                  AND s.started_at > now() - interval '30 days') x
+                  AND s.started_at > $3::timestamptz) x
               WHERE id IN (SELECT id FROM users WHERE status = 'active')`,
-    device: `SELECT user_id AS id FROM devices WHERE organization_id = $1 AND id = $2`,
+    device: `SELECT user_id AS id FROM devices WHERE organization_id = $1 AND id = $2 AND $3::timestamptz IS NOT NULL`,
   }[scopeType];
-  return (await many<{ id: string }>(q, sql, [orgId, scopeId])).map((r) => r.id);
+  return (await many<{ id: string }>(q, sql, [orgId, scopeId, since])).map((r) => r.id);
 }
 
 function scopeContext(scopeType: ScopeType, scopeId: string) {
@@ -226,7 +228,7 @@ export async function scopeDetail(
     history,
     effective,
     plan_locked_fields: planLockedFields(plan),
-    affected_users: (await affectedUsers(q, orgId, scopeType, scopeId)).length,
+    affected_users: (await affectedUsers(deps, q, orgId, scopeType, scopeId)).length,
   };
 }
 
@@ -261,7 +263,7 @@ export async function publishPolicy(
   // Lock the organization row: publishes are serialized and revisions are gap-free.
   await q.query('SELECT 1 FROM organizations WHERE id = $1 FOR UPDATE', [orgId]);
 
-  const users = await affectedUsers(q, orgId, scopeType, scopeId);
+  const users = await affectedUsers(deps, q, orgId, scopeType, scopeId);
   const ctx = scopeContext(scopeType, scopeId);
   const changes = new Map<string, CollectionChange>();
   const expandedFor: string[] = [];
@@ -340,9 +342,9 @@ export async function myPolicy(deps: Deps, q: Queryable, actor: UserActor): Prom
     `SELECT DISTINCT p.id, p.name FROM projects p
      WHERE p.organization_id = $1 AND p.status = 'active' AND (
        p.id IN (SELECT project_id FROM project_memberships WHERE user_id = $2 AND valid_to IS NULL)
-       OR p.id IN (SELECT project_id FROM work_sessions WHERE user_id = $2 AND started_at > now() - interval '30 days'))
+       OR p.id IN (SELECT project_id FROM work_sessions WHERE user_id = $2 AND started_at > $3::timestamptz))
      ORDER BY p.name`,
-    [orgId, actor.userId],
+    [orgId, actor.userId, new Date(deps.now().getTime() - 30 * 86_400_000).toISOString()],
   );
   const perProject: MyPolicyResponse['projects'] = [];
   for (const p of projects) {
