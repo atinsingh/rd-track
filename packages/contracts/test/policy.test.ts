@@ -85,6 +85,18 @@ describe('resolvePolicy', () => {
     expect(settings.idle.threshold_seconds).toBe(240);
   });
 
+  it('defaults the pause cap to 15 minutes and takes the most specific one', () => {
+    expect(resolvePolicy([]).settings.pause.max_minutes).toBe(15);
+    const { settings } = resolvePolicy([
+      org({ pause: { max_minutes: 30 } }),
+      team('a', { pause: { max_minutes: 20 } }),
+      team('b', { pause: { max_minutes: 10 } }),
+    ]);
+    // two teams at the same level: the shorter pause wins
+    expect(settings.pause.max_minutes).toBe(10);
+    expect(() => resolvePolicy([org({ pause: { max_minutes: 0 } })])).toThrow();
+  });
+
   it('applies the plan as an always-restrictive scope', () => {
     const scopes = [project({ screenshots: { enabled: true }, retention: { activity_days: 365 } })];
     const standard = resolvePolicy([...scopes, { scope_type: 'plan', scope_id: 'standard', settings: PLANS.standard.policyScope }]);

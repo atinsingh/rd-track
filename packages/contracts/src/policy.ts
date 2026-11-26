@@ -35,6 +35,10 @@ export const policySettingsSchema = z.strictObject({
     /** Ask the person what to do with an idle run when they come back (else: keep it). */
     prompt_on_return: z.boolean(),
   }),
+  pause: z.strictObject({
+    /** A pause by the employee ends by itself after this long and tracking resumes. */
+    max_minutes: z.number().int().min(1).max(240),
+  }),
   apps: z.strictObject({
     capture_app_name: z.boolean(),
     capture_domains: z.boolean(),
@@ -72,6 +76,7 @@ export type PolicySettings = z.infer<typeof policySettingsSchema>;
 export const partialPolicySettingsSchema = z.strictObject({
   session: policySettingsSchema.shape.session.partial().optional(),
   idle: policySettingsSchema.shape.idle.partial().optional(),
+  pause: policySettingsSchema.shape.pause.partial().optional(),
   apps: policySettingsSchema.shape.apps.partial().optional(),
   screenshots: policySettingsSchema.shape.screenshots.partial().optional(),
   viewers: policySettingsSchema.shape.viewers.partial().optional(),
@@ -84,6 +89,7 @@ export type PartialPolicySettings = z.infer<typeof partialPolicySettingsSchema>;
 export const DEFAULT_POLICY: PolicySettings = {
   session: { allow_overlapping_sessions: false, require_project: false },
   idle: { threshold_seconds: 300, prompt_on_return: true },
+  pause: { max_minutes: 15 },
   apps: { capture_app_name: true, capture_domains: false, capture_window_titles: false },
   screenshots: {
     enabled: false,
@@ -141,6 +147,7 @@ export const POLICY_FIELD_RULES: readonly FieldRule[] = [
   { path: ['apps', 'capture_window_titles'], strategy: 'restrictive_bool' },
   { path: ['idle', 'threshold_seconds'], strategy: 'specific', tie: 'max' },
   { path: ['idle', 'prompt_on_return'], strategy: 'specific' },
+  { path: ['pause', 'max_minutes'], strategy: 'specific', tie: 'min' },
   { path: ['session', 'allow_overlapping_sessions'], strategy: 'restrictive_bool' },
   { path: ['session', 'require_project'], strategy: 'any_true' },
   { path: ['work_hours'], strategy: 'specific' },

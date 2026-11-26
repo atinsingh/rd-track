@@ -135,6 +135,15 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
     help: 'The agent asks whether to keep, remove or move idle time. Off: idle time is kept without asking',
     kind: 'bool',
   },
+  'pause.max_minutes': {
+    group: 'Sessions',
+    label: 'Longest pause',
+    help: 'A pause ends by itself after this long and tracking resumes; the pause is still reported',
+    kind: 'number',
+    unit: 'min',
+    min: 1,
+    max: 240,
+  },
   'session.allow_overlapping_sessions': {
     group: 'Sessions',
     label: 'Allow overlapping sessions',
