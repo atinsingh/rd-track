@@ -159,6 +159,12 @@ pub enum StopReason {
     Policy,
     /// The server rejected the session start as overlapping another session.
     Overlap,
+    /// The employee switched project: a new session on the other project started at
+    /// the same instant.
+    ProjectSwitch,
+    /// The employee quit the app inside the policy's work hours (Stop is not offered
+    /// there, quitting is). Reported to the team's report.
+    QuitDuringHours,
 }
 
 /// `session.stopped.v1` payload.

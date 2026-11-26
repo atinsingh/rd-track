@@ -27,6 +27,9 @@ export const en = {
   "session.pause": "Pause",
   "session.stop": "Stop",
   "session.stopLocked": "Tracking runs during office hours. Use Pause for a break.",
+  "session.switch": "Switch project",
+  "session.switchCancel": "Cancel",
+  "session.switchContinue": "Continue",
 
   "day.mon": "Mon",
   "day.tue": "Tue",
@@ -78,6 +81,7 @@ export const en = {
   "notice.ok": "OK",
   "notice.otherProject": "Choose another project",
   "notice.start": "Start session →",
+  "notice.switch": "Switch to this project →",
 
   "enroll.setUp": "Set up this computer",
   "enroll.title": "Connect with a code",
@@ -165,6 +169,9 @@ export const fr: Record<Key, string> = {
   "session.pause": "Mettre en pause",
   "session.stop": "Arrêter",
   "session.stopLocked": "Le suivi fonctionne pendant les heures de bureau. Utilisez Pause pour faire une pause.",
+  "session.switch": "Changer de projet",
+  "session.switchCancel": "Annuler",
+  "session.switchContinue": "Continuer",
 
   "day.mon": "lun.",
   "day.tue": "mar.",
@@ -216,6 +223,7 @@ export const fr: Record<Key, string> = {
   "notice.ok": "OK",
   "notice.otherProject": "Choisir un autre projet",
   "notice.start": "Démarrer la session →",
+  "notice.switch": "Passer à ce projet →",
 
   "enroll.setUp": "Configurer cet ordinateur",
   "enroll.title": "Se connecter avec un code",

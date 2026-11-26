@@ -651,6 +651,52 @@ impl Controller {
         Ok(view::session_notice(&preview, task_id, name, i.lang()))
     }
 
+    /// Moves the running session onto `project_id` after the employee confirmed its
+    /// notice: the runtime ends the session and starts the new one at the same instant
+    /// (allowed inside office hours). Waits (≤ 2 s) for the new session. Blocking.
+    pub fn switch(
+        &self,
+        project_id: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<(), String> {
+        let before = {
+            let mut i = lock(&self.inner);
+            let lang = i.lang();
+            let live = i.live.as_ref().ok_or("the agent is still starting")?;
+            let session = live.session.as_ref().ok_or("no session is running")?;
+            let before = session.id;
+            let preview = live
+                .preview
+                .as_ref()
+                .filter(|p| p.project_id == project_id)
+                .ok_or("review what this session collects first")?;
+            if project_id.is_none() && preview.settings.session.require_project {
+                return Err(lang.messages().err_project_required.into());
+            }
+            i.acknowledged = Some(preview.settings.clone());
+            i.collection_changed = false;
+            i.dismissed.retain(|d| d != "collection-changed");
+            before
+        };
+        self.send(Command::SwitchProject {
+            project_id,
+            task_id,
+        })?;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            let switched = lock(&self.inner)
+                .live
+                .as_ref()
+                .and_then(|l| l.session.as_ref())
+                .is_some_and(|s| s.id != before);
+            if switched {
+                return Ok(());
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        Err(self.lang().messages().err_not_started.into())
+    }
+
     /// Starts a session after the employee confirmed the notice for `project_id`.
     pub fn start(&self, project_id: Option<String>, task_id: Option<String>) -> Result<(), String> {
         {
@@ -954,7 +1000,10 @@ impl Controller {
             reminder: live
                 .filter(|_| tray != TrayState::Paused)
                 .and_then(|l| l.reminder.as_ref())
-                .map(|r| view::reminder_view(r, Utc::now(), &Local, lang)),
+                .map(|r| {
+                    let locked = live.is_some_and(|l| l.stop_locked);
+                    view::reminder_view(r, Utc::now(), &Local, lang, locked)
+                }),
             reminders: view::reminders_view(
                 &live.map(|l| l.reminders.clone()).unwrap_or_default(),
                 &Local,

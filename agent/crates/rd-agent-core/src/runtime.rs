@@ -1096,6 +1096,44 @@ impl Agent {
         self.stop_at(reason, now)
     }
 
+    /// Stops the open session because the agent is quitting. This works even inside
+    /// work hours (only the employee's Stop command is refused there), but a quit by
+    /// the employee there is reported as [`StopReason::QuitDuringHours`]: the team
+    /// report counts these and the time until the next session. The next launch
+    /// starts a new session.
+    fn shutdown_stop(&mut self, reason: StopReason) -> Result<(), AgentError> {
+        let reason = if reason == StopReason::User && self.stop_locked() {
+            StopReason::QuitDuringHours
+        } else {
+            reason
+        };
+        let now = ClockReading::now(self.clock.as_ref());
+        self.stop_at(reason, now)
+    }
+
+    /// Moves the employee onto another project: the open session stops
+    /// ([`StopReason::ProjectSwitch`]) and a new one starts at the same instant, so
+    /// nothing is missed in between. Allowed inside work hours (it is not a Stop).
+    /// Returns the new session id.
+    pub fn switch_project(
+        &mut self,
+        project_id: Option<String>,
+        task_id: Option<String>,
+    ) -> Result<Uuid, AgentError> {
+        if self.revoked {
+            return Err(AgentError::Revoked);
+        }
+        if let Some(block) = self.license_block {
+            return Err(AgentError::LicenseUnavailable(block));
+        }
+        if project_id.is_none() && self.policy.effective(None).settings.session.require_project {
+            return Err(AgentError::ProjectRequired);
+        }
+        let now = ClockReading::now(self.clock.as_ref());
+        self.stop_at(StopReason::ProjectSwitch, now)?;
+        self.start(project_id, task_id)
+    }
+
     /// Inside the base policy's work hours (the window that starts sessions by
     /// itself): the employee cannot stop, only pause.
     pub fn stop_locked(&mut self) -> bool {
@@ -1978,6 +2016,13 @@ pub enum Command {
     Resume,
     /// Stop the session (keep running).
     Stop(StopReason),
+    /// End the open session and start a new one on another project at once.
+    SwitchProject {
+        /// Project.
+        project_id: Option<String>,
+        /// Task.
+        task_id: Option<String>,
+    },
     /// Stop the session, flush the outbox (bounded), and exit.
     Shutdown(StopReason),
     /// Select the project the session-start notice is for: fetches its policy now and
@@ -2476,10 +2521,7 @@ impl Runtime {
 
     fn shutdown_session(&mut self, reason: StopReason) {
         if self.agent.machine.is_open() {
-            // Quitting the app ends the session even inside work hours (`stop` refuses
-            // only the employee's Stop command); the next launch starts a new one.
-            let now = ClockReading::now(self.agent.clock.as_ref());
-            if let Err(e) = self.agent.stop_at(reason, now) {
+            if let Err(e) = self.agent.shutdown_stop(reason) {
                 log::error!("could not stop session: {e}");
             }
         }
@@ -2502,6 +2544,10 @@ impl Runtime {
             Command::Pause => self.agent.pause(),
             Command::Resume => self.agent.resume(),
             Command::Stop(reason) => self.agent.stop(reason),
+            Command::SwitchProject {
+                project_id,
+                task_id,
+            } => self.agent.switch_project(project_id, task_id).map(|_| ()),
             Command::Shutdown(_) => Ok(()),
             Command::Preview { project_id } => {
                 self.agent.request_policy(project_id.clone());

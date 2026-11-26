@@ -6,6 +6,8 @@ const tauri = window.__TAURI__;
 const invoke = (cmd, args) => tauri.core.invoke(cmd, args);
 let view = null;
 let notice = null;
+// "Switch project": the pickers are open to move the running session onto another project.
+let switching = false;
 let selectedProject = "";
 let selectedTask = "";
 let busy = false;
@@ -126,12 +128,12 @@ function loadProjects() {
     });
 }
 const opt = (s) => (s === "" ? null : s);
-async function prepareStart() {
+async function prepareStart(switchTo = false) {
     const data = await invoke("prepare_session", {
         projectId: opt(selectedProject),
         taskId: opt(selectedTask),
     });
-    notice = { data, review: false };
+    notice = { data, review: false, switch: switchTo };
 }
 function onStart() {
     startHint = null;
@@ -181,9 +183,11 @@ function onConfirmStart() {
     if (!notice)
         return;
     const { project_id, task_id } = notice.data;
+    const command = notice.switch ? "switch_session" : "start_session";
     void run(async () => {
-        view = await invoke("start_session", { projectId: project_id, taskId: task_id });
+        view = await invoke(command, { projectId: project_id, taskId: task_id });
         notice = null;
+        switching = false;
     });
 }
 function onBannerAction(b) {
@@ -222,7 +226,7 @@ function header(v) {
     return h("div", { class: "head" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }), h("span", { class: "status" }, h("span", { class: dotClass, "aria-hidden": "true" }), v.label)), v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed));
 }
 function projectPickers(v) {
-    const open = v.tray !== "idle";
+    const open = v.tray !== "idle" && !switching;
     const projectValue = open ? v.session_project_id ?? "" : selectedProject;
     const taskValue = open ? v.session_task_id ?? "" : selectedTask;
     const project = v.projects.find((p) => p.id === projectValue);
@@ -259,10 +263,27 @@ function projectPickers(v) {
 }
 function sessionButtons(v) {
     if (v.tray === "idle") {
+        switching = false;
         const blocked = !v.can_start || busy || (v.require_project && !selectedProject);
         return h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")));
     }
+    if (switching) {
+        const blocked = busy || (v.require_project && !selectedProject);
+        return h("div", { class: "actions" }, h("button", { class: "btn-outline-light", type: "button", disabled: busy, onclick: () => { switching = false; render(); } }, t("session.switchCancel")), h("button", { class: "btn-solid-light", type: "button", disabled: blocked, onclick: () => void run(() => prepareStart(true)) }, t("session.switchContinue")));
+    }
     const paused = v.tray === "paused";
+    // Moves the running session onto another project (no gap; allowed inside office hours).
+    const switchLink = h("button", {
+        class: "link",
+        type: "button",
+        disabled: busy,
+        onclick: () => {
+            switching = true;
+            selectedProject = v.session_project_id ?? "";
+            selectedTask = "";
+            render();
+        },
+    }, t("session.switch"));
     const pause = h("button", {
         class: "btn-outline-light",
         type: "button",
@@ -271,13 +292,13 @@ function sessionButtons(v) {
     }, paused ? t("session.resume") : t("session.pause"));
     // Inside office hours there is no Stop: only Pause (which resumes by itself).
     if (!v.can_stop) {
-        return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")));
+        return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")), switchLink);
     }
-    return h("div", { class: "actions" }, pause, h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop")));
+    return h("div", {}, h("div", { class: "actions" }, pause, h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop"))), switchLink);
 }
 // A start / stop / "still tracking?" reminder: title, one line, two buttons.
 function reminderCard(r) {
-    return h("div", { class: "banner info reminder", role: "status" }, h("strong", { class: "banner-title" }, r.title), h("span", { class: "banner-detail" }, r.detail), h("div", { class: "row" }, h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label), h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label)));
+    return h("div", { class: "banner info reminder", role: "status" }, h("strong", { class: "banner-title" }, r.title), h("span", { class: "banner-detail" }, r.detail), h("div", { class: "row" }, h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label), r.primary && h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label)));
 }
 const WEEKDAYS = [[1, "day.mon"], [2, "day.tue"], [3, "day.wed"], [4, "day.thu"], [5, "day.fri"], [6, "day.sat"], [7, "day.sun"]];
 // "Reminders": employee-controlled, kept on this computer only.
@@ -427,7 +448,7 @@ function noticeButtons(review) {
     }
     return [
         h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
-        h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, t("notice.start")),
+        h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, notice?.switch ? t("notice.switch") : t("notice.start")),
     ];
 }
 function managedEnrollView(v, server) {

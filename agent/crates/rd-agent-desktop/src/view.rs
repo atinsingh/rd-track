@@ -439,19 +439,21 @@ pub struct ReminderView {
     pub title: String,
     /// "Your hours started at 09:00."
     pub detail: String,
-    /// "Start tracking" / "Stop tracking".
-    pub primary: ReminderButton,
+    /// "Start tracking" / "Stop tracking" (`None`: no Stop inside office hours).
+    pub primary: Option<ReminderButton>,
     /// "Not today" / "Keep tracking".
     pub secondary: ReminderButton,
 }
 
 /// Builds the reminder card; times are shown in `tz` (the device's local zone), with
-/// the date when it is not today's.
+/// the date when it is not today's. Inside office hours (`stop_locked`) "Stop tracking"
+/// is left out.
 pub fn reminder_view<Tz: TimeZone>(
     prompt: &ReminderPrompt,
     now: DateTime<Utc>,
     tz: &Tz,
     lang: Lang,
+    stop_locked: bool,
 ) -> ReminderView
 where
     Tz::Offset: std::fmt::Display,
@@ -526,7 +528,7 @@ where
         kind: prompt.kind,
         title,
         detail,
-        primary,
+        primary: (!(stop_locked && primary.choice == "stop")).then_some(primary),
         secondary,
     }
 }
@@ -1550,12 +1552,16 @@ mod tests {
             now,
             &Utc,
             Lang::En,
+            false,
         );
         assert_eq!(v.id, "6f1c2e7a-3b4d-4e5f-8a9b-0c1d2e3f4a5b");
         assert_eq!(v.title, "Ready to start tracking?");
         assert_eq!(v.detail, "Your hours started at 09:00.");
         assert_eq!(
-            (v.primary.label, v.primary.choice),
+            (
+                v.primary.as_ref().unwrap().label,
+                v.primary.as_ref().unwrap().choice
+            ),
             ("Start tracking", "start")
         );
         assert_eq!(
@@ -1574,6 +1580,7 @@ mod tests {
             now,
             &riga,
             Lang::En,
+            false,
         );
         assert_eq!(v.detail, "Your shift started at 08:30.");
 
@@ -1588,11 +1595,15 @@ mod tests {
             late,
             &Utc,
             Lang::En,
+            false,
         );
         assert_eq!(v.title, "Your hours ended at 17:30");
         assert_eq!(v.detail, "This session is still tracking.");
         assert_eq!(
-            (v.primary.label, v.primary.choice),
+            (
+                v.primary.as_ref().unwrap().label,
+                v.primary.as_ref().unwrap().choice
+            ),
             ("Stop tracking", "stop")
         );
         assert_eq!(
@@ -1610,9 +1621,33 @@ mod tests {
             late,
             &Utc,
             Lang::En,
+            false,
         );
         assert_eq!(v.title, "Still tracking?");
         assert_eq!(v.detail, "Your shift ended at 17:30.");
+        // Inside office hours there is no "Stop tracking", only "Keep tracking".
+        let locked = reminder_view(
+            &reminder(
+                "still_tracking",
+                "organization",
+                None,
+                "2026-10-28T17:30:00Z",
+            ),
+            late,
+            &Utc,
+            Lang::En,
+            true,
+        );
+        assert_eq!(locked.primary, None);
+        assert_eq!(locked.secondary.choice, "keep");
+        let start = reminder_view(
+            &reminder("start", "mine", None, "2026-10-28T17:30:00Z"),
+            late,
+            &Utc,
+            Lang::En,
+            true,
+        );
+        assert_eq!(start.primary.unwrap().choice, "start");
         // After midnight the date is shown.
         let next = Utc.with_ymd_and_hms(2026, 10, 29, 0, 40, 0).unwrap();
         let v = reminder_view(
@@ -1620,6 +1655,7 @@ mod tests {
             next,
             &Utc,
             Lang::En,
+            false,
         );
         assert_eq!(v.detail, "Your hours ended at 28 Oct 17:30.");
     }

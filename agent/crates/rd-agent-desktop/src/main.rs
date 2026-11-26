@@ -130,6 +130,22 @@ async fn start_session(
     Ok(ctl.view())
 }
 
+/// "Switch project": after the employee confirmed the new project's notice, the session
+/// ends and a new one starts on it at once (also inside office hours).
+#[tauri::command]
+async fn switch_session(
+    app: AppHandle,
+    ctl: Ctl<'_>,
+    project_id: Option<String>,
+    task_id: Option<String>,
+) -> Result<AppView, String> {
+    let c = ctl.inner().clone();
+    blocking(move || c.switch(project_id, task_id)).await?;
+    ctl.emit(&app);
+    hide_window(app);
+    Ok(ctl.view())
+}
+
 #[tauri::command]
 fn review_collection(ctl: Ctl<'_>) -> Result<SessionNotice, String> {
     ctl.review()
@@ -454,6 +470,7 @@ fn main() {
             list_projects,
             prepare_session,
             start_session,
+            switch_session,
             review_collection,
             pause_session,
             resume_session,

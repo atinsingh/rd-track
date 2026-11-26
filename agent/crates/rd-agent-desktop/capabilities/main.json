@@ -14,6 +14,7 @@
     "allow-list-projects",
     "allow-prepare-session",
     "allow-start-session",
+    "allow-switch-session",
     "allow-review-collection",
     "allow-pause-session",
     "allow-resume-session",

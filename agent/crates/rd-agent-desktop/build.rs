@@ -11,7 +11,7 @@ fn main() {
 }
 
 /// Must match `generate_handler!` in `src/main.rs`.
-const COMMANDS: [&str; 26] = [
+const COMMANDS: [&str; 27] = [
     "get_view",
     "enroll",
     "sign_in",
@@ -20,6 +20,7 @@ const COMMANDS: [&str; 26] = [
     "list_projects",
     "prepare_session",
     "start_session",
+    "switch_session",
     "review_collection",
     "pause_session",
     "resume_session",

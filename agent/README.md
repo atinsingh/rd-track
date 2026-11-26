@@ -606,8 +606,11 @@ the usual flow. Revoking a key stops new requests; computers already connected s
   (no project; skipped when `session.require_project`), also right after a relaunch. Inside
   the window the employee cannot stop (the Stop command is refused with
   `AgentError::StopDuringWorkHours`; popover and tray hide / grey out Stop and say "Use
-  Pause for a break"), only pause. Quitting the app still ends the session
-  (`reason: user`); the next launch starts a new one. The first automatic start of each
+  Pause for a break"), only pause. "Switch project" (popover) ends the session
+  (`reason: project_switch`) and starts one on the chosen project at the same instant,
+  also inside the window. Quitting the app still ends the session, as
+  `reason: quit_during_hours` inside the window (`user` outside it); the next launch
+  starts a new one. The first automatic start of each
   work-hours day (persisted, `collection_notice_day`) carries the "what this session
   collects" notice, shown without blocking: tracking has already started. When the window
   ends the session is stopped (`session.stopped.v1 {reason: policy}`), so nothing stays

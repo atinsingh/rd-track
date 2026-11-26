@@ -448,17 +448,24 @@ fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
     work_hours_policy(&mut h, json!({}));
     h.step(1);
     let first = h.agent.session().unwrap().id;
-    // Quit: the shutdown path stops with the employee's reason, bypassing the lock, and
-    // holds nothing: even without a relaunch the next tick would start again.
-    let now = ClockReading::now(&h.clock);
-    h.agent.stop_at(StopReason::User, now).unwrap();
-    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+    // Quit: the shutdown path bypasses the lock, is reported as a quit during work
+    // hours (with its time), and holds nothing: the next tick would start again.
+    h.agent.shutdown_stop(StopReason::User).unwrap();
+    let quit_at = h.clock.wall();
+    assert_eq!(
+        h.agent.state(),
+        SessionState::Stopped(StopReason::QuitDuringHours)
+    );
+    let stopped = h.of_type("session.stopped.v1");
+    assert_eq!(
+        serde_json::to_value(&stopped[0]).unwrap()["payload"]["reason"],
+        "quit_during_hours"
+    );
+    assert_eq!(stopped[0].occurred_at, quit_at);
     h.step(1);
     assert_eq!(h.agent.state(), SessionState::Active);
     let second = h.agent.session().unwrap().id;
-    h.agent
-        .stop_at(StopReason::User, ClockReading::now(&h.clock))
-        .unwrap();
+    h.agent.shutdown_stop(StopReason::User).unwrap();
     let at = h.clock.wall();
     drop(h);
     let mut h = harness_at(
@@ -480,6 +487,76 @@ fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
     let mut h = harness_at(start, outbox, AgentConfig::new(identity()));
     h.step(1);
     assert_eq!(h.agent.state(), SessionState::Idle);
+}
+
+#[test]
+fn quitting_outside_work_hours_is_an_ordinary_stop() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 20, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    h.agent.shutdown_stop(StopReason::User).unwrap();
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+    let mut h = harness();
+    h.agent.start(None, None).unwrap();
+    h.agent.shutdown_stop(StopReason::User).unwrap();
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+}
+
+#[test]
+fn switching_project_inside_work_hours_ends_the_session_and_starts_one_at_once() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 10, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({"session": {"require_project": true}}));
+    h.agent.start(Some("p1".into()), None).unwrap();
+    let first = h.agent.session().unwrap().id;
+    h.step(90);
+    // Stop is locked, switching is not; a project is still required.
+    assert!(h.agent.stop_locked());
+    assert!(matches!(
+        h.agent.switch_project(None, None),
+        Err(AgentError::ProjectRequired)
+    ));
+    assert_eq!(h.agent.session().unwrap().id, first, "nothing changed");
+    let at = h.clock.wall();
+    let second = h
+        .agent
+        .switch_project(Some("p2".into()), Some("t9".into()))
+        .unwrap();
+    assert_ne!(second, first);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    let s = h.agent.session().unwrap();
+    assert_eq!(
+        (s.project_id.as_deref(), s.task_id.as_deref()),
+        (Some("p2"), Some("t9"))
+    );
+    assert_eq!(s.started_at, at);
+    let stopped = h.of_type("session.stopped.v1");
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0].session_id, first);
+    assert_eq!(
+        stopped[0].occurred_at, at,
+        "no gap: ends where the next starts"
+    );
+    assert_eq!(
+        serde_json::to_value(&stopped[0]).unwrap()["payload"]["reason"],
+        "project_switch"
+    );
+    assert!(h.of_type("data_gap.v1").is_empty());
+    h.step(30);
+    h.agent.stop(StopReason::Shutdown).unwrap();
+    assert_eq!(h.tracked_seconds(), (120, 0), "every second counted once");
+
+    // An automatic no-project session can be moved onto a project too.
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.step(1);
+    assert_eq!(h.agent.session().unwrap().project_id, None);
+    h.agent.switch_project(Some("p1".into()), None).unwrap();
+    assert_eq!(h.agent.session().unwrap().project_id.as_deref(), Some("p1"));
+    // Nothing open: there is nothing to switch.
+    let mut h = harness();
+    assert!(h.agent.switch_project(Some("p1".into()), None).is_err());
 }
 
 #[test]
@@ -2417,6 +2494,33 @@ fn stop_reminder_never_while_paused_and_stop_tracking_choice() {
         "user"
     );
     only_session_events(&h);
+}
+
+#[test]
+fn stop_tracking_reminder_choice_is_refused_inside_office_hours() {
+    let mut h = utc_harness();
+    let mut s = ReminderSettings::default();
+    s.my_hours.start = reminders::parse_hhmm("07:00").unwrap();
+    s.my_hours.end = reminders::parse_hhmm("08:55").unwrap();
+    h.agent.set_reminder_settings(s).unwrap();
+    work_hours_policy(&mut h, json!({}));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    h.step(600);
+    assert!(reminder_kinds(&h.agent.take_notices()).contains(&ReminderKind::Stop));
+    let p = h.agent.reminder().cloned().unwrap();
+    assert!(matches!(
+        h.agent.resolve_reminder(p.id, ReminderChoice::Stop),
+        Err(AgentError::StopDuringWorkHours)
+    ));
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert_eq!(h.agent.reminder().map(|r| r.id), Some(p.id), "still shown");
+    // "Keep tracking" still answers it.
+    assert!(h
+        .agent
+        .resolve_reminder(p.id, ReminderChoice::Keep)
+        .unwrap());
+    assert!(h.of_type("session.stopped.v1").is_empty());
 }
 
 #[test]
