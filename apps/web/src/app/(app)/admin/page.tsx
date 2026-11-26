@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { TEAM_SUMMARY_MIN_PEOPLE, type AdminOverview, type SetupStep } from '@rd/contracts';
 import { Tiles } from '@/components/workspace/Tiles';
 import s from '@/components/workspace/workspace.module.css';
+import { CheckMark } from '@/components/ui/CheckMark';
 import { Empty, Resource } from '@/components/ui/DataState';
 import { Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
@@ -28,7 +29,7 @@ function Checklist({ steps }: { steps: readonly SetupStep[] }) {
           return (
             <li key={step.key} className={s.step}>
               <span className={step.done ? s.markDone : s.mark} aria-hidden="true">
-                {step.done ? '✓' : i + 1}
+                {step.done ? <CheckMark /> : i + 1}
               </span>
               <span className={s.stepText}>
                 <span className={step.done ? s.stepDone : s.stepTitle}>

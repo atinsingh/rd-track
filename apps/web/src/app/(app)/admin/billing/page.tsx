@@ -5,6 +5,7 @@ import { useState, useSyncExternalStore } from 'react';
 const noopSubscribe = () => () => {};
 import { PLANS, PLAN_IDS, type BillingInterval, type PlanId, type SubscriptionDTO } from '@rd/contracts';
 import { Button } from '@/components/ui/Button';
+import { CheckMark } from '@/components/ui/CheckMark';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
 import { Segmented } from '@/components/ui/Field';
@@ -368,7 +369,7 @@ export default function BillingPage() {
                   {PLAN_FEATURES[id].map((f) => (
                     <li key={f.key} className={f.on ? undefined : s.off}>
                       <span className={s.mark} aria-hidden="true">
-                        {f.on ? '✓' : '–'}
+                        {f.on ? <CheckMark /> : '–'}
                       </span>
                       <span>
                         {t(`money.billing.feat.${f.key}` as MessageKey)}

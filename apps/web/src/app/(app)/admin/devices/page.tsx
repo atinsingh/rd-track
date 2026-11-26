@@ -1,11 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { enrollmentLink, type AgentUpdateMode, type DeviceDTO, type EnrollmentCodeResponse, type PermissionState } from '@rd/contracts';
 import { CopyButton } from '@/components/CopyButton';
 import { MdmDeployment } from '@/components/devices/MdmDeployment';
 import { Button } from '@/components/ui/Button';
+import { CheckMark } from '@/components/ui/CheckMark';
 import { ActionError, Empty, Resource } from '@/components/ui/DataState';
 import { Dialog } from '@/components/ui/Dialog';
 import { Segmented, SelectField } from '@/components/ui/Field';
@@ -39,10 +40,10 @@ function missingPermissions(d: DeviceDTO): string[] {
   return PERMS.filter((p) => d.permissions[p.key] === 'denied').map((p) => t(p.label));
 }
 
-function permText(state: PermissionState | undefined): string {
+function permText(state: PermissionState | undefined): ReactNode {
   switch (state) {
     case 'granted':
-      return '✓';
+      return <CheckMark />;
     case 'denied':
       return t('adm.dev.missing');
     case 'not_required':
