@@ -15,6 +15,7 @@ mod view;
 
 use std::sync::Arc;
 
+use rd_agent_core::events::StopReason;
 use rd_agent_core::runtime::Command;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as _;
@@ -307,7 +308,7 @@ async fn install(app: &AppHandle, update: tauri_plugin_updater::Update) -> Resul
         .map_err(|e| e.to_string())?;
     let ctl = app.state::<Arc<Controller>>().inner().clone();
     blocking(move || {
-        ctl.shutdown();
+        ctl.shutdown(StopReason::Shutdown);
         Ok(())
     })
     .await?;
@@ -362,7 +363,8 @@ pub(crate) fn quit(app: AppHandle) {
     }
     let ctl = app.state::<Arc<Controller>>().inner().clone();
     std::thread::spawn(move || {
-        ctl.shutdown();
+        // The person's own Quit (`quit_during_hours` inside office hours).
+        ctl.shutdown(StopReason::User);
         app.exit(0);
     });
 }
@@ -546,9 +548,12 @@ fn main() {
         RunEvent::ExitRequested {
             code: None, api, ..
         } => api.prevent_exit(),
-        // OS logout/shutdown: stop the session before the process goes away.
+        // OS logout/shutdown: stop the session before the process goes away. After
+        // Quit the runtime is already gone and this does nothing. Tauri does not say
+        // which of the two it is, so both are reported as `shutdown`.
         RunEvent::Exit => {
-            app.state::<Arc<Controller>>().shutdown();
+            app.state::<Arc<Controller>>()
+                .shutdown(StopReason::Shutdown);
         }
         _ => {}
     });

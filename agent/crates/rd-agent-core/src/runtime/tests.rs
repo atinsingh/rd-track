@@ -490,6 +490,24 @@ fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
 }
 
 #[test]
+fn os_shutdown_or_logout_inside_work_hours_is_not_a_quit() {
+    for reason in [StopReason::Shutdown, StopReason::Logout] {
+        let start = Utc.with_ymd_and_hms(2026, 10, 28, 10, 0, 0).unwrap();
+        let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+        work_hours_policy(&mut h, json!({}));
+        h.step(1);
+        assert!(h.agent.stop_locked());
+        h.agent.shutdown_stop(reason).unwrap();
+        assert_eq!(h.agent.state(), SessionState::Stopped(reason));
+        let stopped = h.of_type("session.stopped.v1");
+        assert_eq!(
+            serde_json::to_value(&stopped[0]).unwrap()["payload"]["reason"],
+            serde_json::to_value(reason).unwrap()
+        );
+    }
+}
+
+#[test]
 fn quitting_outside_work_hours_is_an_ordinary_stop() {
     let start = Utc.with_ymd_and_hms(2026, 10, 28, 20, 0, 0).unwrap();
     let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));

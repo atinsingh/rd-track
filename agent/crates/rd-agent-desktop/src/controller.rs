@@ -407,8 +407,9 @@ impl Controller {
     }
 
     /// Stops the session (if any), lets the runtime flush (bounded) and waits for the
-    /// tick thread. Used by Quit and by OS shutdown.
-    pub fn shutdown(&self) {
+    /// tick thread. Used by Quit (`StopReason::User`) and by OS shutdown and updates
+    /// (`StopReason::Shutdown`).
+    pub fn shutdown(&self, reason: StopReason) {
         self.sign_in.cancel();
         {
             let mut i = lock(&self.inner);
@@ -416,7 +417,7 @@ impl Controller {
                 i.phase = Some(Phase::Stopping);
             }
         }
-        let _ = self.send(Command::Shutdown(StopReason::User));
+        let _ = self.send(Command::Shutdown(reason));
         if let Some(t) = lock(&self.thread).take() {
             // The runtime's final sync is bounded (10 s); give it a little more.
             let deadline = Instant::now() + Duration::from_secs(15);
