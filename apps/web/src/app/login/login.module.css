@@ -2,31 +2,29 @@
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
-  background: var(--backdrop);
+  background: var(--canvas);
 }
 .aside {
   position: relative;
   overflow: hidden;
-  background:
-    radial-gradient(720px 420px at 0% 100%, rgb(253 61 65 / 0.16), transparent 70%),
-    var(--ink);
+  background: var(--ink);
   color: var(--ink-text);
-  padding: 48px 56px;
+  padding: var(--space-12) var(--space-16);
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  gap: 40px;
+  gap: var(--space-10);
 }
 .pitch {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: var(--space-8);
 }
 .aside h2 {
-  color: #fff;
-  font-size: clamp(30px, 3.2vw, 44px);
-  line-height: 1.08;
-  letter-spacing: -0.035em;
+  color: var(--text-on-ink);
+  font-size: clamp(var(--text-3xl), 3.2vw, var(--text-5xl));
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   max-width: 14ch;
   text-wrap: balance;
 }
@@ -36,54 +34,51 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  font-size: 16px;
+  gap: var(--space-4);
+  font-size: var(--text-lg);
   max-width: 44ch;
 }
 .aside li {
   display: flex;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .aside li::before {
   content: '';
   flex: none;
-  width: 16px;
+  width: var(--space-4);
   height: 2px;
-  margin-top: 11px;
+  margin-top: var(--space-3);
   background: var(--brand-red);
 }
 .never {
   margin: 0;
-  padding-top: 20px;
+  padding-top: var(--space-5);
   border-top: 1px solid var(--ink-border);
   max-width: 62ch;
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.55;
   color: var(--ink-muted);
 }
 .reversed {
   display: block;
   align-self: flex-start;
-  height: 24px;
+  height: var(--space-6);
 }
 .panel {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 48px 24px;
+  padding: var(--space-12) var(--space-6);
 }
 .card {
   width: min(440px, 100%);
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  padding: 40px;
+  padding: var(--space-10);
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: var(--space-6);
 }
 /* The dark panel already carries the logo; the card shows its own only when that panel is hidden. */
 .logo {
@@ -94,13 +89,13 @@
 .form {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .form p {
   margin: 0;
 }
 .title {
-  font-size: 30px;
+  font-size: var(--text-3xl);
 }
 .lede {
   color: var(--text-2);
@@ -109,64 +104,64 @@
   overflow-wrap: anywhere;
 }
 .terms {
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 .terms label {
-  font-weight: 400;
+  font-weight: var(--weight-regular);
 }
 .problem {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
   color: var(--danger-text);
 }
 .ok {
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   color: var(--text-2);
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 20px;
+  gap: var(--space-2) var(--space-5);
 }
 /* The way out to the other flow, set apart from the form above it. */
 .alt {
-  padding-top: 16px;
+  padding-top: var(--space-4);
   border-top: 1px solid var(--rule);
-  font-size: 13px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--text-2);
 }
 .secret {
   font-family: var(--font-mono);
-  font-size: 15px;
+  font-size: var(--text-lg);
   letter-spacing: 0.1em;
   word-break: break-all;
   background: var(--canvas);
   border: 1px solid var(--rule);
-  padding: 12px;
+  padding: var(--space-3);
   user-select: all;
 }
 .otpauth {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   word-break: break-all;
   color: var(--text-2);
   background: var(--canvas);
   border: 1px solid var(--rule);
-  padding: 10px 12px;
+  padding: var(--space-3) var(--space-3);
   user-select: all;
 }
 .qr {
   /* Always dark-on-white, whatever the theme: phone cameras need the contrast. */
   align-self: flex-start;
-  background: #fff;
+  background: var(--paper);
   border: 1px solid var(--rule);
-  padding: 12px;
+  padding: var(--space-3);
   line-height: 0;
 }
 .manual {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .manual summary {
@@ -175,18 +170,18 @@
 .manual[open] {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .steps {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-5);
   color: var(--text-2);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .fine {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 @media (max-width: 860px) {
@@ -197,11 +192,11 @@
     display: none;
   }
   .panel {
-    padding: 24px 16px;
+    padding: var(--space-6) var(--space-4);
     align-items: flex-start;
   }
   .card {
-    padding: 24px 20px;
+    padding: var(--space-6) var(--space-5);
   }
   .logo {
     display: block;
@@ -228,15 +223,15 @@
   align-items: center;
   justify-content: center;
   min-height: var(--target);
-  padding: 0 18px;
+  padding: 0 var(--space-5);
   border-radius: var(--radius-control);
   background: var(--action-red);
-  color: #fff;
-  font-weight: 600;
+  color: var(--on-accent);
+  font-weight: var(--weight-semibold);
   text-decoration: none;
   align-self: flex-start;
 }
 .primaryLink:hover {
   background: var(--action-red-hover);
-  color: #fff;
+  color: var(--on-accent);
 }

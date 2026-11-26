@@ -12,17 +12,17 @@ html {
 
 body {
   margin: 0;
-  background: var(--backdrop);
-  background-attachment: fixed;
+  background: var(--canvas);
   color: var(--text);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--text-md);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
 
 a {
   color: var(--link);
+  transition: var(--transition-colors);
 }
 a:hover {
   color: var(--link-hover);
@@ -32,22 +32,23 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   margin: 0;
 }
 h1 {
-  font-size: 34px;
-  letter-spacing: -0.035em;
-  line-height: 1.1;
+  font-size: var(--text-4xl);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
 }
 h2 {
-  font-size: 18px;
-  letter-spacing: -0.02em;
-  line-height: 1.25;
+  font-size: var(--text-xl);
+  letter-spacing: -0.015em;
+  line-height: 1.3;
 }
 h3 {
-  font-size: 15px;
+  font-size: var(--text-lg);
   letter-spacing: -0.01em;
+  line-height: 1.35;
 }
 p {
   margin: 0;
@@ -68,8 +69,20 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* Every control eases between states; pressing gives a small, quick give. */
+button,
+summary,
+select,
+input,
+textarea {
+  transition: var(--transition-interactive);
+}
+button:not(:disabled):active {
+  scale: var(--press-scale);
+}
+
 :focus-visible {
-  outline: 2px solid var(--text);
+  outline: var(--focus-ring);
   outline-offset: 2px;
 }
 
@@ -90,9 +103,9 @@ dialog {
 .eyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -107,7 +120,7 @@ dialog {
 
 .label-mono {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-3);
@@ -120,7 +133,7 @@ dialog {
   color: var(--text-2);
 }
 .small {
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .visually-hidden {
@@ -138,12 +151,12 @@ dialog {
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-5);
 }
 .row {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: var(--space-5);
   align-items: flex-start;
 }
 .grow {
@@ -151,32 +164,17 @@ dialog {
   min-width: 0;
 }
 
-/* A frosted panel. Browsers without backdrop-filter get the nearly opaque fill instead. */
-.glass {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
-  border-radius: var(--radius-panel);
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .glass {
-    background: var(--glass-strong);
-  }
-}
-
-/* Forced colours (Windows high contrast): drop the effects, keep the edges. */
-@media (forced-colors: active) {
-  .glass {
-    backdrop-filter: none;
-    border-color: CanvasText;
-  }
-}
-
+/* Reduced motion: no movement; a press dims instead of scaling. */
 @media (prefers-reduced-motion: reduce) {
-  * {
+  *,
+  *::before,
+  *::after {
     animation: none !important;
     transition: none !important;
+    scroll-behavior: auto !important;
+  }
+  button:not(:disabled):active {
+    scale: none;
+    opacity: var(--press-opacity);
   }
 }

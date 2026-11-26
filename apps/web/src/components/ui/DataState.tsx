@@ -7,9 +7,13 @@ import s from './ui.module.css';
 export function Loading({ label }: { label?: string }) {
   const t = useT();
   return (
-    <div className={s.state} role="status" aria-live="polite">
-      <span className={s.loadingBar} aria-hidden="true" />
+    <div className={`${s.state} ${s.stateLoading}`} role="status" aria-live="polite">
       <span className="small">{label ?? t('common.loading')}…</span>
+      <span className={s.skeleton} aria-hidden="true">
+        <span className={s.skeletonLine} />
+        <span className={s.skeletonLine} />
+        <span className={s.skeletonLine} />
+      </span>
     </div>
   );
 }
@@ -17,14 +21,16 @@ export function Loading({ label }: { label?: string }) {
 export function ErrorState({ error, onRetry, title }: { error: ApiError; onRetry?: () => void; title?: string }) {
   const t = useT();
   return (
-    <div className={s.state} role="alert">
+    <div className={`${s.state} ${s.stateError}`} role="alert">
       <span className={s.stateTitle}>{title ?? t('common.couldNotLoad')}</span>
-      <span>{describeError(error)}</span>
+      <span className={s.stateBody}>{describeError(error)}</span>
       {error.requestId ? <span className={s.requestId}>{t('common.requestId', { id: error.requestId })}</span> : null}
       {onRetry ? (
-        <Button size="sm" variant="quiet" onClick={onRetry}>
-          {t('common.tryAgain')}
-        </Button>
+        <span className={s.stateAction}>
+          <Button size="sm" variant="quiet" onClick={onRetry}>
+            {t('common.tryAgain')}
+          </Button>
+        </span>
       ) : null}
     </div>
   );
@@ -34,7 +40,7 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
   return (
     <div className={s.state}>
       <span className={s.stateTitle}>{title}</span>
-      {children ? <span>{children}</span> : null}
+      {children ? <span className={s.stateBody}>{children}</span> : null}
     </div>
   );
 }

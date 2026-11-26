@@ -2,32 +2,29 @@
 .tiles {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 .tile {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
   min-width: 0;
-  padding: 18px 20px;
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
+  padding: var(--space-5) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  box-shadow: var(--glass-shadow);
 }
 .tileLabel {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-3);
 }
 .tileValue {
   font-family: var(--font-display);
-  font-size: 30px;
-  font-weight: 700;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.03em;
   line-height: 1.15;
   font-variant-numeric: tabular-nums;
@@ -35,13 +32,13 @@
 }
 .tileSub {
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--text-sm);
 }
 
 .layout {
   display: grid;
   grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--space-4);
   align-items: start;
 }
 @media (max-width: 960px) {
@@ -56,12 +53,12 @@
 .formBody {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: var(--space-3);
 }
 
 .drop,
@@ -69,8 +66,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 18px 16px;
+  gap: var(--space-1);
+  padding: var(--space-5) var(--space-4);
   text-align: center;
   border: 1px dashed var(--control-border);
   border-radius: var(--radius-control);
@@ -83,7 +80,7 @@
 }
 .drop:hover,
 .dropFilled:hover {
-  background: var(--glass-strong);
+  background: var(--surface);
 }
 .drop:focus-within,
 .dropFilled:focus-within {
@@ -91,34 +88,34 @@
   outline-offset: 2px;
 }
 .dropTitle {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text);
   overflow-wrap: anywhere;
 }
 .dropHint {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .fileError {
-  margin: -6px 0 0;
-  font-size: 13px;
+  margin: calc(-1 * var(--space-2)) 0 0;
+  font-size: var(--text-sm);
   color: var(--warn-text);
 }
 
 .what {
   display: block;
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .meta {
   display: block;
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .status {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: var(--space-1);
 }
 .withdrawn {
   color: var(--text-3);

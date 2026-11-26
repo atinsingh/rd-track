@@ -1,61 +1,126 @@
-/* RoundDigital Track design tokens (UX design §5). */
+/* RoundDigital Track design tokens (UX design §5).
+   Calm, solid surfaces: strong neutrals, one action accent (red) and one data accent (blue).
+   Light and dark follow the system (prefers-color-scheme). Component CSS uses these names only.
+   ds-allow-hardcode: this file is where raw values are defined. */
 :root {
-  /* Ink: navigation rail, dark panels */
-  --ink: #0b0c0f;
-  --ink-raised: #17191d;
-  --ink-avatar: #22252a;
-  --ink-rule: #1f2227;
+  color-scheme: light dark;
+
+  /* ───── Spacing: a strict 4pt scale ───── */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* ───── Radius: 10 for controls and tags, 16 for large surfaces ───── */
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-full: 999px;
+  --radius-panel: var(--radius-lg);
+  --radius-control: var(--radius-md);
+  --radius-badge: var(--radius-md);
+
+  /* ───── Type: one family, three weights, a fixed scale ───── */
+  --font-ui: var(--font-inter), system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --text-2xs: 11px; /* mono captions, table heads */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px; /* body */
+  --text-lg: 16px;
+  --text-xl: 18px; /* section titles */
+  --text-2xl: 24px;
+  --text-3xl: 28px; /* stat numbers */
+  --text-4xl: 32px; /* page titles */
+  --text-5xl: 40px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* ───── Motion ───── */
+  --duration-fast: 200ms;
+  --duration-base: 250ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --transition-colors: color var(--duration-fast) var(--ease-out), background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out),
+    opacity var(--duration-fast) var(--ease-out);
+  --transition-interactive: var(--transition-colors), scale var(--duration-fast) var(--ease-out);
+  --press-scale: 0.98;
+  --press-opacity: 0.8;
+  --disabled-opacity: 0.5;
+
+  /* ───── Size ───── */
+  --target: 44px;
+  --target-sm: 36px; /* visual height only: pair with a hit area that reaches --target */
+  --gutter: var(--space-10);
+  --rail-width: 256px;
+  --focus-ring: 2px solid var(--focus);
+
+  /* ───── Neutrals (light) ───── */
+  --text: #111316;
+  --text-2: #3d424a;
+  --text-3: #5a6069;
+  --text-on-ink: #f5f6f7;
+  --text-inverse: #f7f8f9; /* on a --text fill */
+  --on-accent: #fdfdfd; /* on --action-red */
+  --focus: #111316;
+
+  --canvas: #f3f4f6;
+  --surface: #fcfcfd;
+  --surface-sunken: #eef0f2;
+  --surface-hover: #f0f1f3;
+  --rule: #e2e4e8;
+  --rule-soft: #eaebee;
+  --control-border: #8a9099;
+  --control-border-hover: #5f6670;
+  --scrim: rgb(17 19 22 / 0.32);
+  --paper: #fdfdfd; /* always light: QR codes and organization logos need it in every theme */
+
+  /* Ink: the navigation rail and dark panels, in both themes */
+  --ink: #15171a;
+  --ink-raised: #1d2024;
+  --ink-avatar: #2a2d33;
+  --ink-rule: #262a2f;
   --ink-border: #3a3f46;
-  --ink-muted: #8c939c;
-  --ink-text: #c9cdd2;
-
-  /* Text */
-  --text: #0e1013;
-  --text-2: #3f444b;
-  --text-3: #53595f; /* 4.9:1 on the bare backdrop, ≥ 6.5:1 on glass */
-  --text-on-ink: #ffffff;
-
-  /* Surfaces and rules */
-  --surface: #ffffff;
-  --canvas: #eceef2;
-  --rule: #e4e4e7;
-  --rule-soft: #ecedef;
-  --control-border: #c9cdd2;
-
-  /* Solid glass (Stage 4 design direction): frosted panels over a quiet backdrop with
-     two faint light fields, never more. 78% white keeps every text pair ≥ 5.3:1. */
-  --backdrop: radial-gradient(1100px 620px at 8% -8%, rgb(42 120 214 / 0.18), transparent 62%),
-    radial-gradient(900px 560px at 100% 4%, rgb(253 61 65 / 0.1), transparent 58%), var(--canvas);
-  --glass: rgb(255 255 255 / 0.78);
-  --glass-strong: rgb(255 255 255 / 0.92);
-  --glass-edge: rgb(255 255 255 / 0.9);
-  --glass-blur: blur(24px) saturate(160%);
-  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 0.85), 0 10px 30px rgb(14 16 19 / 0.08), 0 1px 2px rgb(14 16 19 / 0.06);
-  --ink-glass: rgb(11 12 15 / 0.86);
-  --ink-glass-edge: rgb(255 255 255 / 0.08);
-  --ink-glass-shadow: 0 12px 32px rgb(11 12 15 / 0.22);
+  --ink-muted: #9aa0a8;
+  --ink-text: #cdd1d6;
   --ink-hover: rgb(255 255 255 / 0.06);
   --ink-current: rgb(255 255 255 / 0.1);
-  --radius-panel: 16px;
-  --radius-control: 10px;
-  --radius-badge: 6px;
+  --ink-control-border: rgb(255 255 255 / 0.1);
+  --ink-control-border-hover: rgb(255 255 255 / 0.22);
+  --ink-focus: #f5f6f7;
 
-  /* Brand red: chrome, eyebrow dash, active marker, tracking dot. Never a person's activity. */
+  /* Brand red: chrome, eyebrow dash, active marker. Never a person's activity. */
   --brand-red: #fd3d41;
-  /* Action red: primary buttons (white text, 5:1) */
+  /* Action red: primary buttons */
   --action-red: #d42b2b;
   --action-red-hover: #b52222;
-  --link: #c42424;
+  --link: #b8221f;
   --link-hover: #8f1a1a;
   --link-on-ink: #ff8a8a;
   --danger-text: #a12020;
+  --danger-bg: #fdf1f1;
+  --danger-border: #ecc3c3;
+
+  /* Warning: permission missing, device behind on policy */
+  --warn-text: #6e4105;
+  --warn-text-2: #5c3a0a;
+  --warn-bg: #fdf6e7;
+  --warn-border: #ecd29f;
+  --warn-dash: #c77a0a;
 
   /* Data: three lightness steps, never hue alone */
   --data-1: #23272e;
-  --data-2: #7c838c;
-  --data-3: #c9cdd2;
-  --data-track: #ecedef;
-  --data-none: #d4d7db;
+  --data-2: #6f7680;
+  --data-3: #c3c8ce;
+  --data-track: #e6e8eb;
+  --data-none: #cdd1d6;
   /* Series (docs/design/06 §2): blue for one magnitude; its light step for the rest of a whole */
   --series-1: #2a78d6;
   --series-1-light: #86b6ef;
@@ -64,29 +129,70 @@
   --hatch-offline: repeating-linear-gradient(45deg, #bfc3c8 0 2px, #f4f4f5 2px 6px);
   --hatch-permission: repeating-linear-gradient(0deg, #a5abb2 0 1px, transparent 1px 4px),
     repeating-linear-gradient(90deg, #a5abb2 0 1px, #f7f7f8 1px 4px);
-  --hatch-other: repeating-linear-gradient(45deg, #7c838c 0 2px, #ffffff 2px 5px);
+  --hatch-other: repeating-linear-gradient(45deg, #7c838c 0 2px, #fcfcfd 2px 5px);
 
-  /* Warning: permission missing, device behind on policy */
-  --warn-text: #6e4105;
-  --warn-text-2: #5c3a0a;
-  --warn-bg: #fff8e8;
-  --warn-border: #f0d29a;
-  --warn-dash: #c77a0a;
+  /* ───── Elevation: borders first; one soft shadow for floating layers only ───── */
+  --shadow-1: 0 1px 2px rgb(17 19 22 / 0.04);
+  --shadow-overlay: 0 12px 32px rgb(17 19 22 / 0.12), 0 1px 3px rgb(17 19 22 / 0.06);
 
-  /* Type (set by next/font in the root layout) */
-  --font-ui: var(--font-inter), system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: var(--font-inter-tight), var(--font-inter), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, 'SFMono-Regular', Menlo, monospace;
+}
 
-  /* Shape */
-  --target: 44px;
-  --target-sm: 36px;
-  --gutter: 40px;
-  --rail-width: 256px;
+@media screen and (prefers-color-scheme: dark) {
+  :root {
+    --text: #eceef1;
+    --text-2: #c2c7ce;
+    --text-3: #9aa1aa;
+    --text-inverse: #111316;
+    --focus: #eceef1;
+
+    --canvas: #0f1012;
+    --surface: #18191c;
+    --surface-sunken: #131416;
+    --surface-hover: #202226;
+    --rule: #2a2d32;
+    --rule-soft: #23252a;
+    --control-border: #686e77;
+    --control-border-hover: #8e959e;
+    --scrim: rgb(0 0 0 / 0.55);
+
+    --ink: #141518;
+    --ink-raised: #1b1d21;
+    --ink-rule: #24272c;
+
+    --action-red-hover: #b82424;
+    --link: #ff8a87;
+    --link-hover: #ffb1ae;
+    --danger-text: #ff8a87;
+    --danger-bg: #2a1616;
+    --danger-border: #5c2a2a;
+
+    --warn-text: #f4c56f;
+    --warn-text-2: #e8c88e;
+    --warn-bg: #261d0c;
+    --warn-border: #5a4314;
+    --warn-dash: #e0a23a;
+
+    --data-1: #e3e6ea;
+    --data-2: #959ca6;
+    --data-3: #50565e;
+    --data-track: #26282d;
+    --data-none: #3b3f46;
+    --series-1: #4b93ea;
+    --series-1-light: #2f5b8f;
+    --series-2: #f08051;
+    --hatch-paused: repeating-linear-gradient(135deg, #959ca6 0 2px, #2a2d32 2px 5px);
+    --hatch-offline: repeating-linear-gradient(45deg, #50565e 0 2px, #1d1f23 2px 6px);
+    --hatch-permission: repeating-linear-gradient(0deg, #6a7078 0 1px, transparent 1px 4px),
+      repeating-linear-gradient(90deg, #6a7078 0 1px, #1d1f23 1px 4px);
+    --hatch-other: repeating-linear-gradient(45deg, #959ca6 0 2px, #18191c 2px 5px);
+
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-overlay: 0 12px 32px rgb(0 0 0 / 0.45), 0 0 0 1px rgb(255 255 255 / 0.04);
+  }
 }
 
 @media (max-width: 720px) {
   :root {
-    --gutter: 16px;
+    --gutter: var(--space-4);
   }
 }

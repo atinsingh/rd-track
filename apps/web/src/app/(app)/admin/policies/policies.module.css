@@ -1,22 +1,19 @@
 .layout {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: var(--space-5);
   align-items: flex-start;
 }
 .tree {
   flex: 1 1 260px;
   min-width: 0;
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  padding: 16px 0;
+  padding: var(--space-4) 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .treeGroup {
   display: flex;
@@ -24,11 +21,11 @@
 }
 .treeLabel {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-3);
-  padding: 0 16px 6px;
+  padding: 0 var(--space-4) var(--space-2);
 }
 .treeList {
   margin: 0;
@@ -39,10 +36,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
   width: 100%;
   min-height: var(--target);
-  padding: 9px 16px;
+  padding: var(--space-2) var(--space-4);
   border: 0;
   background: none;
   text-align: left;
@@ -54,70 +51,67 @@
 .treeItem[aria-current='true'] {
   background: var(--canvas);
   box-shadow: inset 3px 0 0 var(--brand-red);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .treeMeta {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-3);
-  font-weight: 400;
+  font-weight: var(--weight-regular);
   white-space: nowrap;
 }
 .treeEmpty {
   color: var(--text-2);
-  padding: 9px 16px;
-  font-size: 13px;
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm);
 }
 .editor {
   flex: 3 1 640px;
   min-width: 0;
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  padding: 22px 24px;
+  padding: var(--space-6) var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .editorHead {
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   align-items: baseline;
-  gap: 8px;
-  margin-bottom: 8px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
 }
 .editorHead h2 {
-  font-size: 20px;
+  font-size: var(--text-xl);
 }
 .cols,
 .fieldRow {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(240px, 300px) minmax(0, 1.1fr);
-  gap: 16px;
+  gap: var(--space-4);
 }
 .cols {
-  padding: 8px 0;
+  padding: var(--space-2) 0;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-3);
-  border-bottom: 1px solid var(--text);
+  border-bottom: 1px solid var(--control-border);
 }
 .group {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-3);
-  padding: 18px 0 4px;
+  padding: var(--space-5) 0 var(--space-1);
   margin: 0;
 }
 .fieldRow {
-  padding: 14px 0;
+  padding: var(--space-4) 0;
   border-bottom: 1px solid var(--rule-soft);
   align-items: start;
 }
@@ -127,22 +121,22 @@
   gap: 2px;
 }
 .fieldLabel {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .fieldHelp {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .control {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 .numInput {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .numInput input {
   width: 110px;
@@ -154,28 +148,28 @@
 }
 .effValue {
   font-family: var(--font-mono);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
   word-break: break-word;
 }
 .because {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--text-2);
 }
 .days {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 10px;
+  gap: var(--space-1) var(--space-3);
 }
 .days label {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  min-height: 32px;
-  font-size: 13px;
+  gap: var(--space-1);
+  min-height: var(--space-8);
+  font-size: var(--text-sm);
 }
 .whRow {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .whRow input,
@@ -184,50 +178,50 @@
   min-width: 0;
 }
 .publish {
-  margin-top: 18px;
-  border: 1px solid var(--text);
-  padding: 20px 22px;
+  margin-top: var(--space-5);
+  border: 1px solid var(--rule);
+  padding: var(--space-5) var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .expansion {
-  margin-top: 18px;
-  border: 1px solid var(--text);
-  padding: 20px 22px;
+  margin-top: var(--space-5);
+  border: 1px solid var(--rule);
+  padding: var(--space-5) var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .expEyebrow {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-xs);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--warn-text);
 }
 .expEyebrow::before {
   content: '';
-  width: 16px;
+  width: var(--space-4);
   height: 2px;
   background: var(--warn-dash);
 }
 .expTitle {
   font-family: var(--font-display);
-  font-size: 18px;
-  font-weight: 700;
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.02em;
 }
 .diff {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--space-5);
   color: var(--text-2);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
 }
 .history {
   margin: 0;
@@ -239,8 +233,8 @@
 .history li {
   display: grid;
   grid-template-columns: 70px minmax(0, 1fr);
-  gap: 12px;
-  padding: 10px 0;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
   border-top: 1px solid var(--rule-soft);
 }
 @media (max-width: 900px) {
@@ -249,6 +243,6 @@
   }
   .fieldRow {
     grid-template-columns: 1fr;
-    gap: 10px;
+    gap: var(--space-3);
   }
 }

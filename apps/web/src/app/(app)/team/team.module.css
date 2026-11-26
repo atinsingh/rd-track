@@ -1,5 +1,5 @@
 .memberLink {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text);
   text-decoration: none;
 }
@@ -10,16 +10,16 @@
 .act {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-3);
 }
 .actNum {
   font-family: var(--font-mono);
-  width: 40px;
+  width: var(--space-10);
 }
 .actTrack {
   flex: 1;
   max-width: 90px;
-  min-width: 40px;
+  min-width: var(--space-10);
   height: 6px;
   background: var(--data-track);
 }
@@ -39,7 +39,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 14px;
+  padding: var(--space-4);
   border: 1px solid var(--rule);
   border-radius: var(--radius-control);
   color: var(--text);
@@ -50,10 +50,10 @@ a.attItem:hover {
   color: var(--text);
 }
 .attTitle {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
 }
 .attBody {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .attWarn {
@@ -69,7 +69,7 @@ a.attItem:hover {
 .thActivity {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
 /* Long column labels (French) wrap instead of pushing the table past its card; names stay on one line. */
@@ -84,7 +84,7 @@ a.attItem:hover {
 .status {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   white-space: nowrap;
 }
 .dot {
@@ -110,16 +110,16 @@ a.attItem:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
 }
 .summaryList {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 14px;
+  gap: var(--space-1) var(--space-4);
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 
@@ -128,14 +128,14 @@ a.attItem:hover {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 10px 16px;
+  gap: var(--space-3) var(--space-4);
 }
 .customRange {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .customRange input {

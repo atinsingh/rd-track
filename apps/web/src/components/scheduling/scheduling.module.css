@@ -4,19 +4,19 @@
 .grid {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: var(--text-sm);
   min-width: 760px;
 }
 .grid th {
   text-align: left;
   font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-3);
-  padding: 8px 6px;
-  border-bottom: 1px solid var(--text);
+  padding: var(--space-2) var(--space-2);
+  border-bottom: 1px solid var(--control-border);
   white-space: nowrap;
   vertical-align: bottom;
 }
@@ -25,12 +25,12 @@
   padding-left: 0;
 }
 .grid td {
-  padding: 6px;
+  padding: var(--space-2);
   border-bottom: 1px solid var(--rule-soft);
   vertical-align: top;
 }
 .name {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   white-space: nowrap;
   vertical-align: middle !important;
 }
@@ -42,21 +42,21 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-height: 44px;
-  padding: 6px 8px;
+  min-height: var(--target);
+  padding: var(--space-2) var(--space-2);
   border: 1px solid var(--rule);
-  border-radius: var(--radius-badge);
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--text-2);
 }
 .cellTitle {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--text-xs);
 }
 .cellSub {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: var(--text-3);
 }
 .cellMuted {
@@ -65,7 +65,7 @@
 }
 .cellMuted .cellTitle {
   color: var(--text-3);
-  font-weight: 500;
+  font-weight: var(--weight-medium);
 }
 .cellLeave {
   background: repeating-linear-gradient(45deg, var(--rule-soft) 0 2px, var(--surface) 2px 6px);
@@ -84,9 +84,9 @@
 .marker {
   display: inline-block;
   flex: none;
-  width: 8px;
-  height: 8px;
-  margin-right: 6px;
+  width: var(--space-2);
+  height: var(--space-2);
+  margin-right: var(--space-2);
   background: var(--warn-dash);
   vertical-align: 1px;
 }
@@ -94,14 +94,14 @@
 .legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 18px;
-  font-size: 12px;
+  gap: var(--space-2) var(--space-5);
+  font-size: var(--text-xs);
   color: var(--text-2);
 }
 .legend span {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
 }
 .swatch {
   width: 14px;
@@ -123,21 +123,21 @@
 .balances {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 .balance {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-4);
   border: 1px solid var(--rule);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
 .balanceValue {
   font-family: var(--font-mono);
-  font-size: 26px;
-  font-weight: 500;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-medium);
   color: var(--text);
   line-height: 1.2;
 }
@@ -145,13 +145,13 @@
 .compare {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 12px;
+  gap: var(--space-3);
 }
 .side {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 14px;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
   background: var(--canvas);
   min-width: 0;
 }
@@ -159,7 +159,7 @@
 .inlineForm {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: var(--space-3);
   align-items: flex-end;
 }
 .inlineForm > * {
@@ -174,19 +174,19 @@
   padding: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 12px;
+  gap: var(--space-1) var(--space-3);
   align-items: center;
 }
 .weekdayPicks legend {
-  font-weight: 600;
-  margin-bottom: 6px;
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-2);
   padding: 0;
   width: 100%;
 }
 .weekdayPicks label {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--space-2);
   min-height: var(--target-sm);
 }
 .weekdayPicks input {

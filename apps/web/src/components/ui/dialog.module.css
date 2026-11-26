@@ -1,25 +1,21 @@
 .dialog {
-  border: 1px solid var(--glass-edge);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  box-shadow: 0 24px 64px rgb(11 12 15 / 0.24), 0 2px 6px rgb(11 12 15 / 0.08);
+  box-shadow: var(--shadow-overlay);
   padding: 0;
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--surface);
   color: var(--text);
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100vh - 48px);
+  width: min(560px, calc(100vw - var(--space-8)));
+  max-height: calc(100vh - var(--space-12));
 }
 .sm {
-  width: min(440px, calc(100vw - 32px));
+  width: min(440px, calc(100vw - var(--space-8)));
 }
 .lg {
-  width: min(760px, calc(100vw - 32px));
+  width: min(760px, calc(100vw - var(--space-8)));
 }
 .dialog::backdrop {
-  background: rgb(11 12 15 / 0.4);
-  -webkit-backdrop-filter: blur(2px);
-  backdrop-filter: blur(2px);
+  background: var(--scrim);
 }
 @media (forced-colors: active) {
   .dialog {
@@ -34,20 +30,20 @@
   border-radius: var(--radius-panel) 0 0 var(--radius-panel);
 }
 .ink {
-  background: var(--ink-glass);
-  border-color: var(--ink-glass-edge);
+  background: var(--ink);
+  border-color: var(--ink-rule);
   color: var(--ink-text);
 }
 .ink h2 {
-  color: #fff;
+  color: var(--text-on-ink);
 }
 .ink .close {
-  color: #fff;
+  color: var(--text-on-ink);
   border-color: var(--ink-border);
   background: transparent;
 }
 .ink :focus-visible {
-  outline-color: #fff;
+  outline-color: var(--ink-focus);
 }
 .inner {
   display: flex;
@@ -56,15 +52,15 @@
 }
 .head {
   display: flex;
-  gap: 16px;
+  gap: var(--space-4);
   justify-content: space-between;
   align-items: flex-start;
-  padding: 22px 24px 8px;
+  padding: var(--space-6) var(--space-6) var(--space-2);
 }
 .headText {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-2);
   min-width: 0;
 }
 .desc {
@@ -86,18 +82,18 @@
   color: var(--text);
 }
 .body {
-  padding: 12px 24px 20px;
+  padding: var(--space-3) var(--space-6) var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
   flex: 1;
 }
 .footer {
-  padding: 16px 24px 22px;
+  padding: var(--space-4) var(--space-6) var(--space-6);
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 10px;
+  gap: var(--space-3);
   border-top: 1px solid var(--rule);
 }
 .ink .footer {

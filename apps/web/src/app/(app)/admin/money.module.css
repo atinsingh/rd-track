@@ -2,12 +2,12 @@
 .stack {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .row {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
   align-items: baseline;
   justify-content: space-between;
 }
@@ -18,15 +18,15 @@
 }
 .big {
   font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 500;
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-medium);
   color: var(--text);
 }
 .cellInput {
   width: 100%;
   min-width: 72px;
   min-height: var(--target-sm);
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-2);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
   background: var(--surface);
@@ -34,7 +34,7 @@
   color: var(--text);
 }
 .cellInput:focus-visible {
-  outline: 2px solid var(--text);
+  outline: var(--focus-ring);
   outline-offset: 1px;
 }
 .cellNum {
@@ -46,7 +46,7 @@
   min-width: 260px;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 6px 24px;
+  gap: var(--space-2) var(--space-6);
 }
 .totals dt {
   color: var(--text-2);
@@ -58,16 +58,16 @@
   font-variant-numeric: tabular-nums;
 }
 .totalRow {
-  border-top: 1px solid var(--text);
-  padding-top: 6px;
-  font-weight: 600;
+  border-top: 1px solid var(--control-border);
+  padding-top: var(--space-2);
+  font-weight: var(--weight-semibold);
   color: var(--text);
 }
 .budget {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px 0;
+  gap: var(--space-3);
+  padding: var(--space-4) 0;
   border-top: 1px solid var(--rule);
 }
 .budget:first-child {
@@ -78,13 +78,13 @@
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .history li {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
-  padding: 4px 0;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
   border-bottom: 1px solid var(--rule-soft);
 }

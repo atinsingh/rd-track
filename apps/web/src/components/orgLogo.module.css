@@ -5,8 +5,8 @@
   max-width: 100%;
 }
 .chip {
-  padding: 6px 10px;
-  background: #fff;
+  padding: var(--space-2) var(--space-3);
+  background: var(--paper);
   border-radius: var(--radius-control);
 }
 .img {
@@ -18,6 +18,6 @@
   object-fit: contain;
 }
 .plain .img {
-  max-height: 48px;
+  max-height: var(--space-12);
   max-width: 220px;
 }

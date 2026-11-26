@@ -1,30 +1,27 @@
 .top {
   display: flex;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: var(--space-5);
   align-items: stretch;
 }
 .planCard {
   flex: 1 1 360px;
   min-width: 0;
-  background: var(--ink-glass);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--ink-glass-edge);
-  box-shadow: var(--ink-glass-shadow);
+  background: var(--ink);
+  border: 1px solid var(--ink-rule);
   border-radius: var(--radius-panel);
   color: var(--ink-text);
-  padding: 24px;
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--space-4);
 }
 .planCard :focus-visible {
-  outline-color: #fff;
+  outline-color: var(--ink-focus);
 }
 .cardLabel {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.14em;
   color: var(--ink-muted);
   text-transform: uppercase;
@@ -32,69 +29,66 @@
 .planLine {
   display: flex;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-3);
   flex-wrap: wrap;
 }
 .planName {
   font-family: var(--font-display);
-  font-size: 40px;
-  font-weight: 700;
+  font-size: var(--text-5xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.04em;
-  color: #fff;
+  color: var(--text-on-ink);
   line-height: 1.1;
 }
 .planPrice {
   font-family: var(--font-mono);
-  color: #fff;
+  color: var(--text-on-ink);
 }
 .status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
 }
 .statusDot {
-  width: 8px;
-  height: 8px;
+  width: var(--space-2);
+  height: var(--space-2);
   border-radius: 50%;
-  background: #fff;
+  background: var(--text-on-ink);
   flex: none;
 }
 .statusDotWarn {
   background: transparent;
-  border: 2px solid #fff;
+  border: 2px solid var(--text-on-ink);
 }
 .cost {
   border-top: 1px solid var(--ink-rule);
-  padding-top: 14px;
+  padding-top: var(--space-4);
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 12px;
+  gap: var(--space-3);
 }
 .costValue {
   font-family: var(--font-mono);
-  font-size: 24px;
-  color: #fff;
+  font-size: var(--text-2xl);
+  color: var(--text-on-ink);
   font-variant-numeric: tabular-nums;
 }
 .fine {
-  font-size: 12px;
+  font-size: var(--text-xs);
   color: var(--ink-muted);
 }
 .seats {
   flex: 2 1 520px;
   min-width: 0;
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-edge);
-  box-shadow: var(--glass-shadow);
+  background: var(--surface);
+  border: 1px solid var(--rule);
   border-radius: var(--radius-panel);
-  padding: 24px;
+  padding: var(--space-6);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-4);
 }
 .cells {
   display: flex;
@@ -118,7 +112,7 @@
   display: flex;
   justify-content: space-between;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: var(--text-3);
   text-transform: uppercase;
 }
@@ -129,7 +123,7 @@
   border-top: 1px solid var(--rule-soft);
 }
 .stat {
-  padding: 14px 14px 0;
+  padding: var(--space-4) var(--space-4) 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -142,7 +136,7 @@
 }
 .stat dt {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.12em;
   color: var(--text-3);
   text-transform: uppercase;
@@ -150,24 +144,24 @@
 .stat dd {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 28px;
-  font-weight: 700;
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 .seatForm {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: 10px;
+  gap: var(--space-3);
   border-top: 1px solid var(--rule-soft);
-  padding-top: 16px;
+  padding-top: var(--space-4);
 }
 .seatLabel {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--space-1);
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.12em;
   color: var(--text-3);
   text-transform: uppercase;
@@ -177,8 +171,8 @@
   width: 120px;
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
-  padding: 0 12px;
-  font: 500 16px var(--font-mono);
+  padding: 0 var(--space-3);
+  font: var(--weight-medium) var(--text-lg) var(--font-mono);
   color: var(--text);
   background: var(--surface);
 }
@@ -188,15 +182,15 @@
 .plans {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: var(--space-4);
 }
 .plan {
   border: 1px solid var(--rule);
   border-radius: var(--radius-control);
-  padding: 20px;
+  padding: var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--space-3);
   background: var(--surface);
   min-width: 0;
 }
@@ -207,28 +201,28 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .planHead h3 {
-  font-size: 22px;
+  font-size: var(--text-2xl);
   letter-spacing: -0.03em;
 }
 .tag {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--text-2xs);
   letter-spacing: 0.12em;
   color: var(--link);
 }
 .price {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 .priceValue {
   font-family: var(--font-display);
-  font-size: 32px;
-  font-weight: 700;
+  font-size: var(--text-4xl);
+  font-weight: var(--weight-semibold);
   letter-spacing: -0.03em;
 }
 .features {
@@ -237,20 +231,20 @@
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 13px;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
 }
 .features li {
   display: flex;
-  gap: 8px;
+  gap: var(--space-2);
 }
 .mark {
   font-family: var(--font-mono);
-  width: 12px;
+  width: var(--space-3);
   flex: none;
 }
 .off {
-  color: #6b7178;
+  color: var(--text-3);
 }
 .planBtn {
   margin-top: auto;
@@ -258,14 +252,14 @@
 .currentBtn {
   margin-top: auto;
   background: var(--text) !important;
-  color: #fff !important;
+  color: var(--text-inverse) !important;
   opacity: 1 !important;
 }
 .dlConfirm {
   margin: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px 12px;
+  gap: var(--space-2) var(--space-3);
 }
 .dlConfirm dt {
   color: var(--text-3);
@@ -293,10 +287,10 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
+  gap: var(--space-2) var(--space-4);
 }
 .priceTerm {
-  font-size: 13px;
+  font-size: var(--text-sm);
   color: var(--text-2);
-  margin-top: -6px;
+  margin-top: calc(-1 * var(--space-2));
 }
