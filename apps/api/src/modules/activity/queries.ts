@@ -168,17 +168,31 @@ async function attendanceFor(deps: Deps, q: Queryable, orgId: string, userId: st
   const wh = (await resolveFor(deps, q, orgId, userId)).settings.work_hours;
   const zone = wh?.timezone ?? tz;
   const now = deps.now().toISOString();
+  // A quit is either the agent's own `quit_during_hours` stop, or an unannounced end: the agent
+  // was killed (force quit, crash) inside office hours, went silent for over 5 minutes, and its
+  // session was later superseded by a new start. The last activity minute marks when it left.
+  // ponytail: a pause right before a kill counts as away; fold paused time out if that matters.
   const quits = await one<{ n: number; away: number }>(
     q,
-    `SELECT count(*)::int AS n,
-            coalesce(sum(greatest(0, EXTRACT(EPOCH FROM (least(coalesce(nx.started_at, $5::timestamptz), c.cap) - s.ended_at)))), 0)::int AS away
-     FROM work_sessions s
-     LEFT JOIN LATERAL (SELECT n.started_at FROM work_sessions n WHERE n.user_id = s.user_id AND n.started_at >= s.ended_at
+    `WITH ends AS (
+       SELECT s.ended_at AS left_at FROM work_sessions s
+       WHERE s.organization_id = $1 AND s.user_id = $2 AND s.stop_reason = 'quit_during_hours'
+       UNION ALL
+       SELECT h.left_at FROM work_sessions s
+       CROSS JOIN LATERAL (SELECT coalesce(max(b.bucket_start) + interval '1 minute', s.started_at) AS left_at
+                           FROM activity_buckets b WHERE b.session_id = s.id) h
+       WHERE $8::boolean AND s.organization_id = $1 AND s.user_id = $2 AND s.stop_reason = 'superseded'
+         AND s.ended_at - h.left_at > interval '5 minutes'
+         AND extract(isodow FROM h.left_at AT TIME ZONE $6)::int = ANY($9::int[])
+         AND (h.left_at AT TIME ZONE $6)::time >= $10::time AND (h.left_at AT TIME ZONE $6)::time < $7::time)
+     SELECT count(*)::int AS n,
+            coalesce(sum(greatest(0, EXTRACT(EPOCH FROM (least(coalesce(nx.started_at, $5::timestamptz), c.cap) - e.left_at)))), 0)::int AS away
+     FROM ends e
+     LEFT JOIN LATERAL (SELECT n.started_at FROM work_sessions n WHERE n.user_id = $2 AND n.started_at >= e.left_at
                         ORDER BY n.started_at LIMIT 1) nx ON true
-     CROSS JOIN LATERAL (SELECT (((s.ended_at AT TIME ZONE $6)::date + $7::time) AT TIME ZONE $6) AS cap) c
-     WHERE s.organization_id = $1 AND s.user_id = $2 AND s.stop_reason = 'quit_during_hours'
-       AND s.ended_at >= $3 AND s.ended_at < $4`,
-    [orgId, userId, r.from, r.to, now, zone, wh?.end ?? '24:00'],
+     CROSS JOIN LATERAL (SELECT (((e.left_at AT TIME ZONE $6)::date + $7::time) AT TIME ZONE $6) AS cap) c
+     WHERE e.left_at >= $3 AND e.left_at < $4`,
+    [orgId, userId, r.from, r.to, now, zone, wh?.end ?? '24:00', wh != null, wh?.days ?? WEEKDAYS, wh?.start ?? '00:00'],
   );
   // Completed office days only: today still has hours to go.
   const target = await one<{ work_days: number; under: number }>(
