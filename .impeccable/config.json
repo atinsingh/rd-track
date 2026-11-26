@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-11-26T19:17:40.373Z",
+        "reason": "User's design brief: 'Prefer system fonts or Inter/SF Pro style'; agent popover matches the web dashboard's Inter stack"
+      }
+    ]
+  }
+}
