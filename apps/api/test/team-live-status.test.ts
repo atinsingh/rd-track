@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { SYSTEM_SCOPE, withScope } from '../src/db/tenant-scope';
 import { bucket, deviceReq, enrollDevice, event, makeOrg, minutes, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** The team overview says what each person is doing right now, and how many screenshots the range holds. */
@@ -87,5 +88,19 @@ describe('team live status', () => {
     expect((await rowFor('emp')).screenshot_count).toBe(1);
     // Nothing on that project for this person, so nothing is shared.
     expect((await rowFor('emp2')).screenshot_count).toBeNull();
+  });
+
+  it('leaves out screenshots from sessions outside a project that shares them', async () => {
+    // A session with no project: the org policy doesn't share screenshots, so its screenshot must not count.
+    const other = randomUUID();
+    await send([event(dev, other, 'session.started.v1', {}, env.clock.iso())]);
+    await withScope(SYSTEM_SCOPE, () =>
+      env.deps.pool.query(
+        `INSERT INTO screenshots (id, organization_id, session_id, user_id, device_id, object_key, content_type, status, captured_at, policy_revision, intent_expires_at, retention_after)
+         VALUES ($1, $2, $3, $4, $5, $6, 'image/webp', 'stored', $7, 1, $7, '2027-01-01T00:00:00Z')`,
+        [randomUUID(), org.id, other, org.users.emp!.id, dev.id, `k-${randomUUID()}`, env.clock.iso()],
+      ),
+    );
+    expect((await rowFor('emp')).screenshot_count).toBe(1);
   });
 });

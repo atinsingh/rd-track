@@ -251,13 +251,15 @@ export async function teamReport(
     [orgId, ids],
   );
   // The same screenshots the person's day page lists.
-  const shots = await many<{ user_id: string; n: number }>(
+  // Counted per project, so each count is only shown where that project shares screenshots.
+  const shots = await many<{ user_id: string; project_id: string | null; n: number }>(
     q,
-    `SELECT user_id, count(*)::int AS n FROM screenshots
-     WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND status IN ('stored', 'verifying')
-       AND captured_at >= $3 AND captured_at < $4
-       AND ($5::uuid IS NULL OR session_id IN (SELECT id FROM work_sessions WHERE project_id = $5))
-     GROUP BY user_id`,
+    `SELECT sc.user_id, ws.project_id, count(*)::int AS n FROM screenshots sc
+     LEFT JOIN work_sessions ws ON ws.id = sc.session_id
+     WHERE sc.organization_id = $1 AND sc.user_id = ANY($2::uuid[]) AND sc.status IN ('stored', 'verifying')
+       AND sc.captured_at >= $3 AND sc.captured_at < $4
+       AND ($5::uuid IS NULL OR ws.project_id = $5)
+     GROUP BY sc.user_id, ws.project_id`,
     [orgId, ids, r.from, r.to, projectId],
   );
   // Screenshots are often shared per project: the same projects the person's own visibility check looks at.
@@ -268,6 +270,17 @@ export async function teamReport(
     [orgId, ids, deps.now().toISOString()],
   );
   const now = deps.now().getTime();
+  const shareCache = new Map<string, boolean>();
+  const sharesScreenshots = async (userId: string, project: string): Promise<boolean> => {
+    const key = `${userId}:${project}`;
+    let v = shareCache.get(key);
+    if (v === undefined) {
+      const { settings } = await resolveFor(deps, q, orgId, userId, { projectId: project });
+      v = settings.screenshots.enabled && settings.viewers.manager_can_view_screenshots;
+      shareCache.set(key, v);
+    }
+    return v;
+  };
 
   let anyActivity = false;
   let anyApps = false;
@@ -276,11 +289,17 @@ export async function teamReport(
   for (const m of members) {
     const a = agg.find((x) => x.user_id === m.user_id);
     const vis = await visibilityFor(deps, q, orgId, m.user_id);
+    // Org-level sharing covers screenshots outside a project; each project decides for its own.
+    const orgShares = vis.screenshots;
+    let shotCount = 0;
+    for (const g of shots) {
+      if (g.user_id !== m.user_id) continue;
+      if (g.project_id === null ? orgShares : await sharesScreenshots(m.user_id, g.project_id)) shotCount += g.n;
+    }
     for (const t of tracked) {
       if (vis.screenshots) break;
       if (t.user_id !== m.user_id) continue;
-      const { settings } = await resolveFor(deps, q, orgId, m.user_id, { projectId: t.project_id });
-      vis.screenshots = settings.screenshots.enabled && settings.viewers.manager_can_view_screenshots;
+      vis.screenshots = await sharesScreenshots(m.user_id, t.project_id);
     }
     anyActivity ||= vis.activity;
     anyApps ||= vis.apps;
@@ -301,7 +320,7 @@ export async function teamReport(
       permission_missing_minutes: a?.missing ?? 0,
       notes,
       status: liveStatus(open.find((o) => o.user_id === m.user_id), vis.activity, now),
-      screenshot_count: vis.screenshots ? (shots.find((x) => x.user_id === m.user_id)?.n ?? 0) : null,
+      screenshot_count: vis.screenshots ? shotCount : null,
     });
   }
 
