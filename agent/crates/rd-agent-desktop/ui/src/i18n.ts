@@ -11,7 +11,7 @@ export const en = {
   "app.starting": "Starting…",
   "app.stopping": "Stopping the session and sending the last data…",
 
-  "banner.dismiss": "DISMISS",
+  "banner.dismiss": "Dismiss",
   "head.elapsed": "Elapsed",
 
   "pick.chooseProject": "Choose a project…",
@@ -153,7 +153,7 @@ export const fr: Record<Key, string> = {
   "app.starting": "Démarrage…",
   "app.stopping": "Arrêt de la session et envoi des dernières données…",
 
-  "banner.dismiss": "FERMER",
+  "banner.dismiss": "Fermer",
   "head.elapsed": "Temps écoulé",
 
   "pick.chooseProject": "Choisir un projet…",

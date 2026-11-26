@@ -74,9 +74,16 @@ function h(tag, props = {}, ...children) {
     return el;
 }
 const SVG_NS = "http://www.w3.org/2000/svg";
+/** The wordmark: colour on light, reversed on dark (styles.css shows the right one). */
+function logo() {
+    return [
+        h("img", { class: "logo-light", src: "img/rd-logo-color.png", alt: "RoundDigital Track" }),
+        h("img", { class: "logo-dark", src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }),
+    ];
+}
 function cameraIcon() {
     const svg = document.createElementNS(SVG_NS, "svg");
-    for (const [k, v] of Object.entries({ width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#FFFFFF", "stroke-width": "2", "aria-hidden": "true" })) {
+    for (const [k, v] of Object.entries({ width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true" })) {
         svg.setAttribute(k, v);
     }
     const rect = document.createElementNS(SVG_NS, "rect");
@@ -212,18 +219,28 @@ function onBannerAction(b) {
 }
 // ----- views --------------------------------------------------------------------------
 function banners(v) {
-    return v.banners.map((b) => h("div", { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" }, b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text), b.detail && h("span", { class: "banner-detail" }, b.detail), (b.action || b.dismissible) &&
+    return v.banners.map((b) => h("div", { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" }, b.kind === "warn" && icon(ICONS.alert, 16), h("div", { class: "banner-body" }, b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text), b.detail && h("span", { class: "banner-detail" }, b.detail), (b.action || b.dismissible) &&
         h("div", { class: "row" }, b.dismissible &&
             h("button", {
-                class: "x",
+                class: "x sm",
                 type: "button",
                 onclick: () => void run(() => invoke("dismiss_banner", { id: b.id })),
             }, t("banner.dismiss")), b.action &&
-            h("button", { class: "act", type: "button", onclick: () => onBannerAction(b) }, b.action.label))));
+            h("button", { class: "act sm", type: "button", onclick: () => onBannerAction(b) }, b.action.label)))));
 }
-function header(v) {
-    const dotClass = v.tray === "tracking" ? "dot" : `dot ${v.tray}`;
-    return h("div", { class: "head" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }), h("span", { class: "status" }, h("span", { class: dotClass, "aria-hidden": "true" }), v.label)), v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed));
+/** The live state: a dot (filled, ring or grey) and the label, so colour is never the only cue. */
+function statusLine(v) {
+    return h("span", { class: "status" }, h("span", { class: `dot ${v.tray}`, "aria-hidden": "true" }), v.label);
+}
+/** The wordmark, and (when `withStatus`) the state on the right. */
+function header(v, withStatus = false) {
+    return h("div", { class: "head" }, h("span", { class: "brand" }, ...logo()), withStatus && statusLine(v));
+}
+/** The hero: state and elapsed time, today's worked time large, then the work limits. */
+function hero(v) {
+    const limits = [v.limit_today, v.limit_week].filter((l) => !!l);
+    return h("div", { class: "hero" }, h("div", { class: "hero-top" }, statusLine(v), v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed)), h("p", { class: "hero-time" }, v.today), h("p", { class: "hero-sub" }, t("main.today"), v.activity ? t("main.activity") : "", v.activity ?? ""), limits.length > 0 &&
+        h("div", { class: "limits" }, h("span", { class: "label" }, t("main.workLimit")), h("span", { class: "value" }, ...limits.map((l) => h("span", {}, l)))));
 }
 function projectPickers(v) {
     const open = v.tray !== "idle" && !switching;
@@ -252,28 +269,24 @@ function projectPickers(v) {
     if (taskValue && !tasks.some((task) => task.id === taskValue))
         taskSelect.append(h("option", { value: taskValue }, taskValue));
     taskSelect.value = taskValue;
+    if (open) {
+        const row = (key, value, none, extra) => h("div", { class: "session-row" }, h("span", { class: "key" }, key), h("span", { class: none ? "val none" : "val", title: value }, value), extra || h("span", {}));
+        return [
+            h("div", { class: "session-card" }, row(t("pick.project"), project?.name ?? (projectValue || t("pick.noProject")), !projectValue, switchButton(v)), row(t("pick.task"), tasks.find((task) => task.id === taskValue)?.name ?? (taskValue || t("pick.noTask")), !taskValue)),
+        ];
+    }
     const out = [
-        h("label", { class: "field" }, t("pick.project"), projectSelect),
-        h("label", { class: "field" }, t("pick.task"), taskSelect),
+        h("label", { class: "field" }, t("pick.project"), h("span", { class: "select" }, projectSelect)),
+        h("label", { class: "field" }, t("pick.task"), h("span", { class: "select" }, taskSelect)),
     ];
     if (v.projects_supported === false) {
         out.push(h("p", { class: "hint" }, t("pick.unsupported")));
     }
     return out;
 }
-function sessionButtons(v) {
-    if (v.tray === "idle") {
-        switching = false;
-        const blocked = !v.can_start || busy || (v.require_project && !selectedProject);
-        return h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")));
-    }
-    if (switching) {
-        const blocked = busy || (v.require_project && !selectedProject);
-        return h("div", { class: "actions" }, h("button", { class: "btn-outline-light", type: "button", disabled: busy, onclick: () => { switching = false; render(); } }, t("session.switchCancel")), h("button", { class: "btn-solid-light", type: "button", disabled: blocked, onclick: () => void run(() => prepareStart(true)) }, t("session.switchContinue")));
-    }
-    const paused = v.tray === "paused";
-    // Moves the running session onto another project (no gap; allowed inside office hours).
-    const switchLink = h("button", {
+// Moves the running session onto another project (no gap; allowed inside office hours).
+function switchButton(v) {
+    return h("button", {
         class: "link",
         type: "button",
         disabled: busy,
@@ -284,21 +297,33 @@ function sessionButtons(v) {
             render();
         },
     }, t("session.switch"));
+}
+function sessionButtons(v) {
+    if (v.tray === "idle") {
+        switching = false;
+        const blocked = !v.can_start || busy || (v.require_project && !selectedProject);
+        return h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")));
+    }
+    if (switching) {
+        const blocked = busy || (v.require_project && !selectedProject);
+        return h("div", { class: "actions" }, h("button", { class: "btn-quiet", type: "button", disabled: busy, onclick: () => { switching = false; render(); } }, t("session.switchCancel")), h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: () => void run(() => prepareStart(true)) }, t("session.switchContinue")));
+    }
+    const paused = v.tray === "paused";
     const pause = h("button", {
-        class: "btn-outline-light",
+        class: paused ? "btn-action" : "btn-secondary",
         type: "button",
         disabled: busy,
         onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
     }, paused ? t("session.resume") : t("session.pause"));
     // Inside office hours there is no Stop: only Pause (which resumes by itself).
     if (!v.can_stop) {
-        return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")), switchLink);
+        return h("div", { class: "stack" }, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")));
     }
-    return h("div", {}, h("div", { class: "actions" }, pause, h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop"))), switchLink);
+    return h("div", { class: "actions" }, pause, h("button", { class: "btn-quiet", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop")));
 }
 // A start / stop / "still tracking?" reminder: title, one line, two buttons.
 function reminderCard(r) {
-    return h("div", { class: "banner info reminder", role: "status" }, h("strong", { class: "banner-title" }, r.title), h("span", { class: "banner-detail" }, r.detail), h("div", { class: "row" }, h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label), r.primary && h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label)));
+    return h("div", { class: "banner info reminder", role: "status" }, h("div", { class: "banner-body" }, h("strong", { class: "banner-title" }, r.title), h("span", { class: "banner-detail" }, r.detail), h("div", { class: "row" }, h("button", { class: "x sm", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label), r.primary && h("button", { class: "act strong sm", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary.choice) }, r.primary.label))));
 }
 const WEEKDAYS = [[1, "day.mon"], [2, "day.tue"], [3, "day.wed"], [4, "day.thu"], [5, "day.fri"], [6, "day.sat"], [7, "day.sun"]];
 // "Reminders": employee-controlled, kept on this computer only.
@@ -315,7 +340,7 @@ function remindersSection(v) {
         ? [h("p", { class: "hint" }, r.schedule_note)]
         : [
             h("div", { class: "hours" }, h("label", { class: "field" }, t("settings.start"), h("input", { type: "time", value: r.my_start, disabled: off, onchange: (e) => saveReminders({ my_start: e.target.value }) })), h("label", { class: "field" }, t("settings.end"), h("input", { type: "time", value: r.my_end, disabled: off, onchange: (e) => saveReminders({ my_end: e.target.value }) }))),
-            h("fieldset", { class: "days" }, h("legend", { class: "sr-only" }, t("settings.workdays")), ...WEEKDAYS.map(([d, name]) => h("label", { class: `day${r.my_days.includes(d) ? " on" : ""}` }, h("input", {
+            h("fieldset", { class: "days" }, h("legend", { class: "sr-only" }, t("settings.workdays")), ...WEEKDAYS.map(([d, name]) => h("label", { class: `chip${r.my_days.includes(d) ? " on" : ""}` }, h("input", {
                 type: "checkbox",
                 checked: r.my_days.includes(d),
                 disabled: off,
@@ -341,7 +366,7 @@ function remindersSection(v) {
             })
                 .finally(render);
         },
-    }), h("span", {}, t("settings.openAtLogin"))), h("p", { class: "hint" }, t("settings.openAtLoginHint")), settingsError && h("p", { class: "error", role: "alert" }, settingsError));
+    }), h("span", {}, t("settings.openAtLogin"))), h("p", { class: "hint" }, t("settings.openAtLoginHint")), settingsError && alertLine(settingsError));
 }
 function onResolveIdle(iv) {
     const move = idleChoice.decision === "reassign";
@@ -391,7 +416,7 @@ function idleView(v, iv) {
             },
         }, h("option", { value: "" }, t("pick.chooseProject")), ...iv.targets.map((p) => h("option", { value: p.id }, p.name)));
         projectSelect.value = idleChoice.project;
-        picker.push(h("label", { class: "field" }, t("pick.project"), projectSelect));
+        picker.push(h("label", { class: "field" }, t("pick.project"), h("span", { class: "select" }, projectSelect)));
         if (tasks.length > 0) {
             const taskSelect = h("select", {
                 disabled: busy,
@@ -400,20 +425,19 @@ function idleView(v, iv) {
                 },
             }, h("option", { value: "" }, t("pick.noTask")), ...tasks.map((task) => h("option", { value: task.id }, task.name)));
             taskSelect.value = idleChoice.task;
-            picker.push(h("label", { class: "field" }, t("pick.task"), taskSelect));
+            picker.push(h("label", { class: "field" }, t("pick.task"), h("span", { class: "select" }, taskSelect)));
         }
         picker.push(h("p", { class: "hint" }, t("idle.correction")));
     }
     const primary = idleChoice.decision === "keep" ? iv.keep_label : idleChoice.decision === "discard" ? iv.discard_label : iv.reassign_label;
-    return h("section", { class: "popover", "aria-labelledby": "idle-h" }, header(v), h("div", { class: "idle-panel" }, h("span", { class: "eyebrow" }, t("idle.welcome")), h("h1", { class: "title", id: "idle-h" }, iv.title), h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project), h("fieldset", { class: "choices" }, h("legend", { class: "sr-only" }, t("idle.question")), choice("keep", t("idle.keep")), choice("discard", t("idle.discard")), choice("reassign", t("idle.move"), canMove)), !canMove && h("p", { class: "hint" }, t("idle.noTarget")), ...picker, error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) }, primary)), h("p", { class: "idle-foot" }, t("idle.foot"))));
+    return h("section", { class: "popover", "aria-labelledby": "idle-h" }, header(v, true), h("div", { class: "idle-panel" }, h("span", { class: "eyebrow" }, t("idle.welcome")), h("h1", { class: "title", id: "idle-h" }, iv.title), h("p", { class: "idle-meta" }, h("span", { class: "mono" }, iv.times), " · ", iv.project), h("fieldset", { class: "choices" }, h("legend", { class: "sr-only" }, t("idle.question")), choice("keep", t("idle.keep")), choice("discard", t("idle.discard")), choice("reassign", t("idle.move"), canMove)), !canMove && h("p", { class: "hint" }, t("idle.noTarget")), ...picker, error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: busy || (move && !idleChoice.project), onclick: () => onResolveIdle(iv) }, primary)), h("p", { class: "idle-foot" }, t("idle.foot"))));
 }
 function mainView(v) {
     loadProjects();
     if (v.idle)
         return idleView(v, v.idle);
-    return h("section", { class: "popover", "aria-label": "RoundDigital Track" }, header(v), v.reminder && reminderCard(v.reminder), ...banners(v), v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera), ...projectPickers(v), sessionButtons(v), v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "today" }, h("span", { class: "label" }, t("main.today")), h("span", { class: "value" }, h("span", { class: "mono" }, v.today), v.activity ? t("main.activity") : "", v.activity ? h("span", { class: "mono" }, v.activity) : "")), (v.limit_today || v.limit_week) &&
-        h("div", { class: "limits" }, h("span", { class: "label" }, t("main.workLimit")), h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l) => !!l).map((l) => h("span", { class: "mono" }, l)))), h("div", { class: "foot" }, h("span", {}, v.sync), h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, t("main.dashboard"))), settingsOpen && remindersSection(v), h("div", { class: "small-links" }, h("span", { class: "hint" }, `v${v.version}`), h("button", {
-        class: "link",
+    return h("section", { class: "popover", "aria-label": "RoundDigital Track" }, header(v), hero(v), v.reminder && reminderCard(v.reminder), ...banners(v), v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera), ...projectPickers(v), sessionButtons(v), v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint), error && alertLine(error), h("div", { class: "foot" }, h("span", {}, v.sync), h("button", { class: "link", type: "button", onclick: () => void run(() => invoke("open_dashboard")) }, t("main.dashboard"))), settingsOpen && remindersSection(v), h("div", { class: "small-links" }, h("span", { class: "hint num" }, `v${v.version}`), h("button", {
+        class: "link quiet",
         type: "button",
         "aria-expanded": String(settingsOpen),
         onclick: () => {
@@ -430,12 +454,12 @@ function mainView(v) {
                     .finally(render);
             render();
         },
-    }, settingsOpen ? t("settings.close") : t("settings.open")), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit"))));
+    }, settingsOpen ? t("settings.close") : t("settings.open")), h("button", { class: "link quiet", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit"))));
 }
 function noticeView(n, review) {
     const screenshots = (i) => i.key === "screenshots.enabled";
     return h("section", { class: "notice", "aria-labelledby": "notice-h" }, h("span", { class: "eyebrow" }, review ? t("notice.whatChanged") : t("notice.beforeStart")), h("h2", { id: "notice-h" }, review ? t("notice.nowCollects") : n.title), h("p", { class: "lead" }, t("notice.lead")), h("ul", {}, ...n.items.map((i) => h("li", { class: screenshots(i) ? "strong" : "" }, h("span", { class: "text" }, i.text), h("span", { class: "detail" }, i.detail)))), n.warning && h("p", { class: "warnline", role: "note" }, n.warning), ...n.footer.map((f) => h("p", { class: "fine" }, f)), n.not_collected.length > 0 &&
-        h("details", {}, h("summary", {}, t("notice.notCollected")), h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))), h("p", {}, t("notice.never", { list: n.never }))), error && h("p", { class: "warnline", role: "alert" }, error), h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)));
+        h("details", {}, h("summary", {}, t("notice.notCollected")), h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))), h("p", {}, t("notice.never", { list: n.never }))), error && alertLine(error), h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)));
 }
 function noticeButtons(review) {
     const close = () => {
@@ -447,7 +471,7 @@ function noticeButtons(review) {
         return [h("button", { class: "btn-action", type: "button", onclick: close }, t("notice.ok"))];
     }
     return [
-        h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
+        h("button", { class: "btn-secondary", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
         h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, notice?.switch ? t("notice.switch") : t("notice.start")),
     ];
 }
@@ -478,12 +502,12 @@ function managedEnrollView(v, server) {
         ? h("button", { class: "link", type: "button", onclick: () => go("email") }, t("managed.again"))
         : h("button", { class: "link", type: "button", onclick: () => go("signin") }, t("signin.instead")), h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, t("managed.adminCode")));
     const head = [
-        h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+        h("span", { class: "brand" }, ...logo()),
         h("span", { class: "eyebrow" }, t("enroll.setUp")),
     ];
     if (managed.step === "email")
-        return h("form", { class: "popover", onsubmit: askForCode }, ...head, h("h1", { class: "title" }, t("managed.title")), h("p", { class: "muted" }, t("managed.intro", { server })), v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error), field(t("managed.email"), managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("managed.sending") : t("managed.send"))), other);
-    return h("form", { class: "popover", onsubmit: connect }, ...head, h("h1", { class: "title" }, t("managed.checkTitle")), h("p", { class: "muted" }, t("managed.checkIntro", { email: managed.email })), field(t("managed.code"), enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }), field(t("enroll.deviceName"), enrollForm.name, (s) => (enrollForm.name = s), { placeholder: t("enroll.deviceNamePlaceholder") }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))), other);
+        return h("form", { class: "popover", onsubmit: askForCode }, ...head, h("h1", { class: "title" }, t("managed.title")), h("p", { class: "muted" }, t("managed.intro", { server })), v.phase === "error" && v.error && alertLine(v.error), field(t("managed.email"), managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }), error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("managed.sending") : t("managed.send"))), other);
+    return h("form", { class: "popover", onsubmit: connect }, ...head, h("h1", { class: "title" }, t("managed.checkTitle")), h("p", { class: "muted" }, t("managed.checkIntro", { email: managed.email })), field(t("managed.code"), enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }), field(t("enroll.deviceName"), enrollForm.name, (s) => (enrollForm.name = s), { placeholder: t("enroll.deviceNamePlaceholder") }), error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))), other);
 }
 /** "track.example.com" for the server line; the address itself when it isn't a URL. */
 function hostOf(server) {
@@ -523,7 +547,7 @@ function stepsBar(at) {
     return h("div", { class: "steps-bar", role: "img", "aria-label": t("signin.stepOf", { n: String(at) }) }, ...[1, 2, 3].map((n) => h("span", { class: n < at ? "done" : n === at ? "on" : "" })));
 }
 function brandHead() {
-    return h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }));
+    return h("span", { class: "brand" }, ...logo());
 }
 function alertLine(text) {
     return h("p", { class: "alert", role: "alert" }, icon(ICONS.alert, 16), h("span", {}, text));
@@ -552,7 +576,7 @@ let justConnected = false;
 function signInWaitingView(s) {
     const [a, b] = s.user_code.split("-");
     const tiles = (part) => [...(part ?? "")].map((c) => h("span", { class: "tile" }, c));
-    return h("section", { class: "popover signin" }, brandHead(), stepsBar(2), h("span", { class: "eyebrow" }, t("signin.step2")), h("h1", { class: "title" }, t("signin.waitTitle")), h("div", { class: "link-visual", "aria-hidden": "true" }, h("span", { class: "end" }, icon(ICONS.laptop, 22)), h("span", { class: "wire" }, h("span", { class: "spark" })), h("span", { class: "end" }, icon(ICONS.browser, 22))), h("div", { class: "code-card" }, h("span", { class: "hint" }, t("signin.codeLabel")), h("div", { class: "tiles mono", role: "text", "aria-label": s.user_code.split("").join(" ") }, ...tiles(a), h("span", { class: "dash" }, "–"), ...tiles(b)), h("span", { class: "hint" }, t("signin.codeCheck"))), h("p", { class: "waiting", role: "status" }, h("span", { class: "pulse", "aria-hidden": "true" }), h("span", {}, t("signin.waiting")), h("span", { id: "signin-left", class: "left mono", "data-expires": s.expires_at }, t("signin.expiresIn", { left: timeLeft(s.expires_at) ?? "0:00" }))), error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-outline-light with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen"))), showLink && h("p", { class: "manual-link" }, h("span", { class: "hint" }, t("signin.openByHand")), h("span", { class: "url mono" }, s.approve_url)), h("div", { class: "small-links" }, h("button", { class: "link", type: "button", disabled: busy, onclick: () => void run(async () => { showLink = false; wasSigningIn = false; view = await invoke("cancel_sign_in"); }) }, t("signin.cancel")), !showLink && h("button", { class: "link", type: "button", onclick: () => { showLink = true; render(); } }, t("signin.noBrowser"))));
+    return h("section", { class: "popover signin" }, brandHead(), stepsBar(2), h("span", { class: "eyebrow" }, t("signin.step2")), h("h1", { class: "title" }, t("signin.waitTitle")), h("div", { class: "link-visual", "aria-hidden": "true" }, h("span", { class: "end" }, icon(ICONS.laptop, 22)), h("span", { class: "wire" }, h("span", { class: "spark" })), h("span", { class: "end" }, icon(ICONS.browser, 22))), h("div", { class: "code-card" }, h("span", { class: "hint" }, t("signin.codeLabel")), h("div", { class: "tiles mono", role: "text", "aria-label": s.user_code.split("").join(" ") }, ...tiles(a), h("span", { class: "dash" }, "–"), ...tiles(b)), h("span", { class: "hint" }, t("signin.codeCheck"))), h("p", { class: "waiting", role: "status" }, h("span", { class: "pulse", "aria-hidden": "true" }), h("span", {}, t("signin.waiting")), h("span", { id: "signin-left", class: "left mono", "data-expires": s.expires_at }, t("signin.expiresIn", { left: timeLeft(s.expires_at) ?? "0:00" }))), error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-quiet with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen"))), showLink && h("p", { class: "manual-link" }, h("span", { class: "hint" }, t("signin.openByHand")), h("span", { class: "url mono" }, s.approve_url)), h("div", { class: "small-links" }, h("button", { class: "link", type: "button", disabled: busy, onclick: () => void run(async () => { showLink = false; wasSigningIn = false; view = await invoke("cancel_sign_in"); }) }, t("signin.cancel")), !showLink && h("button", { class: "link", type: "button", onclick: () => { showLink = true; render(); } }, t("signin.noBrowser"))));
 }
 /** Just connected by signing in: say so once, then the main view. */
 function connectedView(v) {
@@ -647,13 +671,14 @@ function enrollView(v) {
                 enrollForm.code = "";
             });
         },
-    }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("span", { class: "eyebrow" }, t("enroll.setUp")), h("h1", { class: "title" }, t("enroll.title")), h("p", { class: "muted" }, t("enroll.intro")), fromLink && h("p", { class: "hint", role: "status" }, t("enroll.fromLink")), v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error), input("server", t("enroll.server"), { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }), input("code", t("enroll.code"), { placeholder: t("enroll.codePlaceholder"), required: true, autocomplete: "one-time-code", spellcheck: false }), input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }), error && h("p", { class: "error", role: "alert" }, error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))), h("div", { class: "small-links" }, h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = false; fromLink = false; error = null; render(); } }, t("signin.instead")), h("span", {})));
+    }, h("span", { class: "brand" }, ...logo()), h("span", { class: "eyebrow" }, t("enroll.setUp")), h("h1", { class: "title" }, t("enroll.title")), h("p", { class: "muted" }, t("enroll.intro")), fromLink && h("p", { class: "hint", role: "status" }, t("enroll.fromLink")), v.phase === "error" && v.error && alertLine(v.error), input("server", t("enroll.server"), { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }), input("code", t("enroll.code"), { placeholder: t("enroll.codePlaceholder"), required: true, autocomplete: "one-time-code", spellcheck: false }), input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }), error && alertLine(error), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))), h("div", { class: "small-links" }, h("button", { class: "link", type: "button", onclick: () => { signIn.useCode = false; fromLink = false; error = null; render(); } }, t("signin.instead")), h("span", {})));
 }
 function revokedView() {
-    return h("section", { class: "popover" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("span", { class: "eyebrow" }, t("revoked.eyebrow")), h("h1", { class: "title" }, t("revoked.title")), h("p", { class: "muted" }, t("revoked.body")), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke("reenroll"); }) }, t("revoked.again"))), h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))));
+    return h("section", { class: "popover" }, h("span", { class: "brand" }, ...logo()), h("span", { class: "eyebrow" }, t("revoked.eyebrow")), h("h1", { class: "title" }, t("revoked.title")), h("p", { class: "muted" }, t("revoked.body")), h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", onclick: () => void run(async () => { view = await invoke("reenroll"); }) }, t("revoked.again"))), h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))));
 }
-function simpleView(text) {
-    return h("section", { class: "popover" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("p", { class: "muted" }, text));
+/** Loading (a quiet pulse and the message) and failure (an alert with the reason). */
+function simpleView(text, failed = false, detail = null) {
+    return h("section", { class: "popover", "aria-busy": failed ? null : "true" }, brandHead(), h("div", { class: "state", role: failed ? "alert" : "status" }, failed ? h("span", { class: "state-icon" }, icon(ICONS.alert, 24)) : h("span", { class: "pulse", "aria-hidden": "true" }), h(failed ? "h1" : "p", { class: failed ? "title" : "muted" }, text), detail && h("p", { class: "state-body" }, detail)), failed && h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link quiet", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))));
 }
 function render() {
     const root = document.getElementById("app");
@@ -682,14 +707,13 @@ function render() {
     else if (v.phase === "revoked")
         content = revokedView();
     else if (v.phase === "error")
-        content = simpleView(v.error ?? t("error.couldNotStart"));
+        content = simpleView(t("error.couldNotStart"), true, v.error);
     else if (v.phase === "starting")
         content = simpleView(t("app.starting"));
     else if (v.phase === "stopping")
         content = simpleView(t("app.stopping"));
     else
         content = mainView(v);
-    document.body.classList.toggle("light", notice !== null);
     // Keep focus and the select values stable across re-renders.
     const active = document.activeElement;
     const focusKey = active?.closest("label")?.textContent ?? null;

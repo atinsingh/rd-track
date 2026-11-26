@@ -184,9 +184,17 @@ function h<K extends keyof HTMLElementTagNameMap>(
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
+/** The wordmark: colour on light, reversed on dark (styles.css shows the right one). */
+function logo(): Node[] {
+  return [
+    h("img", { class: "logo-light", src: "img/rd-logo-color.png", alt: "RoundDigital Track" }),
+    h("img", { class: "logo-dark", src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }),
+  ];
+}
+
 function cameraIcon(): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
-  for (const [k, v] of Object.entries({ width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "#FFFFFF", "stroke-width": "2", "aria-hidden": "true" })) {
+  for (const [k, v] of Object.entries({ width: "16", height: "16", viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "aria-hidden": "true" })) {
     svg.setAttribute(k, v);
   }
   const rect = document.createElementNS(SVG_NS, "rect");
@@ -325,37 +333,51 @@ function banners(v: AppView): Node[] {
     h(
       "div",
       { class: `banner ${b.kind}`, role: b.kind === "warn" ? "alert" : "status" },
-      b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text),
-      b.detail && h("span", { class: "banner-detail" }, b.detail),
-      (b.action || b.dismissible) &&
-        h(
-          "div",
-          { class: "row" },
-          b.dismissible &&
-            h("button", {
-              class: "x",
-              type: "button",
-              onclick: () => void run(() => invoke("dismiss_banner", { id: b.id })),
-            }, t("banner.dismiss")),
-          b.action &&
-            h("button", { class: "act", type: "button", onclick: () => onBannerAction(b) }, b.action.label),
-        ),
+      b.kind === "warn" && icon(ICONS.alert, 16),
+      h(
+        "div",
+        { class: "banner-body" },
+        b.detail ? h("strong", { class: "banner-title" }, b.text) : h("span", {}, b.text),
+        b.detail && h("span", { class: "banner-detail" }, b.detail),
+        (b.action || b.dismissible) &&
+          h(
+            "div",
+            { class: "row" },
+            b.dismissible &&
+              h("button", {
+                class: "x sm",
+                type: "button",
+                onclick: () => void run(() => invoke("dismiss_banner", { id: b.id })),
+              }, t("banner.dismiss")),
+            b.action &&
+              h("button", { class: "act sm", type: "button", onclick: () => onBannerAction(b) }, b.action.label),
+          ),
+      ),
     ),
   );
 }
 
-function header(v: AppView): HTMLElement {
-  const dotClass = v.tray === "tracking" ? "dot" : `dot ${v.tray}`;
+/** The live state: a dot (filled, ring or grey) and the label, so colour is never the only cue. */
+function statusLine(v: AppView): HTMLElement {
+  return h("span", { class: "status" }, h("span", { class: `dot ${v.tray}`, "aria-hidden": "true" }), v.label);
+}
+
+/** The wordmark, and (when `withStatus`) the state on the right. */
+function header(v: AppView, withStatus = false): HTMLElement {
+  return h("div", { class: "head" }, h("span", { class: "brand" }, ...logo()), withStatus && statusLine(v));
+}
+
+/** The hero: state and elapsed time, today's worked time large, then the work limits. */
+function hero(v: AppView): HTMLElement {
+  const limits = [v.limit_today, v.limit_week].filter((l): l is string => !!l);
   return h(
     "div",
-    { class: "head" },
-    h(
-      "span",
-      { class: "brand" },
-      h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }),
-      h("span", { class: "status" }, h("span", { class: dotClass, "aria-hidden": "true" }), v.label),
-    ),
-    v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed),
+    { class: "hero" },
+    h("div", { class: "hero-top" }, statusLine(v), v.elapsed && h("span", { class: "elapsed", "aria-label": t("head.elapsed") }, v.elapsed)),
+    h("p", { class: "hero-time" }, v.today),
+    h("p", { class: "hero-sub" }, t("main.today"), v.activity ? t("main.activity") : "", v.activity ?? ""),
+    limits.length > 0 &&
+      h("div", { class: "limits" }, h("span", { class: "label" }, t("main.workLimit")), h("span", { class: "value" }, ...limits.map((l) => h("span", {}, l)))),
   );
 }
 
@@ -394,14 +416,45 @@ function projectPickers(v: AppView): Node[] {
   );
   if (taskValue && !tasks.some((task) => task.id === taskValue)) taskSelect.append(h("option", { value: taskValue }, taskValue));
   taskSelect.value = taskValue;
+  if (open) {
+    const row = (key: string, value: string, none: boolean, extra?: Node | false): HTMLElement =>
+      h("div", { class: "session-row" }, h("span", { class: "key" }, key), h("span", { class: none ? "val none" : "val", title: value }, value), extra || h("span", {}));
+    return [
+      h(
+        "div",
+        { class: "session-card" },
+        row(t("pick.project"), project?.name ?? (projectValue || t("pick.noProject")), !projectValue, switchButton(v)),
+        row(t("pick.task"), tasks.find((task) => task.id === taskValue)?.name ?? (taskValue || t("pick.noTask")), !taskValue),
+      ),
+    ];
+  }
   const out: Node[] = [
-    h("label", { class: "field" }, t("pick.project"), projectSelect),
-    h("label", { class: "field" }, t("pick.task"), taskSelect),
+    h("label", { class: "field" }, t("pick.project"), h("span", { class: "select" }, projectSelect)),
+    h("label", { class: "field" }, t("pick.task"), h("span", { class: "select" }, taskSelect)),
   ];
   if (v.projects_supported === false) {
     out.push(h("p", { class: "hint" }, t("pick.unsupported")));
   }
   return out;
+}
+
+// Moves the running session onto another project (no gap; allowed inside office hours).
+function switchButton(v: AppView): HTMLElement {
+  return h(
+    "button",
+    {
+      class: "link",
+      type: "button",
+      disabled: busy,
+      onclick: () => {
+        switching = true;
+        selectedProject = v.session_project_id ?? "";
+        selectedTask = "";
+        render();
+      },
+    },
+    t("session.switch"),
+  );
 }
 
 function sessionButtons(v: AppView): HTMLElement {
@@ -419,31 +472,15 @@ function sessionButtons(v: AppView): HTMLElement {
     return h(
       "div",
       { class: "actions" },
-      h("button", { class: "btn-outline-light", type: "button", disabled: busy, onclick: () => { switching = false; render(); } }, t("session.switchCancel")),
-      h("button", { class: "btn-solid-light", type: "button", disabled: blocked, onclick: () => void run(() => prepareStart(true)) }, t("session.switchContinue")),
+      h("button", { class: "btn-quiet", type: "button", disabled: busy, onclick: () => { switching = false; render(); } }, t("session.switchCancel")),
+      h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: () => void run(() => prepareStart(true)) }, t("session.switchContinue")),
     );
   }
   const paused = v.tray === "paused";
-  // Moves the running session onto another project (no gap; allowed inside office hours).
-  const switchLink = h(
-    "button",
-    {
-      class: "link",
-      type: "button",
-      disabled: busy,
-      onclick: () => {
-        switching = true;
-        selectedProject = v.session_project_id ?? "";
-        selectedTask = "";
-        render();
-      },
-    },
-    t("session.switch"),
-  );
   const pause = h(
     "button",
     {
-      class: "btn-outline-light",
+      class: paused ? "btn-action" : "btn-secondary",
       type: "button",
       disabled: busy,
       onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
@@ -452,22 +489,17 @@ function sessionButtons(v: AppView): HTMLElement {
   );
   // Inside office hours there is no Stop: only Pause (which resumes by itself).
   if (!v.can_stop) {
-    return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")), switchLink);
+    return h("div", { class: "stack" }, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")));
   }
   return h(
     "div",
-    {},
+    { class: "actions" },
+    pause,
     h(
-      "div",
-      { class: "actions" },
-      pause,
-      h(
-        "button",
-        { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },
-        t("session.stop"),
-      ),
+      "button",
+      { class: "btn-quiet", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },
+      t("session.stop"),
     ),
-    switchLink,
   );
 }
 
@@ -476,13 +508,17 @@ function reminderCard(r: ReminderView): HTMLElement {
   return h(
     "div",
     { class: "banner info reminder", role: "status" },
-    h("strong", { class: "banner-title" }, r.title),
-    h("span", { class: "banner-detail" }, r.detail),
     h(
       "div",
-      { class: "row" },
-      h("button", { class: "x", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label),
-      r.primary && h("button", { class: "act", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary!.choice) }, r.primary.label),
+      { class: "banner-body" },
+      h("strong", { class: "banner-title" }, r.title),
+      h("span", { class: "banner-detail" }, r.detail),
+      h(
+        "div",
+        { class: "row" },
+        h("button", { class: "x sm", type: "button", disabled: busy, onclick: () => onReminder(r, r.secondary.choice) }, r.secondary.label),
+        r.primary && h("button", { class: "act strong sm", type: "button", disabled: busy, onclick: () => onReminder(r, r.primary!.choice) }, r.primary.label),
+      ),
     ),
   );
 }
@@ -521,7 +557,7 @@ function remindersSection(v: AppView): HTMLElement {
           ...WEEKDAYS.map(([d, name]) =>
             h(
               "label",
-              { class: `day${r.my_days.includes(d) ? " on" : ""}` },
+              { class: `chip${r.my_days.includes(d) ? " on" : ""}` },
               h("input", {
                 type: "checkbox",
                 checked: r.my_days.includes(d),
@@ -571,7 +607,7 @@ function remindersSection(v: AppView): HTMLElement {
       h("span", {}, t("settings.openAtLogin")),
     ),
     h("p", { class: "hint" }, t("settings.openAtLoginHint")),
-    settingsError && h("p", { class: "error", role: "alert" }, settingsError),
+    settingsError && alertLine(settingsError),
   );
 }
 
@@ -634,7 +670,7 @@ function idleView(v: AppView, iv: IdleView): HTMLElement {
       ...iv.targets.map((p) => h("option", { value: p.id }, p.name)),
     );
     projectSelect.value = idleChoice.project;
-    picker.push(h("label", { class: "field" }, t("pick.project"), projectSelect));
+    picker.push(h("label", { class: "field" }, t("pick.project"), h("span", { class: "select" }, projectSelect)));
     if (tasks.length > 0) {
       const taskSelect = h(
         "select",
@@ -648,7 +684,7 @@ function idleView(v: AppView, iv: IdleView): HTMLElement {
         ...tasks.map((task) => h("option", { value: task.id }, task.name)),
       );
       taskSelect.value = idleChoice.task;
-      picker.push(h("label", { class: "field" }, t("pick.task"), taskSelect));
+      picker.push(h("label", { class: "field" }, t("pick.task"), h("span", { class: "select" }, taskSelect)));
     }
     picker.push(h("p", { class: "hint" }, t("idle.correction")));
   }
@@ -657,7 +693,7 @@ function idleView(v: AppView, iv: IdleView): HTMLElement {
   return h(
     "section",
     { class: "popover", "aria-labelledby": "idle-h" },
-    header(v),
+    header(v, true),
     h(
       "div",
       { class: "idle-panel" },
@@ -674,7 +710,7 @@ function idleView(v: AppView, iv: IdleView): HTMLElement {
       ),
       !canMove && h("p", { class: "hint" }, t("idle.noTarget")),
       ...picker,
-      error && h("p", { class: "error", role: "alert" }, error),
+      error && alertLine(error),
       h(
         "div",
         { class: "actions one" },
@@ -696,32 +732,14 @@ function mainView(v: AppView): HTMLElement {
     "section",
     { class: "popover", "aria-label": "RoundDigital Track" },
     header(v),
+    hero(v),
     v.reminder && reminderCard(v.reminder),
     ...banners(v),
     v.camera && h("div", { class: "badge" }, cameraIcon(), v.camera),
     ...projectPickers(v),
     sessionButtons(v),
     v.tray === "idle" && startHint && h("p", { class: "hint" }, startHint),
-    error && h("p", { class: "error", role: "alert" }, error),
-    h(
-      "div",
-      { class: "today" },
-      h("span", { class: "label" }, t("main.today")),
-      h(
-        "span",
-        { class: "value" },
-        h("span", { class: "mono" }, v.today),
-        v.activity ? t("main.activity") : "",
-        v.activity ? h("span", { class: "mono" }, v.activity) : "",
-      ),
-    ),
-    (v.limit_today || v.limit_week) &&
-      h(
-        "div",
-        { class: "limits" },
-        h("span", { class: "label" }, t("main.workLimit")),
-        h("span", { class: "value" }, ...[v.limit_today, v.limit_week].filter((l): l is string => !!l).map((l) => h("span", { class: "mono" }, l))),
-      ),
+    error && alertLine(error),
     h(
       "div",
       { class: "foot" },
@@ -732,11 +750,11 @@ function mainView(v: AppView): HTMLElement {
     h(
       "div",
       { class: "small-links" },
-      h("span", { class: "hint" }, `v${v.version}`),
+      h("span", { class: "hint num" }, `v${v.version}`),
       h(
         "button",
         {
-          class: "link",
+          class: "link quiet",
           type: "button",
           "aria-expanded": String(settingsOpen),
           onclick: () => {
@@ -756,7 +774,7 @@ function mainView(v: AppView): HTMLElement {
         },
         settingsOpen ? t("settings.close") : t("settings.open"),
       ),
-      h("button", { class: "link", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit")),
+      h("button", { class: "link quiet", type: "button", onclick: () => void invoke("quit_app") }, v.tray === "idle" ? t("main.quit") : t("main.stopQuit")),
     ),
   );
 }
@@ -786,7 +804,7 @@ function noticeView(n: SessionNotice, review: boolean): HTMLElement {
         h("ul", {}, ...n.not_collected.map((i) => h("li", {}, i.text))),
         h("p", {}, t("notice.never", { list: n.never })),
       ),
-    error && h("p", { class: "warnline", role: "alert" }, error),
+    error && alertLine(error),
     h("div", { class: review ? "buttons one" : "buttons" }, ...noticeButtons(review)),
   );
 }
@@ -801,7 +819,7 @@ function noticeButtons(review: boolean): HTMLElement[] {
     return [h("button", { class: "btn-action", type: "button", onclick: close }, t("notice.ok"))];
   }
   return [
-    h("button", { class: "btn-outline-dark", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
+    h("button", { class: "btn-secondary", type: "button", disabled: busy, onclick: close }, t("notice.otherProject")),
     h("button", { class: "btn-action", type: "button", disabled: busy, onclick: onConfirmStart }, notice?.switch ? t("notice.switch") : t("notice.start")),
   ];
 }
@@ -844,7 +862,7 @@ function managedEnrollView(v: AppView, server: string): HTMLElement {
     h("button", { class: "link", type: "button", onclick: () => { managed.useAdminCode = true; error = null; render(); } }, t("managed.adminCode")),
   );
   const head = [
-    h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+    h("span", { class: "brand" }, ...logo()),
     h("span", { class: "eyebrow" }, t("enroll.setUp")),
   ];
   if (managed.step === "email")
@@ -854,9 +872,9 @@ function managedEnrollView(v: AppView, server: string): HTMLElement {
       ...head,
       h("h1", { class: "title" }, t("managed.title")),
       h("p", { class: "muted" }, t("managed.intro", { server })),
-      v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
+      v.phase === "error" && v.error && alertLine(v.error),
       field(t("managed.email"), managed.email, (s) => (managed.email = s), { type: "email", required: true, autocomplete: "email", spellcheck: false }),
-      error && h("p", { class: "error", role: "alert" }, error),
+      error && alertLine(error),
       h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("managed.sending") : t("managed.send"))),
       other,
     );
@@ -868,7 +886,7 @@ function managedEnrollView(v: AppView, server: string): HTMLElement {
     h("p", { class: "muted" }, t("managed.checkIntro", { email: managed.email })),
     field(t("managed.code"), enrollForm.code, (s) => (enrollForm.code = s), { required: true, autocomplete: "one-time-code", spellcheck: false, placeholder: "ABCD-EFGH-JK" }),
     field(t("enroll.deviceName"), enrollForm.name, (s) => (enrollForm.name = s), { placeholder: t("enroll.deviceNamePlaceholder") }),
-    error && h("p", { class: "error", role: "alert" }, error),
+    error && alertLine(error),
     h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
     other,
   );
@@ -917,7 +935,7 @@ function stepsBar(at: 1 | 2 | 3): HTMLElement {
 }
 
 function brandHead(): HTMLElement {
-  return h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" }));
+  return h("span", { class: "brand" }, ...logo());
 }
 
 function alertLine(text: string): HTMLElement {
@@ -985,7 +1003,7 @@ function signInWaitingView(s: NonNullable<AppView["sign_in"]>): HTMLElement {
     h(
       "div",
       { class: "actions one" },
-      h("button", { class: "btn-outline-light with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen")),
+      h("button", { class: "btn-quiet with-icon", type: "button", disabled: busy, onclick: () => void run(() => invoke("reopen_sign_in")) }, icon(ICONS.external, 16), t("signin.reopen")),
     ),
     showLink && h("p", { class: "manual-link" }, h("span", { class: "hint" }, t("signin.openByHand")), h("span", { class: "url mono" }, s.approve_url)),
     h(
@@ -1159,16 +1177,16 @@ function enrollView(v: AppView): HTMLElement {
         });
       },
     },
-    h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+    h("span", { class: "brand" }, ...logo()),
     h("span", { class: "eyebrow" }, t("enroll.setUp")),
     h("h1", { class: "title" }, t("enroll.title")),
     h("p", { class: "muted" }, t("enroll.intro")),
     fromLink && h("p", { class: "hint", role: "status" }, t("enroll.fromLink")),
-    v.phase === "error" && v.error && h("p", { class: "error", role: "alert" }, v.error),
+    v.phase === "error" && v.error && alertLine(v.error),
     input("server", t("enroll.server"), { type: "url", placeholder: "https://track.example.com", required: true, autocomplete: "url", spellcheck: false }),
     input("code", t("enroll.code"), { placeholder: t("enroll.codePlaceholder"), required: true, autocomplete: "one-time-code", spellcheck: false }),
     input("name", t("enroll.deviceName"), { placeholder: t("enroll.deviceNamePlaceholder") }),
-    error && h("p", { class: "error", role: "alert" }, error),
+    error && alertLine(error),
     h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "submit", disabled: busy }, busy ? t("enroll.connecting") : t("enroll.connect"))),
     h(
       "div",
@@ -1183,7 +1201,7 @@ function revokedView(): HTMLElement {
   return h(
     "section",
     { class: "popover" },
-    h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })),
+    h("span", { class: "brand" }, ...logo()),
     h("span", { class: "eyebrow" }, t("revoked.eyebrow")),
     h("h1", { class: "title" }, t("revoked.title")),
     h("p", { class: "muted" }, t("revoked.body")),
@@ -1192,8 +1210,21 @@ function revokedView(): HTMLElement {
   );
 }
 
-function simpleView(text: string): HTMLElement {
-  return h("section", { class: "popover" }, h("span", { class: "brand" }, h("img", { src: "img/rd-logo-reversed.png", alt: "RoundDigital Track" })), h("p", { class: "muted" }, text));
+/** Loading (a quiet pulse and the message) and failure (an alert with the reason). */
+function simpleView(text: string, failed = false, detail: string | null = null): HTMLElement {
+  return h(
+    "section",
+    { class: "popover", "aria-busy": failed ? null : "true" },
+    brandHead(),
+    h(
+      "div",
+      { class: "state", role: failed ? "alert" : "status" },
+      failed ? h("span", { class: "state-icon" }, icon(ICONS.alert, 24)) : h("span", { class: "pulse", "aria-hidden": "true" }),
+      h(failed ? "h1" : "p", { class: failed ? "title" : "muted" }, text),
+      detail && h("p", { class: "state-body" }, detail),
+    ),
+    failed && h("div", { class: "small-links" }, h("span", {}), h("button", { class: "link quiet", type: "button", onclick: () => void invoke("quit_app") }, t("main.quit"))),
+  );
 }
 
 function render(): void {
@@ -1214,11 +1245,10 @@ function render(): void {
   else if (justConnected && v.phase !== "enroll" && v.phase !== "revoked") content = connectedView(v);
   else if (v.phase === "enroll" || (v.phase === "error" && !v.server_url)) content = enrollView(v);
   else if (v.phase === "revoked") content = revokedView();
-  else if (v.phase === "error") content = simpleView(v.error ?? t("error.couldNotStart"));
+  else if (v.phase === "error") content = simpleView(t("error.couldNotStart"), true, v.error);
   else if (v.phase === "starting") content = simpleView(t("app.starting"));
   else if (v.phase === "stopping") content = simpleView(t("app.stopping"));
   else content = mainView(v);
-  document.body.classList.toggle("light", notice !== null);
   // Keep focus and the select values stable across re-renders.
   const active = document.activeElement as HTMLElement | null;
   const focusKey = active?.closest("label")?.textContent ?? null;
