@@ -205,7 +205,6 @@ messages! {
     collects_activity: "activity and idle time" => "l’activité et le temps d’inactivité",
     collects_apps: "app names" => "le nom des applications",
     collects_domains: "website domains" => "les domaines de sites Web",
-    collects_titles: "window titles and full URLs" => "les titres de fenêtres et les URL complètes",
     stop_locked: "Tracking runs during office hours. Use Pause for a break." => "Le suivi fonctionne pendant les heures de bureau. Utilisez Pause pour faire une pause.",
     work_hours_ended: "Your work hours ended, so tracking stopped." => "Vos heures de travail sont terminées : le suivi s’est arrêté.",
     pause_cap: "Paused. Tracking resumes by itself after {minutes} min; your organization sees the pause." => "En pause. Le suivi reprend tout seul après {minutes} min; votre organisation voit la pause.",

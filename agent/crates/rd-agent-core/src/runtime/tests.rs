@@ -448,8 +448,17 @@ fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
     work_hours_policy(&mut h, json!({}));
     h.step(1);
     let first = h.agent.session().unwrap().id;
-    // Quit (the shutdown path is not the employee's Stop command).
-    h.agent.stop(StopReason::Shutdown).unwrap();
+    // Quit: the shutdown path stops with the employee's reason, bypassing the lock, and
+    // holds nothing: even without a relaunch the next tick would start again.
+    let now = ClockReading::now(&h.clock);
+    h.agent.stop_at(StopReason::User, now).unwrap();
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    let second = h.agent.session().unwrap().id;
+    h.agent
+        .stop_at(StopReason::User, ClockReading::now(&h.clock))
+        .unwrap();
     let at = h.clock.wall();
     drop(h);
     let mut h = harness_at(
@@ -459,7 +468,8 @@ fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
     );
     h.step(1);
     assert_eq!(h.agent.state(), SessionState::Active);
-    assert_ne!(h.agent.session().unwrap().id, first);
+    let third = h.agent.session().unwrap().id;
+    assert!(third != first && third != second);
 
     // Known gap: a policy that needs a project never starts by itself, so after a quit
     // nothing tracks until the employee starts a session.

@@ -696,9 +696,6 @@ fn collects_line(s: &PolicySettings, lang: Lang) -> String {
             parts.push(m.collects_domains.into());
         }
     }
-    if s.apps.capture_window_titles {
-        parts.push(m.collects_titles.into());
-    }
     if s.screenshots.enabled {
         parts.push(fill(m.collects_shots_every, &[("minutes", &minutes)]));
     }
