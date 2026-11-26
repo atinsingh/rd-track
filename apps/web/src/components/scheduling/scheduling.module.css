@@ -187,7 +187,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  min-height: var(--target-sm);
+  min-height: var(--target);
 }
 .weekdayPicks input {
   width: 18px;

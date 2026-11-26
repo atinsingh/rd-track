@@ -271,7 +271,7 @@ select.input {
   background: transparent;
   color: var(--text);
   font-weight: var(--weight-medium);
-  min-height: var(--space-10);
+  min-height: var(--target);
   max-width: 260px;
 }
 .check {

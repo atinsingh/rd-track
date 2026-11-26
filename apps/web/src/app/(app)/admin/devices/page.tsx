@@ -87,12 +87,12 @@ function Countdown({ expiresAt }: { expiresAt: string }) {
   return left > 0 ? (
     <>
       {t('adm.dev.expiresIn')}{' '}
-      <strong className="mono" style={{ color: '#fff' }}>
+      <strong className="mono" style={{ color: 'var(--text-on-ink)' }}>
         {formatCountdown(left)}
       </strong>
     </>
   ) : (
-    <strong style={{ color: '#fff' }}>{t('adm.dev.expired')}</strong>
+    <strong style={{ color: 'var(--text-on-ink)' }}>{t('adm.dev.expired')}</strong>
   );
 }
 
@@ -161,7 +161,7 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
         <>
           <div style={{ color: 'var(--text)' }}>
             <SelectField
-              label={<span style={{ color: '#fff' }}>{t('adm.dev.person')}</span>}
+              label={<span style={{ color: 'var(--text-on-ink)' }}>{t('adm.dev.person')}</span>}
               value={userId}
               onChange={(e) => setUserId(e.target.value)}
               disabled={!users.data}
@@ -187,7 +187,7 @@ function EnrollDialog({ open, onClose }: { open: boolean; onClose: () => void })
               </Link>
             </p>
           ) : (
-            <div style={{ color: '#fff' }}>
+            <div style={{ color: 'var(--text-on-ink)' }}>
               <ActionError error={action.error} />
             </div>
           )}

@@ -15,7 +15,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: '#0B0C0F',
+  // Browser chrome matches the page canvas (--canvas in tokens.css); metadata cannot read CSS variables. ds-allow-hardcode
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f3f4f6' },
+    { media: '(prefers-color-scheme: dark)', color: '#0f1012' },
+  ],
   width: 'device-width',
   initialScale: 1,
 };

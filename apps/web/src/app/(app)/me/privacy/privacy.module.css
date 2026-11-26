@@ -41,7 +41,7 @@
 }
 .links a {
   text-decoration: none;
-  min-height: var(--space-6);
+  min-height: var(--target);
   display: inline-flex;
   align-items: center;
 }

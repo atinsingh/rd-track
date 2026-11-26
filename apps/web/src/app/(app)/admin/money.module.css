@@ -25,7 +25,7 @@
 .cellInput {
   width: 100%;
   min-width: 72px;
-  min-height: var(--target-sm);
+  min-height: var(--target);
   padding: var(--space-1) var(--space-2);
   border: 1px solid var(--control-border);
   border-radius: var(--radius-control);
