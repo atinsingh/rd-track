@@ -15,6 +15,7 @@ import { errors } from '../../lib/errors';
 import { visibilityFor } from '../authz';
 import { categoryMap } from '../insights/service';
 import { idleAdjustmentsFor } from '../idle/service';
+import { resolveFor } from '../policy/service';
 
 interface Range {
   from: string;
@@ -259,6 +260,13 @@ export async function teamReport(
      GROUP BY user_id`,
     [orgId, ids, r.from, r.to, projectId],
   );
+  // Screenshots are often shared per project: the same projects the person's own visibility check looks at.
+  const tracked = await many<{ user_id: string; project_id: string }>(
+    q,
+    `SELECT DISTINCT user_id, project_id FROM work_sessions
+     WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND project_id IS NOT NULL AND started_at > $3::timestamptz - interval '90 days'`,
+    [orgId, ids, deps.now().toISOString()],
+  );
   const now = deps.now().getTime();
 
   let anyActivity = false;
@@ -268,6 +276,12 @@ export async function teamReport(
   for (const m of members) {
     const a = agg.find((x) => x.user_id === m.user_id);
     const vis = await visibilityFor(deps, q, orgId, m.user_id);
+    for (const t of tracked) {
+      if (vis.screenshots) break;
+      if (t.user_id !== m.user_id) continue;
+      const { settings } = await resolveFor(deps, q, orgId, m.user_id, { projectId: t.project_id });
+      vis.screenshots = settings.screenshots.enabled && settings.viewers.manager_can_view_screenshots;
+    }
     anyActivity ||= vis.activity;
     anyApps ||= vis.apps;
     anyScreens ||= vis.screenshots;

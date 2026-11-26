@@ -43,10 +43,13 @@ const dayCount = (from: string, to: string) => Math.round((Date.parse(to) - Date
 
 /** A member's data notes in the reader's language. */
 function notesOf(m: MemberReportRow): string[] {
-  const notes = m.permission_missing_minutes > 0 ? [tPlural(m.permission_missing_minutes, 'mgr.team.noPermission.one', 'mgr.team.noPermission.other')] : [];
+  return m.permission_missing_minutes > 0 ? [tPlural(m.permission_missing_minutes, 'mgr.team.noPermission.one', 'mgr.team.noPermission.other')] : [];
+}
+
+/** The table's notes add unmeasured time (paused, or the computer not reporting); a pause is no warning. */
+function rowNotes(m: MemberReportRow): string {
   const unmeasured = m.gap_seconds + m.paused_seconds;
-  if (unmeasured > 0) notes.push(t('mgr.team.notMeasured', { d: formatDuration(unmeasured) }));
-  return notes;
+  return [...notesOf(m), ...(unmeasured > 0 ? [t('mgr.team.notMeasured', { d: formatDuration(unmeasured) })] : [])].join('; ');
 }
 
 /** The "Everyone" choice in the team picker (org admins). */
@@ -258,7 +261,7 @@ function MembersTable({
                 </td>
               ) : null}
               {overtime ? <OvertimeCells row={overtime.members.find((o) => o.user_id === m.user_id)} member={m} teamId={report.team.id} week={week} /> : null}
-              <td className="small secondary">{notesOf(m).join('; ') || '—'}</td>
+              <td className="small secondary">{rowNotes(m) || '—'}</td>
             </tr>
           ))}
         </tbody>

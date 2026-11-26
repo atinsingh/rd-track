@@ -59,7 +59,8 @@ describe('team live status', () => {
   it('counts screenshots only for people whose screenshots are shared with the viewer', async () => {
     // The default policy doesn't share screenshots with managers.
     expect((await rowFor('emp')).screenshot_count).toBeNull();
-    const res = await org.admin.put(`/v1/policies/organization/${org.id}`, {
+    // Shared on the project the person tracks, as most setups do.
+    const res = await org.admin.put(`/v1/policies/project/${org.projectId}`, {
       settings: { screenshots: { enabled: true, interval_minutes: 10 }, viewers: { manager_can_view_screenshots: true } },
       change_note: 'Visual evidence for client work',
       confirm_expansion: true,
@@ -84,6 +85,7 @@ describe('team live status', () => {
     expect(done.status, JSON.stringify(done.body)).toBe(200);
     await env.drain();
     expect((await rowFor('emp')).screenshot_count).toBe(1);
-    expect((await rowFor('emp2')).screenshot_count).toBe(0);
+    // Nothing on that project for this person, so nothing is shared.
+    expect((await rowFor('emp2')).screenshot_count).toBeNull();
   });
 });

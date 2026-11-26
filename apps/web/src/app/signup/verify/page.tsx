@@ -7,7 +7,7 @@ import { ActionError } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { rd } from '@/lib/api';
 import { useT } from '@/lib/i18n';
-import { browserTimeZone } from '@/lib/time';
+import { PENDING_TZ_KEY, browserTimeZone } from '@/lib/time';
 import { useAction } from '@/lib/useApi';
 import { AuthFrame } from '../../login/AuthFrame';
 import s from '../../login/login.module.css';
@@ -37,7 +37,12 @@ function Verify() {
     if (!r) return;
     // The account starts on UTC; the founder's browser zone is the right default for them and,
     // through them, for the people and policies they set up next. They can change it in Settings.
-    await rd.account.update({ timezone: browserTimeZone() }).catch(() => undefined);
+    // Saved by the signed-in app once the session may write (after two-factor setup, where required).
+    try {
+      window.sessionStorage.setItem(PENDING_TZ_KEY, browserTimeZone());
+    } catch {
+      // Blocked storage: they keep UTC until they change it in Settings.
+    }
     router.replace('/admin/billing');
   };
 

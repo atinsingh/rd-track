@@ -261,6 +261,9 @@ export function formatCountdown(msLeft: number): string {
   return h > 0 ? `${h}:${mmss}` : mmss;
 }
 
+/** A new founder's time zone, kept until two-factor setup lets the session save it. */
+export const PENDING_TZ_KEY = 'rd.signup.tz';
+
 export function browserTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
