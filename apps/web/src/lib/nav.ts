@@ -64,7 +64,8 @@ export function can(a: Access, c: Capability): boolean {
     case 'screenshots':
       return can(a, 'tracking') && a.entitlements.includes('screenshots');
     case 'team':
-      return a.managesTeams;
+      // Org admins see everyone's reports without managing a team.
+      return a.managesTeams || a.isAdmin;
     case 'approvals':
       // Org admins review deletion requests, and corrections, timesheets, time off and expenses for people without a team manager.
       return a.managesTeams || (a.isAdmin && (timeOff || (['correction_approvals', 'timesheets', 'screenshots', 'expenses'] as const).some((e) => a.entitlements.includes(e))));

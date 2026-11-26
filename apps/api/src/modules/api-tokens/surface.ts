@@ -64,6 +64,7 @@ const SECTIONS: [section: string, entries: Entry[]][] = [
       ['GET', '/v1/users/:id/apps', "A person's app usage, where policy allows"],
       ['GET', '/v1/users/:id/timesheets/:period_start', "A person's timesheet"],
       ['GET', '/v1/teams/:id/report', 'Team hours (`from`, `to`, `tz`)'],
+      ['GET', '/v1/org/report', "Everyone's hours, for admins (`from`, `to`, `tz`)"],
       ['GET', '/v1/projects/:id/report', 'Project hours (`from`, `to`)'],
       ['GET', '/v1/teams/:id/attendance', 'Team attendance'],
       ['GET', '/v1/teams/:id/calendar', 'Team time-off calendar'],

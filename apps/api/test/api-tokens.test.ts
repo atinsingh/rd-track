@@ -113,11 +113,9 @@ describe('personal tokens', () => {
   it("a manager's token reading someone's time shows in that person's access log; their own token reading their own doesn't", async () => {
     const m = (await newToken(org.users.manager!.client, { name: 'Manager BI', kind: 'personal' })).body.token;
     expect((await api(m, 'GET', `/v1/users/${org.users.emp!.id}/sessions?from=2026-10-01T00:00:00Z&to=2026-10-27T00:00:00Z`)).body.error.code).toBe('insufficient_scope');
-    // A token sees what its creator could: an admin sees someone's time only for a team they manage.
+    // A token sees what its creator could: an org admin sees the time of anyone in their org.
     const o = (await newToken(org.admin, { name: 'Team BI', kind: 'organization', scopes: ['read'] })).body.token;
     const url = `/v1/users/${org.users.emp!.id}/sessions?from=2026-10-01T00:00:00Z&to=2026-10-27T00:00:00Z`;
-    expect((await api(o, 'GET', url)).status).toBe(403);
-    await org.admin.post(`/v1/admin/teams/${org.teamId}/members`, { user_id: org.adminId, role: 'manager' });
     expect((await api(o, 'GET', url)).status).toBe(200);
     const log = (await org.users.emp!.client.get('/v1/me/access-log')).body.items;
     expect(log.map((e: { actor_name: string }) => e.actor_name)).toContain('API token · Team BI');

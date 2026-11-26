@@ -1,4 +1,5 @@
 import type { Deps, UserActor } from '../context';
+import { isAdmin } from '../context';
 import { many, one, type Queryable } from '../db/pool';
 import { errors } from '../lib/errors';
 import { audit } from './audit/service';
@@ -59,7 +60,8 @@ export async function assertCanView(
   if (actor.userId === targetUserId) return;
 
   let allowed = false;
-  if (await isTeamManagerOf(q, actor.userId, targetUserId)) {
+  // Org admins view anyone in their own org (checked above) under the same viewer policy as managers.
+  if (isAdmin(actor) || (await isTeamManagerOf(q, actor.userId, targetUserId))) {
     if (purpose === 'time') {
       allowed = true;
     } else {
@@ -88,7 +90,7 @@ export async function assertCanView(
   }
 }
 
-/** What a manager may see for one member, for UI hints. */
+/** What a manager or org admin may see for one member, for UI hints. */
 export async function visibilityFor(
   deps: Pick<Deps, 'now'>,
   q: Queryable,

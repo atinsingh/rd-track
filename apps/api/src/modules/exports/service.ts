@@ -36,8 +36,8 @@ export async function createExport(
     const managed = await managedTeamIds(q, actor.userId);
     const teamOk = await one(q, 'SELECT 1 FROM teams WHERE id = $1 AND organization_id = $2', [input.team_id, actor.organizationId]);
     if (!teamOk) throw errors.notFound('Team');
-    // Org admins may export time records; activity detail stays with managers (system design §3).
-    if (!managed.includes(input.team_id) && !(isAdmin(actor) && purpose === 'time')) throw errors.forbidden();
+    // Managers export their teams; org admins any team. Activity still needs each member's viewer policy.
+    if (!managed.includes(input.team_id) && !isAdmin(actor)) throw errors.forbidden();
     userIds = (
       await many<{ user_id: string }>(q, 'SELECT user_id FROM team_memberships WHERE team_id = $1 AND valid_to IS NULL', [input.team_id])
     ).map((r) => r.user_id);

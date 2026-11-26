@@ -15,7 +15,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Deps, UserActor } from '../context';
 import { isAdmin } from '../context';
 import { many, withTx } from '../db/pool';
-import { userOf } from '../http';
+import { ADMIN_ROLES, requireRole, userOf } from '../http';
 import { errors } from '../lib/errors';
 import { parse, parseRange } from '../lib/validate';
 import { activityFor, appsFor, projectReport, sessionsFor, teamReport } from './activity/queries';
@@ -160,8 +160,8 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
       items: await many(
         pool,
         `SELECT t.id, t.name, (SELECT count(*)::int FROM team_memberships m WHERE m.team_id = t.id AND m.valid_to IS NULL) AS member_count
-         FROM teams t WHERE t.organization_id = $1 AND t.id = ANY($2::uuid[]) ORDER BY t.name`,
-        [a.organizationId, ids],
+         FROM teams t WHERE t.organization_id = $1 AND ($3 OR t.id = ANY($2::uuid[])) ORDER BY t.name`,
+        [a.organizationId, ids, isAdmin(a)],
       ),
     };
   });
@@ -170,13 +170,23 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     user,
     async (req) => {
       const a = userOf(req);
-      if (!(await managedTeamIds(pool, a.userId)).includes(req.params.id)) throw errors.forbidden();
+      const teamId = parse(z.uuid(), req.params.id);
+      // teamReport 404s a team in another organization.
+      if (!isAdmin(a) && !(await managedTeamIds(pool, a.userId)).includes(teamId)) throw errors.forbidden();
       const projectId = req.query.project_id ? parse(z.uuid(), req.query.project_id) : null;
-      const report = await teamReport(deps, pool, a.organizationId, req.params.id, parseRange(req.query), tz(req.query.tz), projectId);
-      await auditTeamView(a, report.members.map((m) => m.user_id), req.params.id, req.id);
+      const report = await teamReport(deps, pool, a.organizationId, teamId, parseRange(req.query), tz(req.query.tz), projectId);
+      await auditTeamView(a, report.members.map((m) => m.user_id), teamId, req.id);
       return report;
     },
   );
+  // Everyone active in the organization, for org admins: the team report over all members.
+  app.get<{ Querystring: { from?: string; to?: string; tz?: string; project_id?: string } }>('/v1/org/report', user, async (req) => {
+    const a = requireRole(req, ADMIN_ROLES);
+    const projectId = req.query.project_id ? parse(z.uuid(), req.query.project_id) : null;
+    const report = await teamReport(deps, pool, a.organizationId, null, parseRange(req.query), tz(req.query.tz), projectId);
+    await auditTeamView(a, report.members.map((m) => m.user_id), a.organizationId, req.id, 'org_report');
+    return report;
+  });
   // Names for jumping to a person or project (⌘K). Not a data view, so not audited as one.
   app.get('/v1/me/directory', user, async (req): Promise<DirectoryResponse> => {
     const a = userOf(req);
@@ -228,7 +238,7 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
   app.get('/v1/exports', user, async (req) => ({ items: await listExports(deps, pool, userOf(req)) }));
   app.get<{ Params: { id: string } }>('/v1/exports/:id', user, async (req) => getExport(deps, pool, userOf(req), req.params.id, req.id));
 
-  async function auditTeamView(actor: UserActor, members: string[], teamId: string, requestId: string) {
+  async function auditTeamView(actor: UserActor, members: string[], teamId: string, requestId: string, via = 'team_report') {
     // One entry per member so each employee sees it under "Who viewed my data".
     for (const m of members) {
       if (m === actor.userId) continue;
@@ -236,11 +246,11 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
         organizationId: actor.organizationId,
         actor,
         action: 'activity.view',
-        targetType: 'team_report',
+        targetType: via,
         targetId: teamId,
         targetUserId: m,
         requestId,
-        metadata: { via: 'team_report', admin: isAdmin(actor) },
+        metadata: { via, admin: isAdmin(actor) },
       });
     }
   }

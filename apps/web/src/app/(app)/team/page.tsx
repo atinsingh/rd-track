@@ -31,8 +31,11 @@ function notesOf(m: MemberReportRow): string[] {
     : [];
 }
 
-function memberHref(m: MemberReportRow, teamId: string, week: string): string {
-  const q = new URLSearchParams({ team: teamId, name: m.display_name, date: week });
+/** The "Everyone" choice in the team picker (org admins). */
+const EVERYONE = 'everyone';
+
+function memberHref(m: MemberReportRow, teamId: string | null, week: string): string {
+  const q = new URLSearchParams({ ...(teamId ? { team: teamId } : {}), name: m.display_name, date: week });
   return `/team/${encodeURIComponent(m.user_id)}?${q.toString()}`;
 }
 
@@ -82,28 +85,36 @@ function Attention({ report, pending }: { report: TeamReport; pending: Correctio
   );
 }
 
-function MembersTable({ report, week, overtime }: { report: TeamReport; week: string; overtime?: TeamOvertimeReport }) {
+function MembersTable({ report, teamId, week, overtime }: { report: TeamReport; teamId: string | null; week: string; overtime?: TeamOvertimeReport }) {
   const rows = [...report.members].sort(byName);
   const showActivity = report.visibility.activity;
   if (rows.length === 0) return <Empty title={t('mgr.team.noMembers')} />;
   return (
     <TableBox label={t('mgr.team.membersLabel')}>
-      <table className={`${tableClass} ${s.membersTable}`} style={{ minWidth: 640 }}>
+      <table className={`${tableClass} ${s.membersTable}`} style={{ minWidth: 800 }}>
         <caption className="visually-hidden">{t('mgr.team.membersCaption')}</caption>
         <thead>
           <tr>
             <th scope="col" aria-sort="ascending">
               {t('mgr.col.nameSorted')}
             </th>
-            <th scope="col" className={numClass}>
+            <th scope="col" className={numClass} title={t('mgr.col.trackedHint')}>
               {t('mgr.col.tracked')}
             </th>
             {showActivity ? (
-              <th scope="col">
-                <span className={s.thActivity}>
-                  {t('mgr.col.activity')} <ActivityInfo />
-                </span>
-              </th>
+              <>
+                <th scope="col" className={numClass}>
+                  {t('mgr.col.active')}
+                </th>
+                <th scope="col" className={numClass}>
+                  {t('mgr.col.idle')}
+                </th>
+                <th scope="col">
+                  <span className={s.thActivity}>
+                    {t('mgr.col.activity')} <ActivityInfo />
+                  </span>
+                </th>
+              </>
             ) : null}
             <th scope="col" className={numClass}>
               {t('tiles.notMeasured')}
@@ -129,24 +140,28 @@ function MembersTable({ report, week, overtime }: { report: TeamReport; week: st
           {rows.map((m) => (
             <tr key={m.user_id}>
               <td>
-                <Link href={memberHref(m, report.team.id, week)} className={s.memberLink}>
+                <Link href={memberHref(m, teamId, week)} className={s.memberLink}>
                   {m.display_name}
                 </Link>
               </td>
               <td className={numClass}>{formatDuration(m.tracked_seconds)}</td>
               {showActivity ? (
-                <td>
-                  {m.activity_percent === null ? (
-                    <span className="mono muted">—</span>
-                  ) : (
-                    <span className={s.act}>
-                      <span className={s.actNum}>{formatPercent(m.activity_percent)}</span>
-                      <span className={s.actTrack} aria-hidden="true">
-                        <span className={s.actFill} style={{ width: `${m.activity_percent}%` }} />
+                <>
+                  <td className={numClass}>{m.activity_percent === null ? '—' : formatDuration(m.active_seconds)}</td>
+                  <td className={numClass}>{m.activity_percent === null ? '—' : formatDuration(m.idle_seconds)}</td>
+                  <td>
+                    {m.activity_percent === null ? (
+                      <span className="mono muted">—</span>
+                    ) : (
+                      <span className={s.act}>
+                        <span className={s.actNum}>{formatPercent(m.activity_percent)}</span>
+                        <span className={s.actTrack} aria-hidden="true">
+                          <span className={s.actFill} style={{ width: `${m.activity_percent}%` }} />
+                        </span>
                       </span>
-                    </span>
-                  )}
-                </td>
+                    )}
+                  </td>
+                </>
               ) : null}
               <td className={numClass}>{durationOrDash(m.gap_seconds + m.paused_seconds)}</td>
               <td className={numClass}>{durationOrDash(m.manual_seconds)}</td>
@@ -250,33 +265,43 @@ function OvertimeCells({ row, member, teamId, week }: { row: TeamOvertimeReport[
 }
 
 export default function TeamPage() {
-  const { access, timezone: tz } = useMe();
+  const { me, access, timezone: tz } = useMe();
+  const allowed = access.managesTeams || access.isAdmin;
   const [teamId, setTeamId] = useState<string | null>(null);
   const [day, setDay] = useState(() => todayInTz(tz));
   const [exported, setExported] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   const exportAction = useAction();
-  const teams = useApi(access.managesTeams ? 'teams' : null, (signal) => rd.teams.list(signal));
-  const pending = useApi(access.managesTeams ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
+  const teams = useApi(allowed ? 'teams' : null, (signal) => rd.teams.list(signal));
+  const pending = useApi(allowed ? 'nav:pending' : null, (signal) => rd.corrections.pending(signal));
   const week = startOfWeek(day);
   const range = daysRange(week, 7, tz);
   const sortedTeams = [...(teams.data ?? [])].sort((a, b) => a.name.localeCompare(b.name));
-  const current = sortedTeams.find((t) => t.id === teamId) ?? sortedTeams[0];
-  const report = useApi(current ? `team|${current.id}|${range.from}|${tz}|${projectId ?? ''}` : null, (signal) =>
-    rd.teams.report(current!.id, { from: range.from, to: range.to }, tz, signal, projectId),
+  // Org admins start on everyone: people in no team are only there.
+  const everyone = access.isAdmin && (teamId ?? EVERYONE) === EVERYONE;
+  const current = everyone ? undefined : (sortedTeams.find((t) => t.id === teamId) ?? sortedTeams[0]);
+  // Overtime and insights are for the team's own managers.
+  const manages = !!current && me.managed_team_ids.includes(current.id);
+  const reportKey = everyone ? `org|${range.from}|${tz}|${projectId ?? ''}` : current ? `team|${current.id}|${range.from}|${tz}|${projectId ?? ''}` : null;
+  const report = useApi(teams.data ? reportKey : null, (signal) =>
+    everyone
+      ? rd.teams.everyone({ from: range.from, to: range.to }, tz, signal, projectId)
+      : rd.teams.report(current!.id, { from: range.from, to: range.to }, tz, signal, projectId),
   );
 
   const overtime = useApi(
-    current && access.entitlements.includes('timesheets') ? `team:overtime|${current.id}|${week}` : null,
+    current && manages && access.entitlements.includes('timesheets') ? `team:overtime|${current.id}|${week}` : null,
     (signal) => timesheetsApi.teamOvertime(current!.id, week, addDays(week, 6), signal),
   );
 
-  if (!access.managesTeams) return <NoAccess what={t('mgr.team.noAccess')} />;
+  if (!allowed) return <NoAccess what={t('mgr.team.noAccess')} />;
   if (teams.error) return <ErrorState error={teams.error} onRetry={teams.reload} />;
   if (!teams.data) return <Loading label={t('mgr.team.loadingTeams')} />;
-  if (!current) return <Empty title={t('mgr.team.noTeams')} />;
+  if (!current && !everyone) return <Empty title={t('mgr.team.noTeams')} />;
 
+  const count = report.data?.team.member_count ?? current?.member_count ?? 0;
   const doExport = async () => {
+    if (!current) return;
     setExported(false);
     const r = await exportAction.run(() =>
       rd.exports.create({ kind: 'sessions', from: range.from, to: range.to, team_id: current.id }),
@@ -287,13 +312,14 @@ export default function TeamPage() {
   return (
     <>
       <PageHeader
-        eyebrow={tPlural(current.member_count, 'mgr.team.eyebrow.one', 'mgr.team.eyebrow.other')}
-        title={t('mgr.team.title', { name: current.name })}
+        eyebrow={manages ? tPlural(count, 'mgr.team.eyebrow.one', 'mgr.team.eyebrow.other') : tPlural(count, 'mgr.team.eyebrowAdmin.one', 'mgr.team.eyebrowAdmin.other')}
+        title={current ? t('mgr.team.title', { name: current.name }) : t('mgr.team.everyone')}
         description={t('mgr.team.description')}
         actions={
           <>
-            {sortedTeams.length > 1 ? (
-              <InlineSelect label={t('nav.team')} value={current.id} onChange={(e) => setTeamId(e.target.value)}>
+            {sortedTeams.length > 1 || access.isAdmin ? (
+              <InlineSelect label={t('nav.team')} value={current?.id ?? EVERYONE} onChange={(e) => setTeamId(e.target.value)}>
+                {access.isAdmin ? <option value={EVERYONE}>{t('mgr.team.everyone')}</option> : null}
                 {sortedTeams.map((t) => (
                   <option key={t.id} value={t.id}>
                     {t.name}
@@ -317,9 +343,11 @@ export default function TeamPage() {
               unit="week"
               label={`${week === startOfWeek(todayInTz(tz)) ? t('ts.thisWeekPrefix') : ''}${formatDayMonth(week)} – ${formatDayMonth(addDays(week, 6))}`}
             />
-            <Button variant="primary" onClick={doExport} disabled={exportAction.busy}>
-              {exportAction.busy ? t('mgr.exporting') : t('mgr.exportCsv')}
-            </Button>
+            {current ? (
+              <Button variant="primary" onClick={doExport} disabled={exportAction.busy}>
+                {exportAction.busy ? t('mgr.exporting') : t('mgr.exportCsv')}
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -341,12 +369,14 @@ export default function TeamPage() {
         <>
           <div className="row">
             <Card title={t('mgr.team.members')} className={s.members}>
-              <MembersTable report={report.data} week={week} overtime={overtime.data} />
+              <MembersTable report={report.data} teamId={current?.id ?? null} week={week} overtime={overtime.data} />
             </Card>
             <Attention report={report.data} pending={pending.data ?? []} />
           </div>
           <StackedDailyChart title={t('mgr.team.chartTitle')} daily={report.data.daily} tz={tz} />
-          <TeamInsightsCard teamId={current.id} range={{ from: range.from, to: range.to }} tz={tz} isAdmin={access.isAdmin} />
+          {current && manages ? (
+            <TeamInsightsCard teamId={current.id} range={{ from: range.from, to: range.to }} tz={tz} isAdmin={access.isAdmin} />
+          ) : null}
         </>
       )}
     </>

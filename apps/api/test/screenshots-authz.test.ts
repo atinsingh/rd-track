@@ -76,16 +76,16 @@ describe('screenshots', () => {
     expect(log.body.items.some((e: { action: string; actor_id: string }) => e.action === 'screenshot.view' && e.actor_id === org.users.manager!.id)).toBe(true);
   });
 
-  it('is not visible to org admins, colleagues or other tenants', async () => {
+  it('is visible to their org admin under the same policy, not to colleagues or other tenants', async () => {
     const id = (await env.deps.pool.query(`SELECT id FROM screenshots WHERE status = 'stored' LIMIT 1`)).rows[0].id;
-    expect((await org.admin.get(`/v1/screenshots/${id}/view-url`)).status).toBe(403);
+    expect((await org.admin.get(`/v1/screenshots/${id}/view-url`)).status).toBe(200);
     expect((await org.users.emp2!.client.get(`/v1/screenshots/${id}/view-url`)).status).toBe(403);
     expect((await other.admin.get(`/v1/screenshots/${id}/view-url`)).status).toBe(404);
     expect((await other.users.manager!.client.get(`/v1/users/${org.users.emp!.id}/activity?${RANGE}`)).status).toBe(404);
     const denied = await env.deps.pool.query(
       `SELECT count(*)::int AS n FROM audit_logs WHERE action = 'screenshot.view' AND result = 'denied'`,
     );
-    expect(denied.rows[0].n).toBeGreaterThanOrEqual(2);
+    expect(denied.rows[0].n).toBeGreaterThanOrEqual(1);
   });
 
   it('enforces the minimum interval between captures', async () => {

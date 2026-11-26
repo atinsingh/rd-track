@@ -150,25 +150,28 @@ export async function appsFor(q: Queryable, orgId: string, userId: string, r: Ra
 
 // ───────────── team & project reports ─────────────
 
+/** One team's report, or with `teamId` null everyone active in the organization (reported as a team with the org's id). */
 export async function teamReport(
   deps: Deps,
   q: Queryable,
   orgId: string,
-  teamId: string,
+  teamId: string | null,
   r: Range,
   tz: string,
   projectId: string | null = null,
 ): Promise<TeamReport> {
-  const team = await one<{ id: string; name: string }>(q, 'SELECT id, name FROM teams WHERE id = $1 AND organization_id = $2', [
-    teamId,
-    orgId,
-  ]);
+  const team =
+    teamId === null
+      ? { id: orgId, name: 'Everyone' }
+      : await one<{ id: string; name: string }>(q, 'SELECT id, name FROM teams WHERE id = $1 AND organization_id = $2', [teamId, orgId]);
   if (!team) throw errors.notFound('Team');
   const members = await many<{ user_id: string; display_name: string }>(
     q,
-    `SELECT u.id AS user_id, u.display_name FROM team_memberships m JOIN users u ON u.id = m.user_id
-     WHERE m.team_id = $1 AND m.valid_to IS NULL AND u.status = 'active' ORDER BY u.display_name`,
-    [teamId],
+    teamId === null
+      ? `SELECT id AS user_id, display_name FROM users WHERE organization_id = $1 AND status = 'active' ORDER BY display_name`
+      : `SELECT u.id AS user_id, u.display_name FROM team_memberships m JOIN users u ON u.id = m.user_id
+         WHERE m.team_id = $1 AND m.valid_to IS NULL AND u.status = 'active' ORDER BY u.display_name`,
+    [teamId ?? orgId],
   );
   const ids = members.map((m) => m.user_id);
 

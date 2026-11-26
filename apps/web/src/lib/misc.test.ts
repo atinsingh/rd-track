@@ -40,7 +40,8 @@ describe('navigation by role', () => {
     const admin = hrefs(me({ org_role: 'org_admin' }));
     expect(admin).toContain('/admin/policies');
     expect(admin).toContain('/audit');
-    expect(admin).not.toContain('/team');
+    // Org admins see everyone's reports without managing a team.
+    expect(admin).toContain('/team');
     // Developers (API tokens, webhooks) is there for every admin; the page says what needs Pro.
     expect(admin).toContain('/admin/developers');
     expect(hrefs(me({}))).not.toContain('/admin/developers');
@@ -50,9 +51,9 @@ describe('navigation by role', () => {
     expect(groups.map((g) => g.label)).toEqual(['Me', 'Settings']);
     expect(groups[1]!.items.map((i) => i.href)).toEqual(['/audit']);
   });
-  it('groups an admin\u2019s pages into Me, Money, Admin and Settings', () => {
+  it('groups an admin\u2019s pages into Me, Team, Money, Admin and Settings', () => {
     const groups = navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['budgets_invoicing', 'webhooks'] }));
-    expect(groups.map((g) => g.key)).toEqual(['me', 'money', 'admin', 'settings']);
+    expect(groups.map((g) => g.key)).toEqual(['me', 'team', 'money', 'admin', 'settings']);
     expect(groupOf(groups, '/admin/billing')).toBe('settings');
     expect(groupOf(groups, '/admin/invoices')).toBe('money');
     expect(groupOf(groups, null)).toBeNull();

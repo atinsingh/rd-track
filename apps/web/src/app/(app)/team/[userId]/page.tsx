@@ -26,19 +26,20 @@ export default function MemberDayPage() {
   const [date, setDate] = useState(() => (initialDate && /^\d{4}-\d{2}-\d{2}$/.test(initialDate) && initialDate <= today ? initialDate : today));
 
   // The team report says what policy lets this manager see for the team.
+  const allowed = access.managesTeams || access.isAdmin;
   const week = daysRange(startOfWeek(date), 7, tz);
-  const report = useApi(teamId && access.managesTeams ? `team|${teamId}|${week.from}|${tz}` : null, (signal) =>
+  const report = useApi(teamId && allowed ? `team|${teamId}|${week.from}|${tz}` : null, (signal) =>
     rd.teams.report(teamId!, { from: week.from, to: week.to }, tz, signal),
   );
   const member = report.data?.members.find((m) => m.user_id === userId);
   const name = member?.display_name ?? search.get('name') ?? t('mgr.member.fallback');
   // What policy shares with this manager about this one person (not the team as a whole).
-  const vis = useApi(access.managesTeams && userId ? `visibility|${userId}` : null, (signal) => rd.person.visibility(userId, signal));
+  const vis = useApi(allowed && userId ? `visibility|${userId}` : null, (signal) => rd.person.visibility(userId, signal));
   const visibility: Visibility | undefined = vis.data
     ? { activity: vis.data.activity, apps: vis.data.apps, screenshots: vis.data.screenshots }
     : undefined;
 
-  if (!access.managesTeams) return <NoAccess what={t('mgr.member.noAccess')} />;
+  if (!allowed) return <NoAccess what={t('mgr.member.noAccess')} />;
 
   return (
     <>

@@ -51,7 +51,7 @@ export default function ExportsPage() {
   const [to, setTo] = useState(today);
   const [scope, setScope] = useState<string>('me');
   const exportsRes = useApi('exports', (signal) => rd.exports.list(signal));
-  const teams = useApi(access.managesTeams ? 'teams' : null, (signal) => rd.teams.list(signal));
+  const teams = useApi(access.managesTeams || access.isAdmin ? 'teams' : null, (signal) => rd.teams.list(signal));
   const create = useAction();
   const inFlight = (exportsRes.data ?? []).some((e) => e.status === 'queued' || e.status === 'running');
   const { reload } = exportsRes;

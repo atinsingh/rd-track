@@ -493,6 +493,9 @@ export const rd = {
       get<TeamReport>(`/v1/teams/${enc(id)}/report`, { query: { ...r, tz, ...(projectId ? { project_id: projectId } : {}) }, signal }),
     insights: (id: string, r: Range, tz: string, signal?: AbortSignal) =>
       get<TeamInsights>(`/v1/teams/${enc(id)}/insights`, { query: { ...r, tz }, signal }),
+    /** Everyone active in the organization, for org admins. */
+    everyone: (r: Range, tz: string, signal?: AbortSignal, projectId?: string | null) =>
+      get<TeamReport>('/v1/org/report', { query: { ...r, tz, ...(projectId ? { project_id: projectId } : {}) }, signal }),
   },
   projects: {
     list: (signal?: AbortSignal) => list<ProjectDTO>('/v1/projects', { signal }),
