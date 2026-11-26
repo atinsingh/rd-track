@@ -77,6 +77,8 @@ interface AppView {
   reminder: ReminderView | null;
   reminders: RemindersView;
   can_start: boolean;
+  /** False inside office hours: the session can be paused, not stopped. */
+  can_stop: boolean;
   require_project: boolean;
   projects: Project[];
   projects_supported: boolean | null;
@@ -408,19 +410,24 @@ function sessionButtons(v: AppView): HTMLElement {
     );
   }
   const paused = v.tray === "paused";
+  const pause = h(
+    "button",
+    {
+      class: "btn-outline-light",
+      type: "button",
+      disabled: busy,
+      onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
+    },
+    paused ? t("session.resume") : t("session.pause"),
+  );
+  // Inside office hours there is no Stop: only Pause (which resumes by itself).
+  if (!v.can_stop) {
+    return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")));
+  }
   return h(
     "div",
     { class: "actions" },
-    h(
-      "button",
-      {
-        class: "btn-outline-light",
-        type: "button",
-        disabled: busy,
-        onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
-      },
-      paused ? t("session.resume") : t("session.pause"),
-    ),
+    pause,
     h(
       "button",
       { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) },

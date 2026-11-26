@@ -684,6 +684,27 @@ pub fn is_translocated(exe: &std::path::Path) -> bool {
     exe.to_string_lossy().contains("/AppTranslocation/")
 }
 
+/// "activity and idle time · app names · screenshots, about one every 10 min": the
+/// one-line summary under the daily notice for a session started by the work hours.
+fn collects_line(s: &PolicySettings, lang: Lang) -> String {
+    let m = lang.messages();
+    let minutes = s.screenshots.interval_minutes.to_string();
+    let mut parts = vec![m.collects_activity.to_owned()];
+    if s.apps.capture_app_name {
+        parts.push(m.collects_apps.into());
+        if s.apps.capture_domains {
+            parts.push(m.collects_domains.into());
+        }
+    }
+    if s.apps.capture_window_titles {
+        parts.push(m.collects_titles.into());
+    }
+    if s.screenshots.enabled {
+        parts.push(fill(m.collects_shots_every, &[("minutes", &minutes)]));
+    }
+    parts.join(" · ")
+}
+
 /// Banners for the popover, most important first.
 pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner> {
     let m = ctx.lang.messages();
@@ -808,6 +829,15 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
             .detail(m.limit_detail)
             .acknowledge(m.got_it),
             Notice::LicenseRestored => Banner::new(format!("n{id}"), "info", m.license_restored),
+            Notice::WorkHoursStarted {
+                collection_notice: true,
+                ..
+            } => match live {
+                Some(l) => Banner::new(format!("n{id}"), "info", m.work_hours_collects)
+                    .detail(&collects_line(&l.settings, ctx.lang))
+                    .action(m.review, "review_collection", None),
+                None => Banner::new(format!("n{id}"), "info", m.work_hours_started),
+            },
             Notice::WorkHoursStarted { .. } => {
                 Banner::new(format!("n{id}"), "info", m.work_hours_started)
             }
@@ -954,6 +984,7 @@ mod tests {
             browser_extensions: Vec::new(),
             reminders: ReminderStatus::default(),
             screenshot_problem: None,
+            stop_locked: false,
         }
     }
 
@@ -1217,6 +1248,50 @@ mod tests {
         let b = banners(Some(&l), &BannerContext::default());
         assert_eq!(b[0].id, "license-grace");
         assert!(b[0].text.contains("31 Oct 2026"));
+    }
+
+    #[test]
+    fn the_daily_notice_for_an_automatic_start_lists_what_is_collected() {
+        let mut l = live();
+        l.settings.apps.capture_app_name = true;
+        l.settings.apps.capture_domains = true;
+        l.settings.screenshots.enabled = true;
+        l.settings.screenshots.interval_minutes = 20;
+        let session_id = uuid::Uuid::nil();
+        let notices = vec![
+            (
+                1,
+                Notice::WorkHoursStarted {
+                    session_id,
+                    collection_notice: true,
+                },
+            ),
+            (
+                2,
+                Notice::WorkHoursStarted {
+                    session_id,
+                    collection_notice: false,
+                },
+            ),
+        ];
+        let ctx = BannerContext {
+            notices: &notices,
+            ..Default::default()
+        };
+        let b = banners(Some(&l), &ctx);
+        assert_eq!(b[0].text, Lang::En.messages().work_hours_collects);
+        assert_eq!(
+            b[0].detail.as_deref(),
+            Some("activity and idle time · app names · website domains · screenshots, about one every 20 min")
+        );
+        assert_eq!(b[0].action.as_ref().unwrap().command, "review_collection");
+        assert_eq!(b[1].text, Lang::En.messages().work_hours_started);
+        assert!(b[1].detail.is_none());
+
+        l.settings.apps.capture_app_name = false;
+        l.settings.screenshots.enabled = false;
+        let b = banners(Some(&l), &ctx);
+        assert_eq!(b[0].detail.as_deref(), Some("activity and idle time"));
     }
 
     #[test]

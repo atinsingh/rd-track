@@ -92,6 +92,8 @@ pub struct AppView {
     pub reminders: RemindersView,
     /// Whether a session can be started now.
     pub can_start: bool,
+    /// `false` inside the policy's office hours: the session can be paused, not stopped.
+    pub can_stop: bool,
     /// The policy requires a project.
     pub require_project: bool,
     /// Projects for the pickers.
@@ -141,6 +143,8 @@ struct Inner {
     server_locale: Option<String>,
     /// The language the tray menu was last written in.
     tray_lang: Option<Lang>,
+    /// Whether the tray menu's "Stop session" is enabled (`None`: as created, enabled).
+    tray_stop: Option<bool>,
 }
 
 impl Inner {
@@ -383,6 +387,23 @@ impl Controller {
             Some(h) if h.send(c) => Ok(()),
             _ => Err("the agent is not running".into()),
         }
+    }
+
+    /// The employee's Stop (popover and tray). Refused inside office hours, where only
+    /// Pause is offered (the runtime refuses it too).
+    pub fn stop(&self) -> Result<(), String> {
+        if self.stop_locked() {
+            return Err(self.lang().messages().stop_locked.into());
+        }
+        self.send(Command::Stop(StopReason::User))
+    }
+
+    /// Inside the policy's office hours (the employee cannot stop).
+    pub fn stop_locked(&self) -> bool {
+        lock(&self.inner)
+            .live
+            .as_ref()
+            .is_some_and(|l| l.stop_locked)
     }
 
     /// Stops the session (if any), lets the runtime flush (bounded) and waits for the
@@ -762,6 +783,11 @@ impl Controller {
             if !choice.answers(shown.kind) {
                 return Err("unknown choice".into());
             }
+            if choice == rd_agent_core::reminders::ReminderChoice::Stop
+                && i.live.as_ref().is_some_and(|l| l.stop_locked)
+            {
+                return Err(i.lang().messages().stop_locked.into());
+            }
         }
         self.send(Command::ResolveReminder { id, choice })?;
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -937,6 +963,7 @@ impl Controller {
             can_start: live.is_some_and(|l| {
                 l.session.is_none() && l.agent.tracking_unavailable.is_none() && !l.revoked
             }),
+            can_stop: live.is_none_or(|l| !l.stop_locked),
             require_project: live.is_some_and(|l| l.settings.session.require_project),
             projects: i.projects.clone(),
             projects_supported: i.projects_supported,
@@ -969,12 +996,14 @@ impl Controller {
             let next = (v.tray, tooltip.clone(), title.clone());
             let changed = i.tray.as_ref() != Some(&next);
             i.tray = Some(next);
-            let relabel = i.tray_lang.is_some_and(|l| l != v.lang);
+            let relabel = i.tray_lang.is_some_and(|l| l != v.lang)
+                || i.tray_stop.unwrap_or(true) != v.can_stop;
             i.tray_lang = Some(v.lang);
+            i.tray_stop = Some(v.can_stop);
             (changed, relabel)
         };
         if relabel {
-            crate::tray::relabel(app, v.lang);
+            crate::tray::relabel(app, v.lang, v.can_stop);
         }
         if changed {
             crate::tray::update(app, v.tray, &tooltip, title.as_deref());
@@ -1042,7 +1071,11 @@ impl RuntimeObserver for Observer {
             }
             // There are no native notifications: the banner shows in the popover,
             // which opens (without taking focus) so the heads-up is seen.
-            Notice::LimitWarning { .. } => crate::tray::show_for_prompt(&self.app),
+            Notice::LimitWarning { .. }
+            | Notice::WorkHoursStarted {
+                collection_notice: true,
+                ..
+            } => crate::tray::show_for_prompt(&self.app),
             _ => {}
         }
         let mut i = lock(&self.ctl.inner);

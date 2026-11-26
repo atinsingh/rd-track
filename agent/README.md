@@ -353,7 +353,7 @@ on Linux, or with `RD_AGENT_SIMULATE=1`). It matches the approved mockup (Agent.
 * **Popover** (dark, `#0B0C0F`): red tracking dot + `TRACKING` / `PAUSED` / `NOT TRACKING`
   and the session's active time `H:MM:SS`; camera badge "Screenshots on for this project ·
   about every N min" when the session's policy enables them; Project / Task pickers;
-  Start (idle) or Pause|Resume / Stop; "Today 6h 42m · activity 71%" (this device, from
+  Start (idle) or Pause|Resume / Stop (Pause|Resume only inside office hours); "Today 6h 42m · activity 71%" (this device, from
   emitted buckets); sync line ("Synced 12 s ago", "Offline · 3 queued"); "My dashboard →".
 * **Session-start notice** (light): "Start a session on <project>?" listing what the
   session collects, generated from the project's *verified* policy with
@@ -603,9 +603,15 @@ the usual flow. Revoking a key stops new requests; computers already connected s
   IANA zone, ISO weekdays (or `"mon"`…), local `HH:MM`, `end ≤ start` = overnight, empty
   `days` = every day. An unparseable window rejects the whole document (last good kept).
   Inside the base policy's window, with no session open, the agent starts one by itself
-  (no project; skipped when `session.require_project`); after an employee's Stop it waits
-  for the next window. When the window ends the session is stopped
-  (`session.stopped.v1 {reason: policy}`), so nothing stays open or paused overnight.
+  (no project; skipped when `session.require_project`), also right after a relaunch. Inside
+  the window the employee cannot stop (the Stop command is refused with
+  `AgentError::StopDuringWorkHours`; popover and tray hide / grey out Stop and say "Use
+  Pause for a break"), only pause. Quitting the app still ends the session
+  (`reason: user`); the next launch starts a new one. The first automatic start of each
+  work-hours day (persisted, `collection_notice_day`) carries the "what this session
+  collects" notice, shown without blocking: tracking has already started. When the window
+  ends the session is stopped (`session.stopped.v1 {reason: policy}`), so nothing stays
+  open or paused overnight.
 * `pause.max_minutes` (1–240, default 15): an employee's pause resumes by itself after
   that long (`session.paused.v1` / `session.resumed.v1` carry the real times; wall clock,
   persisted across restarts).

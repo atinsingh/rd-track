@@ -263,12 +263,17 @@ function sessionButtons(v) {
         return h("div", { class: "actions one" }, h("button", { class: "btn-action", type: "button", disabled: blocked, onclick: onStart }, t("session.start")));
     }
     const paused = v.tray === "paused";
-    return h("div", { class: "actions" }, h("button", {
+    const pause = h("button", {
         class: "btn-outline-light",
         type: "button",
         disabled: busy,
         onclick: () => void run(() => invoke(paused ? "resume_session" : "pause_session")),
-    }, paused ? t("session.resume") : t("session.pause")), h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop")));
+    }, paused ? t("session.resume") : t("session.pause"));
+    // Inside office hours there is no Stop: only Pause (which resumes by itself).
+    if (!v.can_stop) {
+        return h("div", {}, h("div", { class: "actions one" }, pause), h("p", { class: "hint" }, t("session.stopLocked")));
+    }
+    return h("div", { class: "actions" }, pause, h("button", { class: "btn-solid-light", type: "button", disabled: busy, onclick: () => void run(() => invoke("stop_session")) }, t("session.stop")));
 }
 // A start / stop / "still tracking?" reminder: title, one line, two buttons.
 function reminderCard(r) {

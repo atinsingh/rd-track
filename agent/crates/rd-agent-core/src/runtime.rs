@@ -69,6 +69,9 @@ pub const META_LIMITS: &str = "work_limits";
 /// Outbox metadata key holding the [`ReminderState`] (Stage 4 F3: the employee's
 /// settings, today's schedule, reminders already shown).
 pub const META_REMINDERS: &str = "reminders";
+/// Outbox metadata key holding the work-hours day the "what this session collects"
+/// notice was last shown for an automatic start (once per day).
+pub const META_COLLECTION_NOTICE: &str = "collection_notice_day";
 
 /// Runtime error.
 #[derive(Debug, Error)]
@@ -94,6 +97,9 @@ pub enum AgentError {
     /// Reminder settings that cannot be used (shown to the person).
     #[error("{0}")]
     InvalidReminderSettings(&'static str),
+    /// Inside the policy's work hours the employee can pause, not stop.
+    #[error("Tracking runs during office hours. Use Pause for a break.")]
+    StopDuringWorkHours,
 }
 
 /// What to do with a session that was open when the agent last stopped running.
@@ -167,6 +173,9 @@ pub enum Notice {
     WorkHoursStarted {
         /// The new session.
         session_id: Uuid,
+        /// The first automatic start of the day: show what this session collects
+        /// (non-blocking; tracking has already started).
+        collection_notice: bool,
     },
     /// The policy's work hours ended: the session was stopped automatically.
     WorkHoursEnded,
@@ -516,6 +525,8 @@ pub struct LiveStatus {
     /// Why the last screenshot could not be taken (`None` after a success, or before
     /// any attempt).
     pub screenshot_problem: Option<ScreenshotProblem>,
+    /// Inside the policy's work hours: the employee can pause but not stop.
+    pub stop_locked: bool,
 }
 
 /// Why a screenshot could not be taken, for the tray.
@@ -610,12 +621,14 @@ pub struct Agent {
     own_app_in_front: bool,
     /// When the current employee pause began (`pause.max_minutes` counts from here).
     paused_at: Option<DateTime<Utc>>,
-    /// No automatic start in the work-hours window that opened on this day (the
-    /// employee stopped, the server rejected the session as overlapping, or the start
-    /// failed).
+    /// No automatic start in the work-hours window that opened on this day (the server
+    /// rejected the session as overlapping, or the start failed). The employee cannot
+    /// stop inside the window, so their stop never holds it.
     work_hours_hold: Option<NaiveDate>,
     /// The window (by the day it opened) for which a refused start was logged.
     work_hours_refusal_logged: Option<NaiveDate>,
+    /// The work-hours day the collection notice was last shown for (persisted).
+    collection_notice_day: Option<NaiveDate>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -692,6 +705,7 @@ impl Agent {
             paused_at: None,
             work_hours_hold: None,
             work_hours_refusal_logged: None,
+            collection_notice_day: None,
             effective,
             policy,
             cfg,
@@ -707,6 +721,7 @@ impl Agent {
             .unwrap_or_default();
         agent.limits = agent.load_meta(META_LIMITS)?;
         agent.reminders = agent.load_meta(META_REMINDERS)?;
+        agent.collection_notice_day = agent.load_meta(META_COLLECTION_NOTICE)?;
         agent.recover()?;
         if let Some(block) = agent.license_block {
             // Still refused from a previous run: never resume capture.
@@ -926,6 +941,9 @@ impl Agent {
         if !choice.answers(p.kind) {
             return Ok(false);
         }
+        if choice == ReminderChoice::Stop && self.machine.is_open() && self.stop_locked() {
+            return Err(AgentError::StopDuringWorkHours);
+        }
         self.reminder = None;
         reminders::answer(&mut self.reminders.ledger, choice);
         self.save_meta(META_REMINDERS, &self.reminders);
@@ -1067,9 +1085,22 @@ impl Agent {
 
     /// Stops the session. Capture halts immediately: pending screenshot jobs are
     /// cancelled and the final partial second is flushed before `session.stopped.v1`.
+    ///
+    /// The employee's stop ([`StopReason::User`]) is refused inside the base policy's
+    /// work hours ([`AgentError::StopDuringWorkHours`]): they can only pause.
     pub fn stop(&mut self, reason: StopReason) -> Result<(), AgentError> {
         let now = ClockReading::now(self.clock.as_ref());
+        if reason == StopReason::User && self.stop_locked() {
+            return Err(AgentError::StopDuringWorkHours);
+        }
         self.stop_at(reason, now)
+    }
+
+    /// Inside the base policy's work hours (the window that starts sessions by
+    /// itself): the employee cannot stop, only pause.
+    pub fn stop_locked(&mut self) -> bool {
+        let now = self.clock.wall();
+        self.work_hours_day(now).is_some()
     }
 
     fn stop_at(&mut self, reason: StopReason, now: ClockReading) -> Result<(), AgentError> {
@@ -1098,8 +1129,9 @@ impl Agent {
             self.emit(ev, now.wall);
         }
         self.paused_at = None;
-        if matches!(reason, StopReason::User | StopReason::Overlap) {
-            // Respect the stop: no automatic start again in this work-hours window.
+        if reason == StopReason::Overlap {
+            // Another session runs for this person: no automatic start again in this
+            // work-hours window.
             self.work_hours_hold = self.work_hours_day(now.wall);
         }
         self.scheduler.clear();
@@ -1385,7 +1417,8 @@ impl Agent {
     }
 
     /// No session is open: inside the base policy's work hours, start one by itself
-    /// (no project). Not again in the same window after the employee stopped.
+    /// (no project). Not again in the same window after an overlap or a failed start.
+    /// The first automatic start of a work-hours day carries the collection notice.
     fn work_hours_start(&mut self, now: ClockReading) {
         let Some(day) = self.work_hours_day(now.wall) else {
             return;
@@ -1405,7 +1438,15 @@ impl Agent {
         match self.start(None, None) {
             Ok(session_id) => {
                 log::info!("work hours started; session started automatically");
-                self.notices.push(Notice::WorkHoursStarted { session_id });
+                let collection_notice = self.collection_notice_day != Some(day);
+                if collection_notice {
+                    self.collection_notice_day = Some(day);
+                    self.save_meta(META_COLLECTION_NOTICE, &self.collection_notice_day);
+                }
+                self.notices.push(Notice::WorkHoursStarted {
+                    session_id,
+                    collection_notice,
+                });
             }
             Err(e) => {
                 log::warn!("could not start a session for the work hours: {e}");
@@ -2238,6 +2279,7 @@ impl Runtime {
             reminders: self.agent.reminder_status(),
             browser_extensions: self.agent.browser_extensions(),
             screenshot_problem: self.screenshot_problem.clone(),
+            stop_locked: self.agent.stop_locked(),
         }
     }
 
@@ -2434,7 +2476,10 @@ impl Runtime {
 
     fn shutdown_session(&mut self, reason: StopReason) {
         if self.agent.machine.is_open() {
-            if let Err(e) = self.agent.stop(reason) {
+            // Quitting the app ends the session even inside work hours (`stop` refuses
+            // only the employee's Stop command); the next launch starts a new one.
+            let now = ClockReading::now(self.agent.clock.as_ref());
+            if let Err(e) = self.agent.stop_at(reason, now) {
                 log::error!("could not stop session: {e}");
             }
         }

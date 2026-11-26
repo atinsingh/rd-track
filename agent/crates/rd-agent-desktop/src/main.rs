@@ -15,7 +15,6 @@ mod view;
 
 use std::sync::Arc;
 
-use rd_agent_core::events::StopReason;
 use rd_agent_core::runtime::Command;
 use tauri::{AppHandle, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt as _;
@@ -148,7 +147,7 @@ fn resume_session(ctl: Ctl<'_>) -> Result<(), String> {
 
 #[tauri::command]
 fn stop_session(ctl: Ctl<'_>) -> Result<(), String> {
-    ctl.send(Command::Stop(StopReason::User))
+    ctl.stop()
 }
 
 /// The person's answer to the idle-return prompt. Only the popover calls this, on the

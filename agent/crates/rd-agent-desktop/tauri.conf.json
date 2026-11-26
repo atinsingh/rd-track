@@ -40,7 +40,7 @@
     "copyright": "© RoundDigital",
     "category": "Productivity",
     "shortDescription": "Transparent work-session tracking",
-    "longDescription": "RoundDigital Track records work sessions you start yourself — activity counts, the app in front and (only where your organization enabled them) periodic screenshots — and shows you exactly what is collected.",
+    "longDescription": "RoundDigital Track records work sessions, started by itself during your organization’s office hours or by you: activity counts, the app in front and (only where your organization enabled them) periodic screenshots. It shows you exactly what is collected.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

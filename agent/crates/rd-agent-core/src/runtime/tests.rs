@@ -364,7 +364,10 @@ fn work_hours_stop_the_session_at_the_end_and_start_one_the_next_morning() {
     );
     assert_eq!(
         h.agent.take_notices(),
-        vec![Notice::WorkHoursStarted { session_id: second }]
+        vec![Notice::WorkHoursStarted {
+            session_id: second,
+            collection_notice: true
+        }]
     );
     let started = h.of_type("session.started.v1");
     assert_eq!(started.len(), 2);
@@ -373,7 +376,7 @@ fn work_hours_stop_the_session_at_the_end_and_start_one_the_next_morning() {
 }
 
 #[test]
-fn work_hours_start_skips_days_off_respects_a_stop_and_needs_no_project() {
+fn work_hours_start_skips_days_off_and_needs_no_project() {
     // Saturday 10:00: not a work day.
     let start = Utc.with_ymd_and_hms(2026, 10, 31, 10, 0, 0).unwrap();
     let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
@@ -382,14 +385,6 @@ fn work_hours_start_skips_days_off_respects_a_stop_and_needs_no_project() {
     assert_eq!(h.agent.state(), SessionState::Idle);
     // Monday 10:00 (the agent was launched late): starts at once.
     h.clock.advance(Duration::from_secs(2 * 24 * 3600));
-    h.step(1);
-    assert_eq!(h.agent.state(), SessionState::Active);
-    // The employee stops: it stays stopped for the rest of the day.
-    h.agent.stop(StopReason::User).unwrap();
-    h.step(3600);
-    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
-    // Next morning it starts again.
-    h.clock.advance(Duration::from_secs(22 * 3600));
     h.step(1);
     assert_eq!(h.agent.state(), SessionState::Active);
 
@@ -404,6 +399,121 @@ fn work_hours_start_skips_days_off_respects_a_stop_and_needs_no_project() {
     let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
     h.step(10);
     assert_eq!(h.agent.state(), SessionState::Idle);
+}
+
+#[test]
+fn inside_work_hours_the_employee_can_pause_but_not_stop() {
+    // Wednesday 10:00: the session started by itself.
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 10, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert!(h.agent.stop_locked());
+    assert!(matches!(
+        h.agent.stop(StopReason::User),
+        Err(AgentError::StopDuringWorkHours)
+    ));
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert!(h.of_type("session.stopped.v1").is_empty());
+    // Pausing still works (and resumes by itself after the cap).
+    h.agent.pause().unwrap();
+    assert!(matches!(
+        h.agent.stop(StopReason::User),
+        Err(AgentError::StopDuringWorkHours)
+    ));
+    assert_eq!(h.agent.state(), SessionState::Paused(PauseReason::User));
+
+    // Outside the work hours (a session started by hand, paused at once): Stop works.
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 20, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    assert!(!h.agent.stop_locked());
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+
+    // No work hours at all: Stop works.
+    let mut h = harness();
+    h.agent.start(None, None).unwrap();
+    assert!(!h.agent.stop_locked());
+    h.agent.stop(StopReason::User).unwrap();
+}
+
+#[test]
+fn quitting_inside_work_hours_starts_tracking_again_on_the_next_launch() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 10, 0, 0).unwrap();
+    let outbox = shared_outbox();
+    let mut h = harness_at(start, outbox.clone(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.step(1);
+    let first = h.agent.session().unwrap().id;
+    // Quit (the shutdown path is not the employee's Stop command).
+    h.agent.stop(StopReason::Shutdown).unwrap();
+    let at = h.clock.wall();
+    drop(h);
+    let mut h = harness_at(
+        at + TimeDelta::minutes(30),
+        outbox,
+        AgentConfig::new(identity()),
+    );
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert_ne!(h.agent.session().unwrap().id, first);
+
+    // Known gap: a policy that needs a project never starts by itself, so after a quit
+    // nothing tracks until the employee starts a session.
+    let outbox = shared_outbox();
+    let mut h = harness_at(start, outbox.clone(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({"session": {"require_project": true}}));
+    drop(h);
+    let mut h = harness_at(start, outbox, AgentConfig::new(identity()));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Idle);
+}
+
+#[test]
+fn the_collection_notice_comes_with_the_first_automatic_start_of_each_day() {
+    fn started(h: &mut Harness) -> Vec<bool> {
+        h.agent
+            .take_notices()
+            .into_iter()
+            .filter_map(|n| match n {
+                Notice::WorkHoursStarted {
+                    collection_notice, ..
+                } => Some(collection_notice),
+                _ => None,
+            })
+            .collect()
+    }
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 9, 0, 0).unwrap();
+    let outbox = shared_outbox();
+    let mut h = harness_at(start, outbox.clone(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.step(1);
+    assert_eq!(started(&mut h), vec![true]);
+    // Quit and relaunch the same day: tracking starts again, without the notice.
+    h.agent.stop(StopReason::Shutdown).unwrap();
+    let at = h.clock.wall();
+    drop(h);
+    let mut h = harness_at(
+        at + TimeDelta::hours(2),
+        outbox.clone(),
+        AgentConfig::new(identity()),
+    );
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert_eq!(started(&mut h), vec![false]);
+    h.agent.stop(StopReason::Shutdown).unwrap();
+    drop(h);
+    // The next work day: shown again, and again only once.
+    let thursday = Utc.with_ymd_and_hms(2026, 10, 29, 9, 30, 0).unwrap();
+    let mut h = harness_at(thursday, outbox, AgentConfig::new(identity()));
+    h.step(1);
+    assert_eq!(started(&mut h), vec![true]);
+    h.agent.stop(StopReason::Shutdown).unwrap();
+    h.step(1);
+    assert_eq!(started(&mut h), vec![false]);
 }
 
 #[test]
