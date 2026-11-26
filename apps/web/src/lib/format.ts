@@ -54,6 +54,18 @@ export function formatPrice(cents: number, currency = 'USD', locale: string = cu
 }
 
 /** "340 KB", "1.2 MB" */
+/** "Lisbon, Portugal" from a city and ISO country code, country named in the reader's language. */
+export function formatPlace(p: { city: string | null; country_code: string | null } | null | undefined, locale: string = currentLocale()): string {
+  if (!p?.country_code) return '—';
+  let country = p.country_code;
+  try {
+    country = new Intl.DisplayNames([locale], { type: 'region' }).of(p.country_code) ?? p.country_code;
+  } catch {
+    // Unknown code: show it as is.
+  }
+  return p.city ? `${p.city}, ${country}` : country;
+}
+
 export function formatBytes(n: number): string {
   return n < 1024 * 1024 ? `${formatNumber(Math.max(1, Math.round(n / 1024)), 0)} KB` : `${formatNumber(n / 1024 / 1024, 1)} MB`;
 }

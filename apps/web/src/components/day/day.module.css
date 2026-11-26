@@ -236,6 +236,10 @@
   font-size: var(--text-xs);
   color: var(--text-3);
 }
+.sessionPlaceChanged {
+  color: var(--warn-text);
+  font-weight: var(--weight-semibold);
+}
 .sessionDur {
   font-family: var(--font-mono);
   text-align: right;

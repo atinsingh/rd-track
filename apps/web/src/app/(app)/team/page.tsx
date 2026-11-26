@@ -15,7 +15,7 @@ import { ActionError, Empty, ErrorState, Loading } from '@/components/ui/DataSta
 import { InlineSelect, Segmented, inputClass } from '@/components/ui/Field';
 import { Banner, Card, PageHeader, TableBox, numClass, tableClass } from '@/components/ui/Layout';
 import { rd } from '@/lib/api';
-import { byName, durationOrDash, formatDuration, formatPercent, percentOrDash } from '@/lib/format';
+import { byName, durationOrDash, formatDuration, formatPercent, formatPlace, percentOrDash } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { addDays, daysRange, formatDayLabel, formatDayMonth, startOfWeek, todayInTz } from '@/lib/time';
 import { limitsSummary, overtimeText, timesheetsApi } from '@/lib/timesheets';
@@ -154,6 +154,7 @@ function MembersTable({
   const rows: MemberRow[] = [...report.members].sort(byName);
   const showActivity = report.visibility.activity;
   const showShots = report.visibility.screenshots;
+  const showLocation = rows.some((m) => m.location || m.usual_location);
   if (rows.length === 0) return <Empty title={t('mgr.team.noMembers')} />;
   return (
     <TableBox label={t('mgr.team.membersLabel')}>
@@ -218,6 +219,7 @@ function MembersTable({
                 <th scope="col">{t('mgr.col.timesheet')}</th>
               </>
             ) : null}
+            {showLocation ? <th scope="col">{t('mgr.col.location')}</th> : null}
             <th scope="col">{t('mgr.col.notes')}</th>
           </tr>
         </thead>
@@ -275,6 +277,14 @@ function MembersTable({
                 </td>
               ) : null}
               {overtime ? <OvertimeCells row={overtime.members.find((o) => o.user_id === m.user_id)} member={m} teamId={report.team.id} week={week} /> : null}
+              {showLocation ? (
+                <td
+                  className={m.location_changes > 0 ? s.warn : undefined}
+                  title={t('mgr.col.locationHint', { usual: formatPlace(m.usual_location), n: m.location_changes })}
+                >
+                  {formatPlace(m.location)}
+                </td>
+              ) : null}
               <td className="small secondary">{rowNotes(m) || '—'}</td>
             </tr>
           ))}

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import type { SessionDTO } from '@rd/contracts';
 import { Card } from '@/components/ui/Layout';
 import { Empty } from '@/components/ui/DataState';
-import { formatDuration } from '@/lib/format';
+import { formatDuration, formatPlace } from '@/lib/format';
 import { idleNotes } from '@/lib/idle';
 import { formatTime } from '@/lib/time';
 import { t } from '@/lib/i18n';
@@ -42,6 +42,14 @@ export function SessionsList({ sessions, tz, action }: { sessions: readonly Sess
                     {n}
                   </span>
                 ))}
+                {x.ip ? (
+                  <span className={x.location_changed ? `${s.sessionNote} ${s.sessionPlaceChanged}` : s.sessionNote} title={t('day.location.title')}>
+                    {x.country_code ? formatPlace(x) : null}
+                    {x.country_code ? ' · ' : null}
+                    {x.ip}
+                    {x.location_changed ? ` · ${t('day.location.changed')}` : null}
+                  </span>
+                ) : null}
               </span>
               <span className={s.sessionDur}>{formatDuration(x.tracked_seconds)}</span>
             </li>

@@ -6,6 +6,7 @@ const base: SessionDTO = {
   id: 's', user_id: 'u', device_id: 'd', project_id: 'p', project_name: 'Client A', task_id: null, task_name: null,
   state: 'stopped', source: 'agent', corrected: false, started_at: '2026-10-26T09:00:00Z', ended_at: '2026-10-26T12:00:00Z',
   tracked_seconds: 9000, active_seconds: 8000, idle_seconds: 1000, paused_seconds: 0, idle_adjustments: [],
+  ip: null, city: null, region: null, country_code: null, location_changed: false,
 };
 const adj = (over: Partial<IdleAdjustmentDTO>): IdleAdjustmentDTO => ({
   id: 'a', idle_started_at: '2026-10-26T10:12:00Z', idle_ended_at: '2026-10-26T10:30:00Z', seconds: 1080,
