@@ -175,9 +175,11 @@
   min-width: 0;
 }
 .fieldLabel {
+  font-family: var(--font-ui);
   font-weight: var(--weight-semibold);
 }
 .fieldHint {
+  font-family: var(--font-ui);
   font-size: var(--text-xs);
   color: var(--text-3);
 }
