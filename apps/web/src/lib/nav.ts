@@ -110,7 +110,7 @@ export interface NavItem {
   /** Extra words the ⌘K palette matches on. */
   keywords?: string;
 }
-export type NavGroupKey = 'me' | 'team' | 'money' | 'admin' | 'settings';
+export type NavGroupKey = 'team' | 'me' | 'money' | 'admin' | 'time' | 'settings';
 export interface NavGroup {
   key: NavGroupKey;
   label: string;
@@ -120,8 +120,21 @@ export interface NavGroup {
 /** As written below: labels are catalogue keys, translated when the menu is built (G27). */
 type NavGroupDef = Omit<NavGroup, 'label' | 'items'> & { label: MessageKey; items: (Omit<NavItem, 'label'> & { label: MessageKey })[] };
 
-/** Five groups (Stage 4 IA): your own pages, the people you manage, money, organisation admin, settings. */
+/**
+ * Six groups: the people you can see first (it's what admins and managers open the app for), then your
+ * own pages, money, organisation admin, time rules and settings.
+ */
 const GROUPS: NavGroupDef[] = [
+  {
+    key: 'team',
+    label: 'nav.group.team',
+    items: [
+      { href: '/team', label: 'nav.team', capability: 'team', keywords: 'people reports' },
+      { href: '/approvals', label: 'nav.approvals', capability: 'approvals', badge: 'approvals', keywords: 'inbox review corrections timesheets time off' },
+      { href: '/team/attendance', label: 'nav.attendance', capability: 'teamSchedule', keywords: 'leave late absent' },
+      { href: '/projects', label: 'nav.projects', capability: 'projects', keywords: 'budget report' },
+    ],
+  },
   {
     key: 'me',
     label: 'nav.group.me',
@@ -136,16 +149,6 @@ const GROUPS: NavGroupDef[] = [
       { href: '/me/privacy', label: 'nav.privacy', capability: 'me', keywords: 'privacy data deletion' },
       { href: '/me/settings', label: 'nav.settings', capability: 'me', keywords: 'notifications email preferences account' },
       { href: '/exports', label: 'nav.exports', capability: 'exports', keywords: 'csv download payroll' },
-    ],
-  },
-  {
-    key: 'team',
-    label: 'nav.group.team',
-    items: [
-      { href: '/team', label: 'nav.team', capability: 'team', keywords: 'people reports' },
-      { href: '/approvals', label: 'nav.approvals', capability: 'approvals', badge: 'approvals', keywords: 'inbox review corrections timesheets time off' },
-      { href: '/team/attendance', label: 'nav.attendance', capability: 'teamSchedule', keywords: 'leave late absent' },
-      { href: '/projects', label: 'nav.projects', capability: 'projects', keywords: 'budget report' },
     ],
   },
   {
@@ -168,11 +171,16 @@ const GROUPS: NavGroupDef[] = [
       { href: '/admin/devices', label: 'nav.devices', capability: 'admin', keywords: 'agent enrol computers' },
       { href: '/admin/policies', label: 'nav.policies', capability: 'admin', keywords: 'idle screenshots tracking settings' },
       { href: '/admin/apps', label: 'nav.workApps', capability: 'admin', keywords: 'categories' },
+    ],
+  },
+  {
+    key: 'time',
+    label: 'nav.group.time',
+    items: [
       { href: '/admin/schedules', label: 'nav.schedules', capability: 'adminSchedules', keywords: 'shifts hours' },
       { href: '/admin/holidays', label: 'nav.holidays', capability: 'adminHolidays' },
       { href: '/admin/time-off', label: 'nav.timeOff', capability: 'adminTimeOff', keywords: 'leave accrual' },
       { href: '/admin/work-limits', label: 'nav.workLimits', capability: 'work_limits', keywords: 'overtime daily weekly timesheet deadline reminder due' },
-      { href: '/admin/requests', label: 'nav.dataRequests', capability: 'admin', keywords: 'privacy deletion erasure erase' },
     ],
   },
   {
@@ -185,6 +193,7 @@ const GROUPS: NavGroupDef[] = [
       { href: '/admin/sso', label: 'nav.sso', capability: 'admin', keywords: 'sso oidc saml okta entra azure google scim directory provisioning' },
       { href: '/admin/support', label: 'nav.support', capability: 'admin', keywords: 'rounddigital help grant operator' },
       { href: '/admin/developers', label: 'nav.developers', capability: 'developers', keywords: 'api tokens webhooks integrations rest' },
+      { href: '/admin/requests', label: 'nav.dataRequests', capability: 'admin', keywords: 'privacy deletion erasure erase' },
       { href: '/audit', label: 'nav.audit', capability: 'audit', keywords: 'history security' },
     ],
   },
@@ -195,6 +204,14 @@ export function navFor(a: Access): NavGroup[] {
   return GROUPS.map((g) => ({ ...g, label: t(g.label), items: g.items.filter((i) => can(a, i.capability)).map((i) => ({ ...i, label: t(i.label) })) })).filter(
     (g) => g.items.length > 0,
   );
+}
+
+/**
+ * Groups folded until the person opens them: rarely used ones, and for people whose home is Team,
+ * their own pages and money too, so the sidebar starts short.
+ */
+export function defaultCollapsed(a: Access): NavGroupKey[] {
+  return can(a, 'team') ? ['me', 'money', 'time', 'settings'] : ['time', 'settings'];
 }
 
 /** The group holding the current page, which always stays open. */
@@ -246,16 +263,17 @@ export interface Home {
 }
 
 /**
- * The homes this person can switch between, most specific first: the first one is where
+ * The homes this person can switch between, most used first: the first one is where
  * "/" lands unless they picked another. My day is offered to anyone who tracks, and is
  * the fallback for everyone else.
  */
 export function homesFor(a: Access): Home[] {
   const homes: Home[] = [];
+  // Admins and managers open the app to see their people: Team (today) comes first.
+  if (can(a, 'team')) homes.push({ href: '/team', label: t('nav.teamToday') });
   if (a.isAdmin) homes.push({ href: '/admin', label: t('nav.setup') });
   if (can(a, 'finance')) homes.push({ href: '/money', label: t('nav.periodClose') });
   if (a.isAuditor) homes.push({ href: '/audit', label: t('nav.audit') });
-  if (a.managesTeams) homes.push({ href: '/team', label: t('nav.teamToday') });
   if (a.tracks || homes.length === 0) homes.push({ href: '/me', label: t('nav.myDay') });
   return homes;
 }

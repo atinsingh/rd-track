@@ -79,3 +79,69 @@ a.attItem:hover {
 .membersTable td:first-child {
   white-space: nowrap;
 }
+
+/* ───── Right-now status: a shape and a word, never colour alone ───── */
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+.tracking {
+  background: var(--series-1);
+}
+.paused {
+  background: var(--hatch-paused);
+}
+.idle {
+  border: 2px solid var(--data-2);
+}
+.offline {
+  background: var(--data-none);
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+.summaryList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+/* ───── Period picker ───── */
+.range {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+}
+.customRange {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.customRange input {
+  width: auto;
+}
+.rangeError {
+  flex-basis: 100%;
+  color: var(--danger-text);
+}

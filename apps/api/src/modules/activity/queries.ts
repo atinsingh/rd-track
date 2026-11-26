@@ -150,6 +150,30 @@ export async function appsFor(q: Queryable, orgId: string, userId: string, r: Ra
 
 // ───────────── team & project reports ─────────────
 
+/** What someone is doing right now, whatever the report's range. */
+export type LiveStatus = 'tracking' | 'paused' | 'idle' | 'offline';
+/** Not yet in the shared contract: the web reads both fields as optional. */
+export type MemberLiveRow = MemberReportRow & { status: LiveStatus; screenshot_count: number | null };
+
+// The agent heartbeats every minute and sends each minute's bucket within seconds.
+const OFFLINE_AFTER_MS = 3 * 60_000;
+// ponytail: the default idle threshold (300 s), not each person's policy value; resolve it per person if policies diverge.
+const IDLE_AFTER_MS = 5 * 60_000;
+
+function liveStatus(
+  open: { state: string; started_at: string; last_seen_at: string | null; last_bucket: string | null; last_active: string | null } | undefined,
+  activityShared: boolean,
+  now: number,
+): LiveStatus {
+  if (!open) return 'offline';
+  const seen = Math.max(open.last_seen_at ? Date.parse(open.last_seen_at) : 0, open.last_bucket ? Date.parse(open.last_bucket) + 60_000 : 0);
+  if (now - seen > OFFLINE_AFTER_MS) return 'offline';
+  if (open.state === 'paused') return 'paused';
+  // Idle comes from activity, so it is only told to viewers who may see activity.
+  if (activityShared && now - Date.parse(open.last_active ?? open.started_at) > IDLE_AFTER_MS) return 'idle';
+  return 'tracking';
+}
+
 /** One team's report, or with `teamId` null everyone active in the organization (reported as a team with the org's id). */
 export async function teamReport(
   deps: Deps,
@@ -159,7 +183,7 @@ export async function teamReport(
   r: Range,
   tz: string,
   projectId: string | null = null,
-): Promise<TeamReport> {
+): Promise<TeamReport & { members: MemberLiveRow[] }> {
   const team =
     teamId === null
       ? { id: orgId, name: 'Everyone' }
@@ -215,10 +239,32 @@ export async function teamReport(
     pausedBy.set(uid, (pausedBy.get(uid) ?? 0) + (new Date(p.to).getTime() - new Date(p.from).getTime()) / 1000);
   }
 
+  const open = await many<{ user_id: string; state: string; started_at: string; last_seen_at: string | null; last_bucket: string | null; last_active: string | null }>(
+    q,
+    `SELECT DISTINCT ON (s.user_id) s.user_id, s.state, s.started_at, d.last_seen_at,
+            (SELECT max(b.bucket_start) FROM activity_buckets b WHERE b.session_id = s.id) AS last_bucket,
+            (SELECT max(b.bucket_start) FROM activity_buckets b WHERE b.session_id = s.id AND b.active_seconds > 0) AS last_active
+     FROM work_sessions s LEFT JOIN devices d ON d.id = s.device_id
+     WHERE s.organization_id = $1 AND s.user_id = ANY($2::uuid[]) AND s.state IN ('active', 'paused') AND s.ended_at IS NULL
+     ORDER BY s.user_id, s.started_at DESC`,
+    [orgId, ids],
+  );
+  // The same screenshots the person's day page lists.
+  const shots = await many<{ user_id: string; n: number }>(
+    q,
+    `SELECT user_id, count(*)::int AS n FROM screenshots
+     WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND status IN ('stored', 'verifying')
+       AND captured_at >= $3 AND captured_at < $4
+       AND ($5::uuid IS NULL OR session_id IN (SELECT id FROM work_sessions WHERE project_id = $5))
+     GROUP BY user_id`,
+    [orgId, ids, r.from, r.to, projectId],
+  );
+  const now = deps.now().getTime();
+
   let anyActivity = false;
   let anyApps = false;
   let anyScreens = false;
-  const rows: MemberReportRow[] = [];
+  const rows: MemberLiveRow[] = [];
   for (const m of members) {
     const a = agg.find((x) => x.user_id === m.user_id);
     const vis = await visibilityFor(deps, q, orgId, m.user_id);
@@ -240,6 +286,8 @@ export async function teamReport(
       days_active: a?.days ?? 0,
       permission_missing_minutes: a?.missing ?? 0,
       notes,
+      status: liveStatus(open.find((o) => o.user_id === m.user_id), vis.activity, now),
+      screenshot_count: vis.screenshots ? (shots.find((x) => x.user_id === m.user_id)?.n ?? 0) : null,
     });
   }
 

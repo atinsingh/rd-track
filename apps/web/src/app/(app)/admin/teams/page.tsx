@@ -317,7 +317,7 @@ export default function TeamsAndProjectsPage() {
           kind="team"
           onCreate={async (name) => {
             const r = await createTeam.run(() => rd.admin.createTeam(name));
-            if (r) teams.mutate((prev) => [...(prev ?? []), r]);
+            if (r) teams.mutate((prev) => [...(prev ?? []), { ...r, member_count: 0, members: [] }]);
             return !!r;
           }}
         />

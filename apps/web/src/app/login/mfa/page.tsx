@@ -3,7 +3,8 @@
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { QRCodeSVG } from 'qrcode.react';
-import { Suspense, useState, type FormEvent } from 'react';
+import type { MfaEnrollResponse } from '@rd/contracts';
+import { Suspense, useRef, useState, type FormEvent } from 'react';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { RecoveryCodes } from '@/components/auth/RecoveryCodes';
@@ -115,7 +116,15 @@ function Verify({ next }: { next: string }) {
 
 function Enroll({ next, chosen = false }: { next: string; chosen?: boolean }) {
   const t = useT();
-  const enroll = useApi('mfa-enroll', () => rd.auth.mfaEnroll());
+  // Each enroll call makes a new secret, so the re-run of this effect (React dev) must reuse the first
+  // request: a second one would replace the secret behind the QR code already on screen.
+  const started = useRef<Promise<MfaEnrollResponse> | null>(null);
+  const enroll = useApi('mfa-enroll', () =>
+    (started.current ??= rd.auth.mfaEnroll().catch((e: unknown) => {
+      started.current = null;
+      throw e;
+    })),
+  );
   const action = useAction();
   const [codes, setCodes] = useState<string[] | null>(null);
   const confirm = async (code: string) => {

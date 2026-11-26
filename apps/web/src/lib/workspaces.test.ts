@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Me } from '@rd/contracts';
-import { accessFor, homeFor, homesFor, navFor } from './nav';
+import { accessFor, defaultCollapsed, homeFor, homesFor, navFor } from './nav';
 import { invoiceState, setupProgress, totalsByCurrency, weekDelta } from './workspaces';
 
 const me = (role: Me['user']['org_role'], opts: { tracks?: boolean; teams?: string[]; entitlements?: Me['entitlements'] } = {}): Me => ({
@@ -14,10 +14,11 @@ const me = (role: Me['user']['org_role'], opts: { tracks?: boolean; teams?: stri
 const homes = (m: Me) => homesFor(accessFor(m)).map((h) => h.href);
 
 describe('role homes', () => {
-  it('lands each role on its own home, with My day for anyone who tracks', () => {
+  it('lands each role on its own home, Team first for admins and managers, with My day for anyone who tracks', () => {
     expect(homes(me('employee'))).toEqual(['/me']);
     expect(homes(me('employee', { teams: ['t'] }))).toEqual(['/team', '/me']);
-    expect(homes(me('org_admin', { tracks: false }))).toEqual(['/admin', '/money']);
+    expect(homes(me('org_admin', { tracks: false }))).toEqual(['/team', '/admin', '/money']);
+    expect(homes(me('org_admin'))).toEqual(['/team', '/admin', '/money', '/me']);
     expect(homes(me('finance', { tracks: false }))).toEqual(['/money']);
     expect(homes(me('auditor', { tracks: false }))).toEqual(['/audit']);
     // Someone with nothing else still has a home.
@@ -26,9 +27,14 @@ describe('role homes', () => {
 
   it('remembers a chosen home only while it is still theirs', () => {
     const a = accessFor(me('org_admin', { teams: ['t'] }));
-    expect(homeFor(a, null)).toBe('/admin');
-    expect(homeFor(a, '/team')).toBe('/team');
-    expect(homeFor(a, '/audit')).toBe('/admin');
+    expect(homeFor(a, null)).toBe('/team');
+    expect(homeFor(a, '/admin')).toBe('/admin');
+    expect(homeFor(a, '/audit')).toBe('/team');
+  });
+
+  it('starts the sidebar short for people whose home is Team', () => {
+    expect(defaultCollapsed(accessFor(me('org_admin')))).toEqual(['me', 'money', 'time', 'settings']);
+    expect(defaultCollapsed(accessFor(me('employee')))).toEqual(['time', 'settings']);
   });
 
   it('gives finance Money and nothing admin', () => {

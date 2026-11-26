@@ -51,9 +51,10 @@ describe('navigation by role', () => {
     expect(groups.map((g) => g.label)).toEqual(['Me', 'Settings']);
     expect(groups[1]!.items.map((i) => i.href)).toEqual(['/audit']);
   });
-  it('groups an admin\u2019s pages into Me, Team, Money, Admin and Settings', () => {
+  it('groups an admin\u2019s pages into Team, Me, Money, Admin and Settings, Team first', () => {
     const groups = navFor(accessFor({ ...me({ org_role: 'org_admin' }), entitlements: ['budgets_invoicing', 'webhooks'] }));
-    expect(groups.map((g) => g.key)).toEqual(['me', 'team', 'money', 'admin', 'settings']);
+    expect(groups.map((g) => g.key)).toEqual(['team', 'me', 'money', 'admin', 'settings']);
+    expect(groupOf(groups, '/admin/requests')).toBe('settings');
     expect(groupOf(groups, '/admin/billing')).toBe('settings');
     expect(groupOf(groups, '/admin/invoices')).toBe('money');
     expect(groupOf(groups, null)).toBeNull();

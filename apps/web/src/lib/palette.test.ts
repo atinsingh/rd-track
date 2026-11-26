@@ -31,13 +31,15 @@ describe('command palette', () => {
     expect(items.find((i) => i.kind === 'project')?.href).toBe('/projects?project=j1');
   });
   it('shows the pages when nothing is typed', () => {
-    expect(labels('')[0]).toBe('My day');
+    // Pages in menu order: the people you can see come first.
+    expect(labels('')[0]).toBe('Team');
     expect(searchPalette(items, '  ').every((i) => i.kind === 'page')).toBe(true);
   });
   it('ranks label starts above word starts and keywords', () => {
     expect(labels('in')[0]).toBe('Insights');
     // "timeline" is a keyword of My day, so it comes after a label match.
-    expect(labels('time').slice(0, 2)).toEqual(['My time', 'My day']);
+    expect(labels('time')[0]).toBe('My time');
+    expect(labels('time')).toContain('My day');
     expect(labels('my t')[0]).toBe('My time');
     expect(labels('sam')).toEqual(['Sam Ortiz']);
     expect(labels('ortiz')).toEqual(['Sam Ortiz']);

@@ -7,6 +7,7 @@ import { ActionError } from '@/components/ui/DataState';
 import { TextField } from '@/components/ui/Field';
 import { rd } from '@/lib/api';
 import { useT } from '@/lib/i18n';
+import { browserTimeZone } from '@/lib/time';
 import { useAction } from '@/lib/useApi';
 import { AuthFrame } from '../../login/AuthFrame';
 import s from '../../login/login.module.css';
@@ -33,7 +34,11 @@ function Verify() {
     setTried(true);
     if (!token || nameError || orgError) return;
     const r = await action.run(() => rd.auth.verifySignup({ token, display_name: name.trim(), org_name: org.trim() }));
-    if (r) router.replace('/admin/billing');
+    if (!r) return;
+    // The account starts on UTC; the founder's browser zone is the right default for them and,
+    // through them, for the people and policies they set up next. They can change it in Settings.
+    await rd.account.update({ timezone: browserTimeZone() }).catch(() => undefined);
+    router.replace('/admin/billing');
   };
 
   if (badLink) {

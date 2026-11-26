@@ -65,7 +65,6 @@
   display: block;
   align-self: flex-start;
   height: 24px;
-  width: auto;
 }
 .panel {
   display: flex;
@@ -91,7 +90,6 @@
   display: none;
   align-self: flex-start;
   height: 28px;
-  width: auto;
 }
 .form {
   display: flex;

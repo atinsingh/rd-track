@@ -11,7 +11,7 @@ import { onApprovalsChanged } from '@/lib/events';
 import { initials } from '@/lib/format';
 import { useMe } from '@/lib/me';
 import { useT } from '@/lib/i18n';
-import { HOME_KEY, activeHref, can, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
+import { HOME_KEY, activeHref, can, defaultCollapsed, groupOf, homesFor, navFor, roleLabel, type NavGroupKey } from '@/lib/nav';
 import { useApi } from '@/lib/useApi';
 import { ClosingBanner } from './ClosingBanner';
 import { CommandPalette } from './CommandPalette';
@@ -22,12 +22,14 @@ import s from './shell.module.css';
 const COLLAPSED_KEY = 'rd.nav.collapsed';
 
 /** Which groups the person folded away, remembered in this browser only. */
-function readCollapsed(): NavGroupKey[] {
+function readCollapsed(fallback: NavGroupKey[]): NavGroupKey[] {
   try {
-    const v: unknown = JSON.parse(window.localStorage.getItem(COLLAPSED_KEY) ?? '[]');
+    const saved = window.localStorage.getItem(COLLAPSED_KEY);
+    if (saved === null) return fallback;
+    const v: unknown = JSON.parse(saved);
     return Array.isArray(v) ? v.filter((x): x is NavGroupKey => typeof x === 'string') : [];
   } catch {
-    return [];
+    return fallback;
   }
 }
 function writeCollapsed(keys: NavGroupKey[]) {
@@ -52,7 +54,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const homes = homesFor(access);
   const current = activeHref(groups, pathname);
   const currentGroup = groupOf(groups, current);
-  const [collapsed, setCollapsed] = useState<NavGroupKey[]>(readCollapsed);
+  const [collapsed, setCollapsed] = useState<NavGroupKey[]>(() => readCollapsed(defaultCollapsed(access)));
   const toggleGroup = (key: NavGroupKey) => {
     const next = collapsed.includes(key) ? collapsed.filter((k) => k !== key) : [...collapsed, key];
     setCollapsed(next);

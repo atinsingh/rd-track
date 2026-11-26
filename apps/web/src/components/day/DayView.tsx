@@ -48,6 +48,11 @@ export function screenshotPolicySummary(policy: MyPolicyResponse | undefined): {
   return { enabled: lines.length > 0, text: lines.join(' — ') || undefined };
 }
 
+/** Team overview links open a day at its screenshots (…#screenshots); the section mounts once the day has loaded. */
+const scrollIfTarget = (el: HTMLElement | null) => {
+  if (el && window.location.hash === `#${el.id}`) el.scrollIntoView();
+};
+
 /**
  * One person's day — used for "My day" and, with `userId`, for a team member.
  * Managers see exactly the same components with the same numbers, minus what policy
@@ -144,7 +149,8 @@ export function DayView({
       </div>
 
       {showShots ? (
-        shots.error ? (
+        <div id="screenshots" ref={scrollIfTarget}>
+        {shots.error ? (
           <Card title={t('day.screenshots')}>
             <ErrorState error={shots.error} onRetry={shots.reload} />
           </Card>
@@ -165,7 +171,8 @@ export function DayView({
           <Card title={t('day.screenshots')}>
             <Loading />
           </Card>
-        )
+        )}
+        </div>
       ) : null}
     </>
   );
