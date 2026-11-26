@@ -13,7 +13,7 @@
 use std::collections::{HashMap, HashSet};
 
 use base64::Engine as _;
-use chrono::{DateTime, Datelike, NaiveTime, TimeDelta, Utc, Weekday};
+use chrono::{DateTime, Datelike, NaiveDate, NaiveTime, TimeDelta, Utc, Weekday};
 use chrono_tz::Tz;
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
@@ -96,6 +96,21 @@ impl Default for IdleSettings {
             threshold_seconds: 300,
             prompt_on_return: true,
         }
+    }
+}
+
+/// `pause.*` settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PauseSettings {
+    /// `pause.max_minutes` (1–240, default 15): a pause by the employee ends by itself
+    /// after this long and the session resumes (the pause is still reported).
+    pub max_minutes: u32,
+}
+
+impl Default for PauseSettings {
+    fn default() -> Self {
+        Self { max_minutes: 15 }
     }
 }
 
@@ -330,6 +345,20 @@ impl WorkWindow {
         self.days[wd.num_days_from_monday() as usize]
     }
 
+    /// The local date the window containing `now` opened on (the day before for the
+    /// early part of an overnight window); `None` outside the window.
+    pub fn opened_on(&self, now: DateTime<Utc>) -> Option<NaiveDate> {
+        if !self.contains(now) {
+            return None;
+        }
+        let local = now.with_timezone(&self.tz);
+        if self.start > self.end && local.time() < self.end {
+            local.date_naive().pred_opt()
+        } else {
+            Some(local.date_naive())
+        }
+    }
+
     /// `true` if `now` is inside the window.
     pub fn contains(&self, now: DateTime<Utc>) -> bool {
         let local = now.with_timezone(&self.tz);
@@ -354,6 +383,8 @@ pub struct PolicySettings {
     pub session: SessionSettings,
     /// `idle.*`
     pub idle: IdleSettings,
+    /// `pause.*`
+    pub pause: PauseSettings,
     /// `apps.*`
     pub apps: AppsSettings,
     /// `screenshots.*`
@@ -372,6 +403,7 @@ impl PolicySettings {
     /// Clamps numeric fields to their documented ranges and validates `work_hours`.
     pub fn normalized(mut self) -> Result<Self, PolicyError> {
         self.idle.threshold_seconds = self.idle.threshold_seconds.clamp(60, 1800);
+        self.pause.max_minutes = self.pause.max_minutes.clamp(1, 240);
         let s = &mut self.screenshots;
         s.interval_minutes = s.interval_minutes.clamp(10, 60);
         s.max_width_px = s.max_width_px.clamp(640, 1920);
@@ -398,6 +430,11 @@ impl PolicySettings {
             // A window that fails to parse never got past `normalized`; be safe anyway.
             Some(w) => w.parse().map(|w| w.contains(now)).unwrap_or(false),
         }
+    }
+
+    /// How long an employee's pause may last before the session resumes by itself.
+    pub fn max_pause(&self) -> TimeDelta {
+        TimeDelta::minutes(i64::from(self.pause.max_minutes))
     }
 
     /// Screenshot interval as a duration.
@@ -758,6 +795,14 @@ pub(crate) mod tests {
         assert!(d.settings.apps.capture_app_name);
         assert!(d.settings.work_hours.is_none());
         assert_eq!(d.settings.retention, RetentionSettings::default());
+        assert_eq!(
+            d.settings.pause.max_minutes, 15,
+            "older documents: default cap"
+        );
+        let d = pinned()
+            .verify(&doc(None, 2, json!({"pause": {"max_minutes": 9999}})))
+            .unwrap();
+        assert_eq!(d.settings.pause.max_minutes, 240);
     }
 
     #[test]
@@ -946,6 +991,20 @@ pub(crate) mod tests {
         assert!(night.contains(Utc.with_ymd_and_hms(2026, 10, 31, 5, 59, 0).unwrap()));
         assert!(!night.contains(Utc.with_ymd_and_hms(2026, 10, 31, 22, 0, 0).unwrap()));
         assert!(!night.contains(Utc.with_ymd_and_hms(2026, 10, 30, 21, 0, 0).unwrap()));
+        // Both halves of the night belong to the Friday it opened on.
+        let fri = NaiveDate::from_ymd_opt(2026, 10, 30);
+        assert_eq!(
+            night.opened_on(Utc.with_ymd_and_hms(2026, 10, 30, 23, 0, 0).unwrap()),
+            fri
+        );
+        assert_eq!(
+            night.opened_on(Utc.with_ymd_and_hms(2026, 10, 31, 5, 59, 0).unwrap()),
+            fri
+        );
+        assert_eq!(
+            night.opened_on(Utc.with_ymd_and_hms(2026, 10, 31, 22, 0, 0).unwrap()),
+            None
+        );
 
         let all_day = WorkHours {
             timezone: "UTC".into(),

@@ -14,6 +14,7 @@ use rd_agent_core::reminders::{
 };
 use rd_agent_core::runtime::{
     IdlePrompt, LiveStatus, Notice, PolicyPreview, ReminderPrompt, ReminderStatus,
+    ScreenshotProblem,
 };
 use serde::Serialize;
 
@@ -657,6 +658,8 @@ pub struct BannerContext<'a> {
     pub macos: bool,
     /// An update is ready to install.
     pub update: Option<&'a str>,
+    /// macOS runs this copy from a translocated (read-only, temporary) location.
+    pub translocated: bool,
     /// The language to write in.
     pub lang: Lang,
 }
@@ -674,11 +677,21 @@ fn permission_banner(name: &str, text: &str, ctx: &BannerContext<'_>) -> Banner 
     }
 }
 
+/// `true` when macOS runs the app from an App Translocation mount (a quarantined app
+/// opened in place, e.g. from Downloads): a random, read-only path that changes on every
+/// launch, so the Screen Recording grant and the login item cannot stick to it.
+pub fn is_translocated(exe: &std::path::Path) -> bool {
+    exe.to_string_lossy().contains("/AppTranslocation/")
+}
+
 /// Banners for the popover, most important first.
 pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner> {
     let m = ctx.lang.messages();
     let mut out = Vec::new();
     let paused = TrayState::of(live) == TrayState::Paused;
+    if ctx.translocated {
+        out.push(Banner::new("translocated", "warn", m.translocated).sticky());
+    }
     if let Some(l) = live {
         let unavailable = l
             .agent
@@ -712,6 +725,21 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
                 .is_some_and(|p| p.settings.screenshots.enabled);
         if screenshots_relevant && l.permissions.screen_recording == PermissionStatus::Denied {
             out.push(permission_banner("screen_recording", m.perm_screen, ctx));
+        } else if screenshots_relevant {
+            // The permission looked fine, yet the last capture failed.
+            match &l.screenshot_problem {
+                Some(ScreenshotProblem::PermissionMissing) => out.push(permission_banner(
+                    "screen_recording",
+                    m.screenshot_permission,
+                    ctx,
+                )),
+                Some(ScreenshotProblem::Failed { error }) => out.push(Banner::new(
+                    "screenshot-failed",
+                    "warn",
+                    fill(m.screenshot_failed, &[("error", error)]),
+                )),
+                None => {}
+            }
         }
         if l.permissions.input_monitoring == PermissionStatus::Denied {
             out.push(permission_banner("input_monitoring", m.perm_input, ctx));
@@ -729,10 +757,22 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
                 m.browser_ext_missing,
             ));
         }
-        if l.session.as_ref().and_then(|s| s.paused_reason)
-            == Some(rd_agent_core::events::PauseReason::WorkHours)
-        {
-            out.push(Banner::new("work-hours", "info", m.work_hours));
+        match l.session.as_ref().and_then(|s| s.paused_reason) {
+            Some(rd_agent_core::events::PauseReason::WorkHours) => {
+                out.push(Banner::new("work-hours", "info", m.work_hours));
+            }
+            Some(rd_agent_core::events::PauseReason::User) => {
+                let minutes = l.settings.pause.max_minutes.to_string();
+                out.push(
+                    Banner::new(
+                        "pause-cap",
+                        "info",
+                        fill(m.pause_cap, &[("minutes", &minutes)]),
+                    )
+                    .sticky(),
+                );
+            }
+            _ => {}
         }
     }
     if ctx.collection_changed {
@@ -768,6 +808,15 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
             .detail(m.limit_detail)
             .acknowledge(m.got_it),
             Notice::LicenseRestored => Banner::new(format!("n{id}"), "info", m.license_restored),
+            Notice::WorkHoursStarted { .. } => {
+                Banner::new(format!("n{id}"), "info", m.work_hours_started)
+            }
+            Notice::WorkHoursEnded => Banner::new(format!("n{id}"), "info", m.work_hours_ended),
+            Notice::PauseEnded { max_minutes } => Banner::new(
+                format!("n{id}"),
+                "info",
+                fill(m.pause_ended, &[("minutes", &max_minutes.to_string())]),
+            ),
             Notice::Recovered { resumed: true, .. } => {
                 Banner::new(format!("n{id}"), "info", m.recovered_resumed)
             }
@@ -904,6 +953,7 @@ mod tests {
             reminder: None,
             browser_extensions: Vec::new(),
             reminders: ReminderStatus::default(),
+            screenshot_problem: None,
         }
     }
 
@@ -1167,6 +1217,65 @@ mod tests {
         let b = banners(Some(&l), &BannerContext::default());
         assert_eq!(b[0].id, "license-grace");
         assert!(b[0].text.contains("31 Oct 2026"));
+    }
+
+    #[test]
+    fn translocated_paths_are_recognised() {
+        use std::path::Path;
+        assert!(is_translocated(Path::new(
+            "/private/var/folders/x1/T/AppTranslocation/0C1D2E3F/d/RoundDigital Track.app/Contents/MacOS/rd-agent-desktop"
+        )));
+        assert!(!is_translocated(Path::new(
+            "/Applications/RoundDigital Track.app/Contents/MacOS/rd-agent-desktop"
+        )));
+    }
+
+    #[test]
+    fn banners_for_capture_failures_translocation_and_pauses() {
+        let mut l = live();
+        l.settings.screenshots.enabled = true;
+        l.permissions.screen_recording = PermissionStatus::Granted;
+        l.screenshot_problem = Some(ScreenshotProblem::PermissionMissing);
+        let ctx = BannerContext {
+            translocated: true,
+            macos: true,
+            ..Default::default()
+        };
+        let b = banners(Some(&l), &ctx);
+        let ids: Vec<_> = b.iter().map(|b| b.id.as_str()).collect();
+        assert_eq!(ids, ["translocated", "perm:screen_recording"]);
+        assert!(!b[0].dismissible);
+        assert!(b[0].text.contains("Applications"));
+        assert!(b[1].text.contains("couldn’t be taken"));
+
+        // Denied up front: only the usual permission banner, once.
+        l.permissions.screen_recording = PermissionStatus::Denied;
+        let b = banners(Some(&l), &BannerContext::default());
+        assert_eq!(b.len(), 1);
+        assert_eq!(b[0].text, Lang::En.messages().perm_screen);
+
+        l.permissions.screen_recording = PermissionStatus::Granted;
+        l.screenshot_problem = Some(ScreenshotProblem::Failed {
+            error: "upload failed".into(),
+        });
+        let b = banners(Some(&l), &BannerContext::default());
+        assert_eq!(b[0].id, "screenshot-failed");
+        assert!(b[0].text.ends_with("upload failed"));
+
+        let mut l = live();
+        let mut s = session("paused");
+        s.paused_reason = Some(rd_agent_core::events::PauseReason::User);
+        l.session = Some(s);
+        l.settings.pause.max_minutes = 20;
+        let notices = vec![(3, Notice::PauseEnded { max_minutes: 20 })];
+        let ctx = BannerContext {
+            notices: &notices,
+            ..Default::default()
+        };
+        let b = banners(Some(&l), &ctx);
+        assert_eq!(b[0].id, "pause-cap");
+        assert!(b[0].text.contains("after 20 min"));
+        assert_eq!(b[1].text, "Your pause reached 20 min, so tracking resumed.");
     }
 
     fn prompt(seconds: u32, project: Option<&str>) -> IdlePrompt {

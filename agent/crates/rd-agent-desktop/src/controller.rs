@@ -25,7 +25,7 @@ use serde::Serialize;
 
 use crate::link::EnrollPrefill;
 use crate::signin::{self, SignInSlot, SignInView};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::view::{
@@ -172,6 +172,8 @@ pub struct Controller {
     handle: Mutex<Option<AgentHandle>>,
     thread: Mutex<Option<JoinHandle<()>>>,
     sign_in: SignInSlot,
+    /// macOS runs this copy translocated (opened in place from Downloads).
+    translocated: bool,
 }
 
 /// The Track address built in (rounddigital.co, or `RD_DEFAULT_SERVER_URL` at build time).
@@ -228,7 +230,19 @@ impl Controller {
             handle: Mutex::new(None),
             thread: Mutex::new(None),
             sign_in: SignInSlot::default(),
+            translocated: std::env::current_exe().is_ok_and(|p| view::is_translocated(&p)),
         })
+    }
+
+    /// macOS runs this copy from a translocated location: screen capture and the login
+    /// item cannot work until the app is moved to Applications.
+    pub fn translocated(&self) -> bool {
+        self.translocated
+    }
+
+    /// Marker kept once the person turned "Open at login" off themselves.
+    pub fn open_at_login_off_marker(&self) -> std::path::PathBuf {
+        self.paths.root.join("open-at-login-off")
     }
 
     /// Lets the browsers find the extension's native messaging host (this executable).
@@ -423,6 +437,13 @@ impl Controller {
         }
         // A code from the administrator or a link connects too: stop waiting for the browser.
         self.sign_in.cancel();
+        // Connected: out of the way, into the menu bar / tray (unless it must say that
+        // the app has to be moved first).
+        if !self.translocated {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.hide();
+            }
+        }
         self.spawn_runtime(app);
         Ok(())
     }
@@ -870,6 +891,7 @@ impl Controller {
                 simulated: self.simulated,
                 macos: cfg!(target_os = "macos"),
                 update: i.update.as_deref(),
+                translocated: self.translocated,
                 lang,
             },
         );

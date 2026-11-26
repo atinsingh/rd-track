@@ -6,6 +6,9 @@
 //!   so no keystroke ever reaches this process. If the counters stay flat while the idle
 //!   timer shows input (some macOS releases may gate them behind Input Monitoring),
 //!   counts are reported unavailable — see [`super::logic::CounterHealth`].
+//!   Once counters are known to work, an idle timer that keeps saying "input just
+//!   now" while they stay flat (background or synthetic events) is ignored — see
+//!   [`super::logic::IdleTimerGuard`].
 //! * [`MacForeground`]: `NSWorkspace.sharedWorkspace.frontmostApplication` →
 //!   `bundleIdentifier` / `localizedName`. Window titles are never read.
 //! * [`DisplayCapturer`]: `CGDisplayCreateImage` of the main display, drawn into an
@@ -32,7 +35,7 @@ use rd_agent_core::platform::{
 };
 use rd_agent_core::screenshot::scaled_size;
 
-use super::logic::{counter_delta, force_opaque, CounterHealth};
+use super::logic::{counter_delta, force_opaque, CounterHealth, IdleTimerGuard};
 use super::Permission;
 
 const STATE: CGEventSourceStateID = CGEventSourceStateID::HIDSystemState;
@@ -63,6 +66,7 @@ fn read_counters() -> [u32; 9] {
 pub struct CounterInput {
     last: Option<[u32; 9]>,
     health: CounterHealth,
+    idle_timer: IdleTimerGuard,
 }
 
 impl CounterInput {
@@ -71,6 +75,7 @@ impl CounterInput {
         Self {
             last: None,
             health: CounterHealth::default(),
+            idle_timer: IdleTimerGuard::default(),
         }
     }
 }
@@ -97,10 +102,9 @@ impl InputCounter for CounterInput {
             acc.saturating_add(counter_delta(*p, *n))
         });
         let input_seen = since.is_some_and(|s| s < 1.0);
-        let available = self.health.observe(
-            input_seen,
-            u64::from(keyboard_count) + u64::from(mouse_count),
-        );
+        let total = u64::from(keyboard_count) + u64::from(mouse_count);
+        let available = self.health.observe(input_seen, total);
+        let since = self.idle_timer.filter(since, self.health.verified(), total);
         InputSample {
             keyboard_count: if available { keyboard_count } else { 0 },
             mouse_count: if available { mouse_count } else { 0 },

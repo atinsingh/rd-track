@@ -27,7 +27,7 @@ use crate::activity::{ActivityAggregator, IdleRun};
 use crate::api::{
     ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo, ScheduleToday, WorkLimits,
 };
-use crate::apps::AppTracker;
+use crate::apps::{is_own_app, AppTracker};
 use crate::browser::BrowserFamily;
 use crate::clock::{Clock, ClockReading, TickKind, TickObserver};
 use crate::events::{
@@ -159,8 +159,23 @@ pub enum Notice {
     },
     /// The device was revoked; collection stopped and local data was wiped.
     Revoked,
-    /// The session was paused automatically because the work-hours window ended.
+    /// The session was paused automatically because it was started outside the
+    /// policy's work hours (it resumes when they start).
     OutsideWorkHours,
+    /// The policy's work hours started and no session was open: one was started
+    /// automatically (no project).
+    WorkHoursStarted {
+        /// The new session.
+        session_id: Uuid,
+    },
+    /// The policy's work hours ended: the session was stopped automatically.
+    WorkHoursEnded,
+    /// The employee's pause reached the policy's `pause.max_minutes`: tracking resumed
+    /// automatically (the pause and its length were reported as usual).
+    PauseEnded {
+        /// The policy's cap, in minutes.
+        max_minutes: u32,
+    },
     /// The server refused service (`subscription_inactive` / `seat_unavailable`); the
     /// session was stopped and collection is off until the licence is restored.
     LicenseUnavailable {
@@ -498,6 +513,23 @@ pub struct LiveStatus {
     pub reminders: ReminderStatus,
     /// Browsers whose Track extension was heard from lately (website domains, Pro).
     pub browser_extensions: Vec<BrowserFamily>,
+    /// Why the last screenshot could not be taken (`None` after a success, or before
+    /// any attempt).
+    pub screenshot_problem: Option<ScreenshotProblem>,
+}
+
+/// Why a screenshot could not be taken, for the tray.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ScreenshotProblem {
+    /// The OS refused the capture (macOS Screen Recording not granted to this copy of
+    /// the app). Nothing was sent to the server.
+    PermissionMissing,
+    /// Capture, encoding or upload failed.
+    Failed {
+        /// Short description (never image data).
+        error: String,
+    },
 }
 
 /// Receives [`LiveStatus`] snapshots and [`Notice`]s from a running [`Runtime`] (the
@@ -517,6 +549,9 @@ struct SessionSnapshot {
     #[serde(with = "crate::ts")]
     started_at: DateTime<Utc>,
     paused: Option<PauseReason>,
+    /// When the employee's pause began (absent in older snapshots).
+    #[serde(default, with = "crate::ts::option")]
+    paused_at: Option<DateTime<Utc>>,
     #[serde(with = "crate::ts")]
     last_alive: DateTime<Utc>,
     last_monotonic_ms: u64,
@@ -571,6 +606,16 @@ pub struct Agent {
     data_requests: Vec<DataRequest>,
     last_limits_fetch: Option<Duration>,
     last_schedule_fetch: Option<(Duration, NaiveDate)>,
+    /// RoundDigital Track itself was in front at the last capture point.
+    own_app_in_front: bool,
+    /// When the current employee pause began (`pause.max_minutes` counts from here).
+    paused_at: Option<DateTime<Utc>>,
+    /// No automatic start in the work-hours window that opened on this day (the
+    /// employee stopped, the server rejected the session as overlapping, or the start
+    /// failed).
+    work_hours_hold: Option<NaiveDate>,
+    /// The window (by the day it opened) for which a refused start was logged.
+    work_hours_refusal_logged: Option<NaiveDate>,
 }
 
 impl std::fmt::Debug for Agent {
@@ -643,6 +688,10 @@ impl Agent {
             data_requests: Vec::new(),
             last_limits_fetch: None,
             last_schedule_fetch: None,
+            own_app_in_front: false,
+            paused_at: None,
+            work_hours_hold: None,
+            work_hours_refusal_logged: None,
             effective,
             policy,
             cfg,
@@ -999,6 +1048,13 @@ impl Agent {
             return Err(AgentError::LicenseUnavailable(block));
         }
         let now = ClockReading::now(self.clock.as_ref());
+        self.resume_checked(now)?;
+        self.write_status();
+        Ok(())
+    }
+
+    /// Resumes, then pauses again at once if this is outside the work hours.
+    fn resume_checked(&mut self, now: ClockReading) -> Result<(), AgentError> {
         self.resume_at(now)?;
         self.last_limits_fetch = None;
         if !self.effective.settings.within_work_hours(now.wall) {
@@ -1006,7 +1062,6 @@ impl Agent {
             self.notices.push(Notice::OutsideWorkHours);
         }
         self.persist_session(now);
-        self.write_status();
         Ok(())
     }
 
@@ -1041,6 +1096,11 @@ impl Agent {
         let t = self.machine.stop(reason)?;
         if let Some(ev) = t.event {
             self.emit(ev, now.wall);
+        }
+        self.paused_at = None;
+        if matches!(reason, StopReason::User | StopReason::Overlap) {
+            // Respect the stop: no automatic start again in this work-hours window.
+            self.work_hours_hold = self.work_hours_day(now.wall);
         }
         self.scheduler.clear();
         if let Err(e) = lock(&self.outbox).delete_meta(META_SESSION) {
@@ -1215,10 +1275,7 @@ impl Agent {
                 } => self.on_clock_change(gap_start, gap_end, now),
                 TickKind::First | TickKind::Normal { .. } => {
                     if !self.effective.settings.within_work_hours(now.wall) {
-                        if self.pause_with(PauseReason::WorkHours, now).is_ok() {
-                            self.notices.push(Notice::OutsideWorkHours);
-                            self.persist_session(now);
-                        }
+                        self.end_of_work_hours(now);
                     } else {
                         self.capture_until(now);
                         summary.screenshot_dispatched = self.screenshot_check(now);
@@ -1228,14 +1285,24 @@ impl Agent {
             SessionState::Paused(reason) => {
                 let buckets = self.activity.emit_completed(now.wall);
                 self.emit_buckets(buckets, now.wall);
-                if reason == PauseReason::WorkHours
-                    && self.effective.settings.within_work_hours(now.wall)
-                    && self.resume_at(now).is_ok()
-                {
-                    self.persist_session(now);
+                let within = self.effective.settings.within_work_hours(now.wall);
+                if reason == PauseReason::WorkHours {
+                    if within && self.resume_at(now).is_ok() {
+                        self.persist_session(now);
+                    }
+                } else if !within {
+                    // The work hours ended during the employee's pause.
+                    self.end_of_work_hours(now);
+                } else if self.pause_expired(now.wall) {
+                    let max_minutes = self.effective.settings.pause.max_minutes;
+                    log::info!("pause reached {max_minutes} min; resuming");
+                    if self.resume_checked(now).is_ok() {
+                        self.notices.push(Notice::PauseEnded { max_minutes });
+                    }
                 }
             }
-            _ => {}
+            SessionState::Idle | SessionState::Stopped(_) => self.work_hours_start(now),
+            SessionState::Suspended => {}
         }
         self.nudges(now);
         if self.machine.is_open() && self.ticks % 10 == 0 {
@@ -1296,8 +1363,64 @@ impl Agent {
         if let Some(ev) = t.event {
             self.emit(ev, now.wall);
         }
+        self.paused_at = (reason == PauseReason::User).then_some(now.wall);
         log::info!("session paused ({reason:?})");
         Ok(())
+    }
+
+    /// The employee's pause has lasted `pause.max_minutes` (wall time, so time asleep
+    /// counts too).
+    fn pause_expired(&self, now: DateTime<Utc>) -> bool {
+        self.paused_at
+            .is_some_and(|at| now - at >= self.effective.settings.max_pause())
+    }
+
+    /// The policy's work hours are over: the open session stops (so nothing stays open,
+    /// or counts as paused, overnight). The next window starts a new one.
+    fn end_of_work_hours(&mut self, now: ClockReading) {
+        log::info!("work hours ended; stopping the session");
+        if self.stop_at(StopReason::Policy, now).is_ok() {
+            self.notices.push(Notice::WorkHoursEnded);
+        }
+    }
+
+    /// No session is open: inside the base policy's work hours, start one by itself
+    /// (no project). Not again in the same window after the employee stopped.
+    fn work_hours_start(&mut self, now: ClockReading) {
+        let Some(day) = self.work_hours_day(now.wall) else {
+            return;
+        };
+        if self.work_hours_hold == Some(day) || self.license_block.is_some() {
+            return;
+        }
+        if self.policy.effective(None).settings.session.require_project {
+            if self.work_hours_refusal_logged != Some(day) {
+                log::info!(
+                    "work hours started, but every session needs a project: not starting by itself"
+                );
+                self.work_hours_refusal_logged = Some(day);
+            }
+            return;
+        }
+        match self.start(None, None) {
+            Ok(session_id) => {
+                log::info!("work hours started; session started automatically");
+                self.notices.push(Notice::WorkHoursStarted { session_id });
+            }
+            Err(e) => {
+                log::warn!("could not start a session for the work hours: {e}");
+                self.work_hours_hold = Some(day);
+            }
+        }
+    }
+
+    /// The day the base policy's work-hours window containing `now` opened on.
+    fn work_hours_day(&mut self, now: DateTime<Utc>) -> Option<NaiveDate> {
+        self.policy
+            .effective(None)
+            .settings
+            .work_window()
+            .and_then(|w| w.opened_on(now))
     }
 
     fn resume_at(&mut self, now: ClockReading) -> Result<(), AgentError> {
@@ -1305,6 +1428,7 @@ impl Agent {
         if let Some(ev) = t.event {
             self.emit(ev, now.wall);
         }
+        self.paused_at = None;
         self.enter_active(now);
         log::info!("session resumed");
         Ok(())
@@ -1318,8 +1442,21 @@ impl Agent {
         let since = self.last_capture.unwrap_or(now.mono);
         self.last_capture = Some(now.mono);
         let elapsed = now.mono.saturating_sub(since);
-        self.session_tracked += elapsed;
         let sample = self.input.sample();
+        let foreground = self.foreground.current();
+        self.own_app_in_front = foreground.as_ref().is_some_and(is_own_app);
+        if self.own_app_in_front {
+            // RoundDigital Track itself is in front: this time counts nowhere. The input
+            // sample is dropped, an inactive run ends there (as on a pause), and the app
+            // segment closes.
+            self.last_foreground = None;
+            let buckets = self.activity.interrupt(now.wall);
+            self.emit_buckets(buckets, now.wall);
+            let apps = self.apps.flush();
+            self.emit_apps(apps, now.wall);
+            return;
+        }
+        self.session_tracked += elapsed;
         let buckets = self.activity.record(now.wall, elapsed, sample);
         self.emit_buckets(buckets, now.wall);
         for run in self.activity.take_idle_returns() {
@@ -1331,11 +1468,7 @@ impl Agent {
         let want_domains = want_apps && s.apps.capture_domains;
         let want_fg =
             want_apps || (s.screenshots.enabled && !s.screenshots.excluded_apps.is_empty());
-        self.last_foreground = if want_fg {
-            self.foreground.current()
-        } else {
-            None
-        };
+        self.last_foreground = if want_fg { foreground } else { None };
         self.foreground
             .want_domains(want_domains.then_some(now.wall));
         if want_apps {
@@ -1442,6 +1575,10 @@ impl Agent {
             SlotDecision::Due => {
                 if !self.online {
                     log::info!("screenshot slot skipped: offline");
+                    return false;
+                }
+                if self.own_app_in_front {
+                    log::info!("screenshot slot skipped: RoundDigital Track in front");
                     return false;
                 }
                 if let Some(fg) = &self.last_foreground {
@@ -1690,6 +1827,7 @@ impl Agent {
                 SessionState::Paused(r) => Some(r),
                 _ => None,
             },
+            paused_at: self.paused_at,
             last_alive: now.wall,
             last_monotonic_ms: mono_ms(now.mono, sess.mono_origin),
             tracked_ms: u64::try_from(self.session_tracked.as_millis()).unwrap_or(u64::MAX),
@@ -1750,6 +1888,9 @@ impl Agent {
             .paused
             .map_or(SessionState::Active, SessionState::Paused);
         self.machine = SessionMachine::restore(info, state);
+        if state == SessionState::Paused(PauseReason::User) {
+            self.paused_at = Some(snap.paused_at.unwrap_or(snap.last_alive));
+        }
         self.session_tracked = Duration::from_millis(snap.tracked_ms);
         self.limits
             .session_started(snap.session_id, snap.started_at);
@@ -1861,6 +2002,8 @@ pub enum NetEvent {
     },
     /// Today's schedule was fetched (`None`: the server has no schedules).
     Schedule(Option<ScheduleToday>),
+    /// A screenshot attempt ended: `None` on success, else why it failed.
+    Screenshot(Option<ScreenshotProblem>),
 }
 
 /// Everything the tick loop can receive.
@@ -1996,6 +2139,7 @@ pub struct Runtime {
     preview: Option<Option<String>>,
     sync_status: Arc<Mutex<SyncStatus>>,
     depth: Option<(Duration, u64)>,
+    screenshot_problem: Option<ScreenshotProblem>,
 }
 
 impl Runtime {
@@ -2042,6 +2186,7 @@ impl Runtime {
                 preview: None,
                 sync_status: Arc::new(Mutex::new(SyncStatus::default())),
                 depth: None,
+                screenshot_problem: None,
             },
             handle,
         ))
@@ -2092,6 +2237,7 @@ impl Runtime {
             reminder: self.agent.reminder().cloned(),
             reminders: self.agent.reminder_status(),
             browser_extensions: self.agent.browser_extensions(),
+            screenshot_problem: self.screenshot_problem.clone(),
         }
     }
 
@@ -2143,6 +2289,15 @@ impl Runtime {
                 Notice::OutsideWorkHours => {
                     log::info!("NOTICE: outside policy work hours; capture is paused")
                 }
+                Notice::WorkHoursStarted { .. } => {
+                    log::info!("NOTICE: your work hours started; tracking started automatically")
+                }
+                Notice::WorkHoursEnded => {
+                    log::info!("NOTICE: your work hours ended; tracking stopped")
+                }
+                Notice::PauseEnded { max_minutes } => log::info!(
+                    "NOTICE: pauses last at most {max_minutes} min; tracking resumed"
+                ),
                 Notice::LicenseUnavailable { block } => log::warn!("NOTICE: {}", block.message()),
                 Notice::LicenseRestored => {
                     log::info!("NOTICE: tracking is available again")
@@ -2347,6 +2502,7 @@ impl Runtime {
                 self.agent.on_work_limits(limits, excluded)
             }
             NetEvent::Schedule(s) => self.agent.on_schedule(s),
+            NetEvent::Screenshot(p) => self.screenshot_problem = p,
             NetEvent::Revoked => {}
         }
         self.update_health();
@@ -2711,7 +2867,14 @@ impl NetWorker {
     fn screenshot(&mut self, job: &ScreenshotJob) {
         match run_job(job, &self.api, self.capturer.as_ref(), self.clock.as_ref()) {
             ScreenshotOutcome::Completed { bytes, .. } => {
-                log::info!("screenshot uploaded ({bytes} bytes)")
+                log::info!("screenshot uploaded ({bytes} bytes)");
+                self.send(NetEvent::Screenshot(None));
+            }
+            ScreenshotOutcome::PermissionMissing => {
+                log::warn!("screenshot not taken: the system refused screen capture (Screen Recording permission missing for this copy of the app)");
+                self.send(NetEvent::Screenshot(Some(
+                    ScreenshotProblem::PermissionMissing,
+                )));
             }
             ScreenshotOutcome::Refused(code) => {
                 log::info!("screenshot not authorised: {code}");
@@ -2720,7 +2883,12 @@ impl NetWorker {
                 }
             }
             ScreenshotOutcome::Cancelled => log::info!("screenshot cancelled: session left Active"),
-            ScreenshotOutcome::Failed(e) => log::warn!("screenshot failed: {e}"),
+            ScreenshotOutcome::Failed(e) => {
+                log::warn!("screenshot failed: {e}");
+                self.send(NetEvent::Screenshot(Some(ScreenshotProblem::Failed {
+                    error: e,
+                })));
+            }
         }
     }
 }

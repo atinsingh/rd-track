@@ -318,38 +318,192 @@ fn idle_threshold_from_policy_and_attribution_back_to_run_start() {
     assert!(evs.iter().all(|e| e.policy_version == 5));
 }
 
+fn work_hours_policy(h: &mut Harness, extra: Value) {
+    let mut settings = json!({"work_hours": {"timezone": "UTC", "days": [1, 2, 3, 4, 5], "start": "09:00", "end": "17:00"}});
+    if let (Some(a), Some(b)) = (settings.as_object_mut(), extra.as_object()) {
+        a.extend(b.clone());
+    }
+    h.agent.on_policy(None, &doc(None, 2, settings));
+}
+
 #[test]
-fn work_hours_pause_and_resume_automatically() {
+fn work_hours_stop_the_session_at_the_end_and_start_one_the_next_morning() {
+    // Wednesday 16:59.
     let start = Utc.with_ymd_and_hms(2026, 10, 28, 16, 59, 0).unwrap();
     let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
-    h.agent.on_policy(
-        None,
-        &doc(None, 2, json!({"work_hours": {"timezone": "UTC", "days": [], "start": "09:00", "end": "17:00"}})),
-    );
-    h.agent.start(None, None).unwrap();
+    work_hours_policy(&mut h, json!({}));
+    let first = h.agent.start(None, None).unwrap();
     h.step(120);
-    assert_eq!(
-        h.agent.state(),
-        SessionState::Paused(PauseReason::WorkHours)
-    );
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::Policy));
     assert_eq!(h.tracked_seconds(), (60, 0));
-    let paused = h.of_type("session.paused.v1");
-    assert_eq!(paused.len(), 1);
+    let stopped = h.of_type("session.stopped.v1");
+    assert_eq!(stopped.len(), 1);
     assert_eq!(
-        paused[0].occurred_at,
+        stopped[0].occurred_at,
         Utc.with_ymd_and_hms(2026, 10, 28, 17, 0, 0).unwrap()
     );
-    // Next morning.
-    h.clock.advance(Duration::from_secs(16 * 3600 - 60));
-    h.agent.tick();
-    assert_eq!(h.agent.state(), SessionState::Active);
-    h.step(10);
-    h.agent.stop(StopReason::User).unwrap();
-    assert_eq!(h.tracked_seconds(), (70, 0));
-    assert_eq!(h.of_type("session.resumed.v1").len(), 1);
     assert!(
-        h.of_type("data_gap.v1").is_empty(),
-        "paused time is not a gap"
+        h.of_type("session.paused.v1").is_empty(),
+        "nothing paused overnight"
+    );
+    assert!(h.agent.take_notices().contains(&Notice::WorkHoursEnded));
+    // Overnight: nothing starts.
+    h.clock.advance(Duration::from_secs(15 * 3600));
+    h.agent.tick();
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::Policy));
+    // Thursday 09:00: a new session starts by itself, without a project.
+    h.clock.advance(Duration::from_secs(3600 - 120));
+    h.step(120);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    let second = h.agent.session().unwrap().id;
+    assert_ne!(second, first);
+    assert_eq!(h.agent.session().unwrap().project_id, None);
+    assert_eq!(
+        h.agent.session().unwrap().started_at,
+        Utc.with_ymd_and_hms(2026, 10, 29, 9, 0, 0).unwrap()
+    );
+    assert_eq!(
+        h.agent.take_notices(),
+        vec![Notice::WorkHoursStarted { session_id: second }]
+    );
+    let started = h.of_type("session.started.v1");
+    assert_eq!(started.len(), 2);
+    assert_eq!(started[1].session_id, second);
+    assert!(h.of_type("data_gap.v1").is_empty());
+}
+
+#[test]
+fn work_hours_start_skips_days_off_respects_a_stop_and_needs_no_project() {
+    // Saturday 10:00: not a work day.
+    let start = Utc.with_ymd_and_hms(2026, 10, 31, 10, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.step(60);
+    assert_eq!(h.agent.state(), SessionState::Idle);
+    // Monday 10:00 (the agent was launched late): starts at once.
+    h.clock.advance(Duration::from_secs(2 * 24 * 3600));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    // The employee stops: it stays stopped for the rest of the day.
+    h.agent.stop(StopReason::User).unwrap();
+    h.step(3600);
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::User));
+    // Next morning it starts again.
+    h.clock.advance(Duration::from_secs(22 * 3600));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+
+    // A policy that needs a project for every session: nothing starts by itself.
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 10, 0, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({"session": {"require_project": true}}));
+    h.step(10);
+    assert_eq!(h.agent.state(), SessionState::Idle);
+
+    // No work hours: nothing starts by itself.
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    h.step(10);
+    assert_eq!(h.agent.state(), SessionState::Idle);
+}
+
+#[test]
+fn a_pause_resumes_by_itself_after_the_policy_cap_and_is_reported() {
+    let mut h = harness();
+    h.agent
+        .on_policy(None, &doc(None, 2, json!({"pause": {"max_minutes": 10}})));
+    h.agent.start(None, None).unwrap();
+    h.step(60);
+    h.agent.pause().unwrap();
+    let paused_at = h.clock.wall();
+    h.step(599);
+    assert_eq!(h.agent.state(), SessionState::Paused(PauseReason::User));
+    h.step(1);
+    assert_eq!(h.agent.state(), SessionState::Active);
+    assert!(h
+        .agent
+        .take_notices()
+        .contains(&Notice::PauseEnded { max_minutes: 10 }));
+    let paused = h.of_type("session.paused.v1");
+    let resumed = h.of_type("session.resumed.v1");
+    assert_eq!((paused.len(), resumed.len()), (1, 1));
+    assert_eq!(paused[0].occurred_at, paused_at);
+    assert_eq!(
+        resumed[0].occurred_at - paused[0].occurred_at,
+        TimeDelta::minutes(10),
+        "the server sees the whole pause"
+    );
+    h.step(30);
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.tracked_seconds(), (90, 0));
+}
+
+#[test]
+fn the_pause_cap_survives_a_restart() {
+    let outbox = shared_outbox();
+    let mut h = harness_at(t0(), outbox.clone(), AgentConfig::new(identity()));
+    h.agent.start(None, None).unwrap();
+    h.step(10);
+    h.agent.pause().unwrap();
+    h.step(600);
+    let at = h.clock.wall();
+    drop(h);
+    // Back two minutes later: 12 of the 15 minutes are used up.
+    let mut h = harness_at(
+        at + TimeDelta::seconds(120),
+        outbox,
+        AgentConfig::new(identity()),
+    );
+    assert_eq!(h.agent.state(), SessionState::Paused(PauseReason::User));
+    h.step(170);
+    assert_eq!(h.agent.state(), SessionState::Paused(PauseReason::User));
+    h.step(10);
+    assert_eq!(h.agent.state(), SessionState::Active);
+}
+
+#[test]
+fn work_hours_ending_during_a_pause_stop_the_session() {
+    let start = Utc.with_ymd_and_hms(2026, 10, 28, 16, 55, 0).unwrap();
+    let mut h = harness_at(start, shared_outbox(), AgentConfig::new(identity()));
+    work_hours_policy(&mut h, json!({}));
+    h.agent.start(None, None).unwrap();
+    h.step(60);
+    h.agent.pause().unwrap();
+    h.step(300);
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::Policy));
+}
+
+#[test]
+fn time_with_track_itself_in_front_counts_nowhere() {
+    let mut h = harness();
+    screenshot_policy(&mut h, "p1", json!({}));
+    h.agent.start(Some("p1".into()), None).unwrap();
+    h.step(30);
+    let before = h.jobs().len();
+    h.fg.set(Some("digital.round.track"));
+    h.step(3600);
+    assert_eq!(h.jobs().len(), before, "no screenshot of Track itself");
+    h.fg.set(Some("rd-agent-desktop.exe"));
+    h.step(60);
+    h.fg.set(Some("com.example.editor"));
+    h.step(20);
+    let live = h.agent.live_session().unwrap();
+    h.agent.stop(StopReason::User).unwrap();
+    assert_eq!(h.tracked_seconds(), (50, 0), "neither active nor idle");
+    assert_eq!(live.tracked_seconds, 50, "nor in the tray's timer");
+    let apps: Vec<_> = h
+        .events()
+        .into_iter()
+        .filter_map(|e| match e.body {
+            EventBody::AppUsage(a) => Some((a.app_identifier, a.duration_seconds)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        apps,
+        vec![
+            ("com.example.editor".to_owned(), 30),
+            ("com.example.editor".to_owned(), 20)
+        ]
     );
 }
 
@@ -405,7 +559,8 @@ fn screenshots_one_per_interval_never_while_paused_and_cancelled_on_stop() {
         h.jobs().iter().all(|j| !j.gate.is_open()),
         "pause closes gates"
     );
-    h.step(3600);
+    // Under the default 15-minute pause cap.
+    h.step(840);
     assert_eq!(h.jobs().len(), n, "no screenshots while paused");
 
     h.agent.resume().unwrap();
@@ -788,6 +943,78 @@ fn fast_opts() -> RunOptions {
         policy_interval: Duration::from_secs(60),
         license_retry_interval: Duration::from_secs(900),
     }
+}
+
+#[test]
+fn five_idle_minutes_reach_the_server_as_idle_from_the_gap_start() {
+    let mut h = harness();
+    h.agent.start(None, None).unwrap();
+    // 09:00:30–09:01:30 input, six minutes with none, then input again.
+    h.step(60);
+    let gap_start = h.clock.wall();
+    for i in 1..=360 {
+        h.input.idle(f64::from(i));
+        h.step(1);
+    }
+    h.input.set(InputSample {
+        keyboard_count: 1,
+        mouse_count: 1,
+        counts_available: true,
+        seconds_since_last_input: Some(0.1),
+    });
+    h.step(30);
+    h.agent.stop(StopReason::User).unwrap();
+    match h.agent.take_notices().as_slice() {
+        [Notice::IdleReturn {
+            started_at,
+            seconds,
+            ..
+        }] => assert_eq!((*started_at, *seconds), (gap_start, 360)),
+        other => panic!("expected one idle return, got {other:?}"),
+    }
+
+    // What the server receives.
+    let t = FakeTransport::new();
+    t.set_handler(|req| {
+        let v: Value = serde_json::from_slice(req.body.as_ref()?).ok()?;
+        let results: Vec<Value> = v["events"]
+            .as_array()?
+            .iter()
+            .map(|e| json!({"event_id": e["event_id"], "status": "accepted"}))
+            .collect();
+        let body = json!({"server_time": "2026-10-28T09:00:00Z", "results": results});
+        Some(Ok(HttpResponse {
+            status: 200,
+            body: serde_json::to_vec(&body).unwrap(),
+        }))
+    });
+    let api = ApiClient::new("http://server.test", t.clone()).with_credential("cred");
+    Syncer::new(StdRng::seed_from_u64(1))
+        .sync(&h.outbox, &api, &h.clock)
+        .unwrap();
+    let buckets: Vec<(String, u64, u64)> = t
+        .requests_to("/v1/ingestion/event-batches")
+        .iter()
+        .flat_map(|r| {
+            let v: Value = serde_json::from_slice(r.body.as_ref().unwrap()).unwrap();
+            v["events"].as_array().unwrap().clone()
+        })
+        .filter(|e| e["event_type"] == "activity_bucket.v1")
+        .map(|e| {
+            let p = &e["payload"];
+            (
+                p["bucket_start"].as_str().unwrap().to_owned(),
+                p["active_seconds"].as_u64().unwrap(),
+                p["idle_seconds"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    let idle: u64 = buckets.iter().map(|b| b.2).sum();
+    let active: u64 = buckets.iter().map(|b| b.1).sum();
+    assert_eq!((active, idle), (90, 360));
+    let first_idle = buckets.iter().find(|b| b.2 > 0).unwrap();
+    assert_eq!(first_idle.0, "2026-10-28T09:01:00Z");
+    assert_eq!((first_idle.1, first_idle.2), (30, 30), "idle from 09:01:30");
 }
 
 #[test]
@@ -1862,7 +2089,7 @@ fn limits_refresh_every_five_minutes_while_active_only() {
     h.step(1);
     assert_eq!(fetches(&mut h), 1, "five minutes later");
     h.agent.pause().unwrap();
-    h.step(900);
+    h.step(840);
     assert_eq!(fetches(&mut h), 0, "paused: none");
     h.agent.resume().unwrap();
     h.step(1);

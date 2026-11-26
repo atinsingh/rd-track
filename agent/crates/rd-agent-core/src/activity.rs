@@ -436,6 +436,60 @@ mod tests {
     }
 
     #[test]
+    fn five_minutes_without_input_is_idle_from_the_start_of_the_gap() {
+        // The policy default: 300 s.
+        let mut agg = ActivityAggregator::new(300);
+        let quiet = |since: u32| InputSample {
+            counts_available: true,
+            seconds_since_last_input: Some(f64::from(since)),
+            ..Default::default()
+        };
+        // 09:00:00–09:01:00 input, 09:01:00–09:07:00 nothing (the OS idle timer climbs
+        // with it), then input again for 30 s.
+        let mut out = drive(&mut agg, t(9, 0, 0), 450, |i| match i {
+            0..60 => input(1),
+            60..420 => quiet(i - 59),
+            _ => input(1),
+        });
+        let returns = agg.take_idle_returns();
+        out.extend(agg.flush_all());
+        assert_eq!(
+            sum(&out),
+            (90, 360),
+            "the whole gap is idle, not just past 5 min"
+        );
+        let idle_from = out.iter().find(|b| b.idle_seconds > 0).unwrap();
+        assert_eq!(
+            idle_from.bucket_start,
+            t(9, 1, 0),
+            "attributed back to the gap start"
+        );
+        assert_eq!(
+            out.iter().map(|b| b.idle_seconds).collect::<Vec<_>>(),
+            vec![0, 60, 60, 60, 60, 60, 60, 0]
+        );
+        assert_eq!(
+            returns,
+            vec![IdleRun {
+                started_at: t(9, 1, 0),
+                ended_at: t(9, 7, 0),
+                idle_seconds: 360
+            }]
+        );
+
+        // One second short of the threshold stays active.
+        let mut agg = ActivityAggregator::new(300);
+        let mut out = drive(&mut agg, t(9, 0, 0), 330, |i| match i {
+            0..30 => input(1),
+            30..329 => quiet(i - 29),
+            _ => input(1),
+        });
+        out.extend(agg.flush_all());
+        assert_eq!(sum(&out), (330, 0));
+        assert!(agg.take_idle_returns().is_empty());
+    }
+
+    #[test]
     fn os_reported_idle_time_is_used_when_available() {
         let mut agg = ActivityAggregator::new(120);
         // The OS says the user has been idle for 500 s already: idle immediately.

@@ -126,6 +126,8 @@ async fn start_session(
     let c = ctl.inner().clone();
     blocking(move || c.start(project_id, task_id)).await?;
     ctl.emit(&app);
+    // Tracking: out of the way, into the menu bar / tray.
+    hide_window(app);
     Ok(ctl.view())
 }
 
@@ -298,15 +300,16 @@ async fn install(app: &AppHandle, update: tauri_plugin_updater::Update) -> Resul
     app.restart();
 }
 
-/// Open at login (G10): off until the person turns it on. It only opens the app in the
-/// menu bar or tray; nothing is collected until they start a session.
+/// Open at login (G10): on by default, so the app is in the menu bar or tray when the
+/// work hours start; the person can turn it off. Collection itself still follows the
+/// policy (a session starts by itself only inside the organization's work hours).
 #[tauri::command]
 fn get_open_at_login(app: AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
 #[tauri::command]
-fn set_open_at_login(app: AppHandle, enabled: bool) -> Result<bool, String> {
+fn set_open_at_login(app: AppHandle, ctl: Ctl<'_>, enabled: bool) -> Result<bool, String> {
     let launcher = app.autolaunch();
     if enabled {
         launcher.enable()
@@ -314,7 +317,31 @@ fn set_open_at_login(app: AppHandle, enabled: bool) -> Result<bool, String> {
         launcher.disable()
     }
     .map_err(|e| e.to_string())?;
+    // Remember a "no" so the next launch does not turn it back on.
+    let marker = ctl.open_at_login_off_marker();
+    let _ = if enabled {
+        std::fs::remove_file(&marker)
+    } else {
+        std::fs::write(&marker, b"")
+    };
     launcher.is_enabled().map_err(|e| e.to_string())
+}
+
+/// Turns "Open at login" on unless the person turned it off. Skipped for development
+/// builds and for a translocated copy, whose path is temporary (the login item would
+/// point at nothing after the next launch).
+fn ensure_open_at_login(app: &AppHandle, ctl: &Controller) {
+    if cfg!(debug_assertions) || ctl.translocated() || ctl.open_at_login_off_marker().exists() {
+        return;
+    }
+    let launcher = app.autolaunch();
+    if launcher.is_enabled().unwrap_or(false) {
+        return;
+    }
+    match launcher.enable() {
+        Ok(()) => log::info!("open at login turned on"),
+        Err(e) => log::info!("could not turn on open at login: {e}"),
+    }
 }
 
 /// Quit: stop the session first (bounded final sync), then exit.
@@ -456,8 +483,13 @@ fn main() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::create(app.handle(), app.state::<Arc<Controller>>().lang())?;
             let needs_ui = ctl.boot(app.handle());
+            ensure_open_at_login(app.handle(), &ctl);
+            if ctl.translocated() {
+                log::warn!("running translocated (opened in place from Downloads): screen capture and open at login cannot work until the app is moved to Applications");
+            }
+            // Otherwise the window starts hidden: the app lives in the menu bar / tray.
             // Linux trays cannot report clicks: open the window on start there too.
-            if needs_ui || cfg!(target_os = "linux") {
+            if needs_ui || ctl.translocated() || cfg!(target_os = "linux") {
                 tray::show_centered(app.handle());
             }
             ctl.emit(app.handle());

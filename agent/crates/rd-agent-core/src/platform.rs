@@ -128,8 +128,9 @@ pub enum CaptureError {
     Failed(String),
 }
 
-/// Captures the screen. Used only by the screenshot pipeline after the server
-/// authorised an upload.
+/// Captures the screen. Used only by the screenshot pipeline, during an `Active`
+/// session with screenshots enabled; the frame is uploaded only once the server
+/// authorised it.
 pub trait ScreenCapturer: Send + Sync {
     /// Captures the primary monitor (or all monitors when `primary_monitor_only` is
     /// `false` and the platform supports it).

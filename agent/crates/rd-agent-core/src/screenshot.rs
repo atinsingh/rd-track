@@ -7,10 +7,12 @@
 //! tolerance; a slot that passed while paused, suspended or stopped is consumed as
 //! *missed*, never caught up. Hence at most one capture per window and none while paused.
 //!
-//! **Pipeline.** request upload intent → capture → downscale to `max_width_px` → JPEG
-//! encode → `PUT` to the presigned URL → `complete`. The capture happens only after the
-//! server authorised it, so nothing is ever captured offline, and a [`CaptureGate`]
-//! closed by stop/pause aborts any job that has not captured yet.
+//! **Pipeline.** capture → downscale to `max_width_px` → request upload intent → blur
+//! (if asked) → JPEG encode → `PUT` to the presigned URL → `complete`. Jobs are only
+//! dispatched while online. Capturing first means a capture the OS refuses (Screen
+//! Recording missing, or a translocated app copy on macOS) never leaves an upload
+//! intent pending on the server; the frame stays in memory and is dropped if the intent
+//! is refused. A [`CaptureGate`] closed by stop/pause aborts the job at every step.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -25,7 +27,7 @@ use crate::api::{
     UploadIntentResponse,
 };
 use crate::clock::Clock;
-use crate::platform::{RawFrame, ScreenCapturer};
+use crate::platform::{CaptureError, RawFrame, ScreenCapturer};
 
 /// JPEG quality used for screenshots.
 pub const JPEG_QUALITY: u8 = 70;
@@ -200,6 +202,9 @@ pub enum ScreenshotOutcome {
     Refused(String),
     /// The session left `Active` before capture; nothing was captured.
     Cancelled,
+    /// The OS refused the capture (Screen Recording not granted to this app copy).
+    /// Nothing was sent to the server.
+    PermissionMissing,
     /// Capture, encode, upload or complete failed.
     Failed(String),
 }
@@ -239,6 +244,22 @@ pub fn run_job(
     if !job.gate.is_open() {
         return ScreenshotOutcome::Cancelled;
     }
+    // Capture first: a capture the OS refuses (no Screen Recording permission, or an
+    // app copy macOS runs translocated) must not leave an upload intent pending.
+    let frame = match capturer.capture_scaled(job.primary_monitor_only, job.max_width) {
+        Ok(f) => f,
+        Err(CaptureError::PermissionMissing) => return ScreenshotOutcome::PermissionMissing,
+        Err(e) => return ScreenshotOutcome::Failed(e.to_string()),
+    };
+    let captured_at = clock.wall();
+    if !job.gate.is_open() {
+        // Stopped while capturing: discard the frame.
+        return ScreenshotOutcome::Cancelled;
+    }
+    let frame = match downscale(&frame, job.max_width) {
+        Ok(f) => f,
+        Err(e) => return ScreenshotOutcome::Failed(e),
+    };
     let intent = match api.create_intent(job.session_id) {
         Ok(i) => i,
         Err(e) => {
@@ -256,19 +277,6 @@ pub fn run_job(
     if !job.gate.is_open() {
         return ScreenshotOutcome::Cancelled;
     }
-    let frame = match capturer.capture_scaled(job.primary_monitor_only, job.max_width) {
-        Ok(f) => f,
-        Err(e) => return ScreenshotOutcome::Failed(e.to_string()),
-    };
-    let captured_at = clock.wall();
-    if !job.gate.is_open() {
-        // Stopped while capturing: discard the frame.
-        return ScreenshotOutcome::Cancelled;
-    }
-    let frame = match downscale(&frame, job.max_width) {
-        Ok(f) => f,
-        Err(e) => return ScreenshotOutcome::Failed(e),
-    };
     // Blurred here, before encoding: the sharp image never leaves this computer.
     let blurred = job.blur || intent.blur;
     let frame = if blurred {
@@ -730,6 +738,7 @@ mod tests {
             run_job(&job(&gates), &api, cap.as_ref(), &clock),
             ScreenshotOutcome::Refused("session_not_active".into())
         );
+        assert!(api.uploaded.borrow().is_empty(), "refused: frame dropped");
 
         let j = job(&gates);
         gates.close_all();
@@ -749,7 +758,27 @@ mod tests {
             run_job(&job(&gates), &api, cap.as_ref(), &clock),
             ScreenshotOutcome::Cancelled
         );
-        assert_eq!(cap.count(), 0);
+        // Captured for the refused intent and here, never for the closed gate.
+        assert_eq!(cap.count(), 2);
+        assert!(api.uploaded.borrow().is_empty(), "stopped: frame dropped");
+    }
+
+    #[test]
+    fn refused_capture_never_creates_an_upload_intent() {
+        struct Denied;
+        impl ScreenCapturer for Denied {
+            fn capture(&self, _p: bool) -> Result<RawFrame, CaptureError> {
+                Err(CaptureError::PermissionMissing)
+            }
+        }
+        let gates = GateController::new();
+        let api = FakeApi::default();
+        let clock = FakeClock::new(t0());
+        assert_eq!(
+            run_job(&job(&gates), &api, &Denied, &clock),
+            ScreenshotOutcome::PermissionMissing
+        );
+        assert!(api.calls.borrow().is_empty(), "no intent left pending");
     }
 
     #[test]

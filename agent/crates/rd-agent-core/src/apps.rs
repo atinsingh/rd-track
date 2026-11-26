@@ -36,6 +36,23 @@ pub struct AppTracker {
     carry_ms: u128,
 }
 
+/// Identifiers of the RoundDigital Track app itself: the macOS bundle id, the Windows
+/// executable, and an unbundled development build. Time while it is in front counts
+/// nowhere (no app usage, no activity, no tracked time, no screenshot).
+pub const OWN_APP_IDENTIFIERS: [&str; 3] = [
+    "digital.round.track",
+    "rd-agent-desktop.exe",
+    "rd-agent-desktop",
+];
+
+/// `true` if `app` is RoundDigital Track itself (identifier, case-insensitive).
+pub fn is_own_app(app: &ForegroundAppInfo) -> bool {
+    let id = app.app_identifier.trim();
+    OWN_APP_IDENTIFIERS
+        .iter()
+        .any(|own| own.eq_ignore_ascii_case(id))
+}
+
 /// Normalises an identifier or name: strips control characters, trims, truncates.
 pub fn sanitize(s: &str) -> String {
     s.chars()
@@ -156,6 +173,24 @@ mod tests {
             app_identifier: id.into(),
             app_name: id.to_uppercase(),
         })
+    }
+
+    #[test]
+    fn recognises_its_own_app_on_each_platform() {
+        for id in [
+            "digital.round.track",
+            "RD-AGENT-DESKTOP.EXE",
+            "rd-agent-desktop",
+        ] {
+            assert!(is_own_app(&app(id).unwrap()), "{id}");
+        }
+        for id in [
+            "com.example.editor",
+            "digital.round.track.helper",
+            "chrome.exe",
+        ] {
+            assert!(!is_own_app(&app(id).unwrap()), "{id}");
+        }
     }
 
     fn t0() -> DateTime<Utc> {

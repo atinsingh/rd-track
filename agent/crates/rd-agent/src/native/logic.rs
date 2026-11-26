@@ -109,6 +109,42 @@ impl CounterHealth {
     }
 }
 
+/// Seconds in a row that the idle timer may report input while working counters see
+/// none, before the timer is no longer trusted.
+pub const STUCK_TIMER_SECONDS: u32 = 60;
+
+/// Guards against an idle timer that keeps reporting input nobody made (macOS
+/// `HIDIdleTime` reset by background or synthetic events, e.g. remote-control or
+/// "keep awake" tools, or a chattering device). While the event counters are known to
+/// work, [`STUCK_TIMER_SECONDS`] of "input just happened" with no counter increment
+/// means the timer is not about the person: it is then left out of the sample (the
+/// activity aggregator counts inactivity itself) until a counter increments again.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct IdleTimerGuard {
+    flat_input_seconds: u32,
+}
+
+impl IdleTimerGuard {
+    /// The idle time to report for one sample: `since` (seconds since the last input
+    /// event), or `None` while the timer is judged stuck.
+    pub fn filter(
+        &mut self,
+        since: Option<f64>,
+        counters_verified: bool,
+        total_counts: u64,
+    ) -> Option<f64> {
+        let input_seen = since.is_some_and(|s| s < 1.0);
+        if total_counts > 0 || !input_seen || !counters_verified {
+            self.flat_input_seconds = 0;
+            return since;
+        }
+        self.flat_input_seconds = self.flat_input_seconds.saturating_add(1);
+        (self.flat_input_seconds < STUCK_TIMER_SECONDS)
+            .then_some(since)
+            .flatten()
+    }
+}
+
 /// Remembers which OS permission prompts were already shown on this install, so a
 /// prompt (e.g. macOS `CGRequestScreenCaptureAccess`) is triggered at most once
 /// (`DEV-03`). Afterwards the UI only links to System Settings.
@@ -229,6 +265,30 @@ mod tests {
         assert!(h.verified());
         for _ in 0..1000 {
             assert!(h.observe(true, 0), "verified counters stay trusted");
+        }
+    }
+
+    #[test]
+    fn idle_timer_reporting_input_nobody_made_is_dropped() {
+        let mut g = IdleTimerGuard::default();
+        // Counters not proven yet: the timer is all there is.
+        for _ in 0..1000 {
+            assert_eq!(g.filter(Some(0.2), false, 0), Some(0.2));
+        }
+        // Working counters, flat, while the timer says "input just now".
+        for _ in 0..STUCK_TIMER_SECONDS - 1 {
+            assert_eq!(g.filter(Some(0.2), true, 0), Some(0.2));
+        }
+        assert_eq!(g.filter(Some(0.2), true, 0), None, "stuck");
+        assert_eq!(g.filter(Some(0.1), true, 0), None, "stays dropped");
+        // Real input again.
+        assert_eq!(g.filter(Some(0.1), true, 4), Some(0.1));
+        assert_eq!(g.filter(Some(0.3), true, 0), Some(0.3));
+        // A timer that shows real idleness is always kept.
+        let mut g = IdleTimerGuard::default();
+        for i in 0..1000 {
+            let since = 2.0 + f64::from(i);
+            assert_eq!(g.filter(Some(since), true, 0), Some(since));
         }
     }
 
