@@ -479,3 +479,33 @@ impl ScreenCapturer for GdiCapturer {
         Self::grab(max_width)
     }
 }
+
+/// Watches the app's top-level window `hwnd` for `WM_QUERYENDSESSION` /
+/// `WM_ENDSESSION` (logout, restart, shut down) and records it, so the app's exit is
+/// then reported as the OS ending the session rather than the person's Quit. Windows
+/// sends both to every top-level window, hidden ones included.
+pub fn watch_session_end(hwnd: isize) {
+    use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_ENDSESSION, WM_QUERYENDSESSION};
+
+    unsafe extern "system" fn subclass(
+        hwnd: HWND,
+        msg: u32,
+        wparam: WPARAM,
+        lparam: LPARAM,
+        _id: usize,
+        _data: usize,
+    ) -> LRESULT {
+        if msg == WM_QUERYENDSESSION || (msg == WM_ENDSESSION && wparam != 0) {
+            super::logic::note_os_session_ending();
+        }
+        // SAFETY: forwards the message unchanged to the next window procedure.
+        unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
+    }
+    // SAFETY: `hwnd` is the app's own live window; the subclass proc only stores an
+    // atomic and forwards every message.
+    let ok = unsafe { SetWindowSubclass(hwnd as HWND, Some(subclass), 1, 0) };
+    if ok == 0 {
+        log::info!("could not watch for the end of the Windows session");
+    }
+}

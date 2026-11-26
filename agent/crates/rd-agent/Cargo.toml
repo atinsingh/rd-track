@@ -45,11 +45,13 @@ windows-sys = { workspace = true, features = [
   "Win32_System_SystemInformation",
   "Win32_System_Threading",
   "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
+block2.workspace = true
 objc2-foundation.workspace = true
 objc2-app-kit.workspace = true
 objc2-core-foundation.workspace = true

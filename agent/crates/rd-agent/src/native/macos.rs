@@ -252,3 +252,33 @@ pub(super) fn request(p: Permission) {
         Permission::Accessibility => {}
     }
 }
+
+/// Watches for `NSWorkspaceWillPowerOffNotification` (posted when the person logs out,
+/// restarts or shuts down) and records it, so the app's exit is then reported as the
+/// OS ending the session rather than the person's Quit. Call once, on the main thread
+/// (the notification is delivered on the main run loop the app already runs).
+pub fn watch_power_off() {
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use objc2_app_kit::NSWorkspaceWillPowerOffNotification;
+    use objc2_foundation::NSNotification;
+
+    let block = RcBlock::new(|_: NonNull<NSNotification>| {
+        log::info!("the OS is logging out or powering off");
+        super::logic::note_os_session_ending();
+    });
+    let center = NSWorkspace::sharedWorkspace().notificationCenter();
+    // SAFETY: a static notification name, no sender filter, no queue (delivered on the
+    // posting thread); the block only stores an atomic.
+    let token = unsafe {
+        center.addObserverForName_object_queue_usingBlock(
+            Some(NSWorkspaceWillPowerOffNotification),
+            None,
+            None,
+            &block,
+        )
+    };
+    // Observe for the life of the process.
+    std::mem::forget(token);
+}

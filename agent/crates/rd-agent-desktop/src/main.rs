@@ -496,6 +496,13 @@ fn main() {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             tray::create(app.handle(), app.state::<Arc<Controller>>().lang())?;
+            // Tell an OS logout / power off apart from the person's Quit at exit.
+            #[cfg(target_os = "macos")]
+            rd_agent::native::macos::watch_power_off();
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd) = app.get_webview_window("main").and_then(|w| w.hwnd().ok()) {
+                rd_agent::native::windows::watch_session_end(hwnd.0 as isize);
+            }
             let needs_ui = ctl.boot(app.handle());
             ensure_open_at_login(app.handle(), &ctl);
             if ctl.translocated() {
@@ -548,12 +555,13 @@ fn main() {
         RunEvent::ExitRequested {
             code: None, api, ..
         } => api.prevent_exit(),
-        // OS logout/shutdown: stop the session before the process goes away. After
-        // Quit the runtime is already gone and this does nothing. Tauri does not say
-        // which of the two it is, so both are reported as `shutdown`.
+        // Any other exit (Cmd+Q, the app menu, OS logout / power off): stop the session
+        // before the process goes away. It is the person's Quit unless the OS announced
+        // the end of the session first (then `shutdown`). After the tray / popover Quit
+        // the runtime is already gone and this does nothing.
         RunEvent::Exit => {
-            app.state::<Arc<Controller>>()
-                .shutdown(StopReason::Shutdown);
+            let reason = rd_agent::native::logic::exit_stop_reason();
+            app.state::<Arc<Controller>>().shutdown(reason);
         }
         _ => {}
     });

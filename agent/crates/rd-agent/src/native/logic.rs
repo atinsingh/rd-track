@@ -4,6 +4,36 @@
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use rd_agent_core::events::StopReason;
+
+/// Set once the OS announced a logout / power off (macOS
+/// `NSWorkspaceWillPowerOffNotification`, Windows `WM_QUERYENDSESSION` /
+/// `WM_ENDSESSION`). Never cleared: the process is about to end.
+static OS_SESSION_ENDING: AtomicBool = AtomicBool::new(false);
+
+/// Records that the OS is logging out or powering off (called from the platform hooks).
+pub fn note_os_session_ending() {
+    OS_SESSION_ENDING.store(true, Ordering::SeqCst);
+}
+
+/// Why the app is exiting: the OS ending the session (`Shutdown`, which macOS and
+/// Windows do not tell apart from a logout here) only when it said so first;
+/// otherwise the person quit it (`User`: Cmd+Q, app menu, tray, popover), which the
+/// runtime reports as `quit_during_hours` inside office hours.
+pub fn exit_reason(os_session_ending: bool) -> StopReason {
+    if os_session_ending {
+        StopReason::Shutdown
+    } else {
+        StopReason::User
+    }
+}
+
+/// [`exit_reason`] for this process.
+pub fn exit_stop_reason() -> StopReason {
+    exit_reason(OS_SESSION_ENDING.load(Ordering::SeqCst))
+}
 
 /// A per-second counter delta above this is not real input (the OS counter was reset,
 /// e.g. after a logout); the new value itself is then the count since the reset.
@@ -192,6 +222,12 @@ impl PromptLedger {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exit_is_the_persons_quit_unless_the_os_announced_the_end() {
+        assert_eq!(exit_reason(false), StopReason::User);
+        assert_eq!(exit_reason(true), StopReason::Shutdown);
+    }
 
     #[test]
     fn counter_delta_handles_wraparound_and_resets() {
