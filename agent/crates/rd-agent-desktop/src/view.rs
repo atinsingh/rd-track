@@ -178,6 +178,7 @@ pub fn expands(old: &PolicySettings, new: &PolicySettings) -> bool {
         || (o.enabled && n.enabled && n.max_width_px > o.max_width_px)
         || (o.enabled && n.enabled && o.primary_monitor_only && !n.primary_monitor_only)
         || (!old.apps.capture_app_name && new.apps.capture_app_name)
+        || (!old.location.capture && new.location.capture)
         || (!old.viewers.manager_can_view_screenshots && new.viewers.manager_can_view_screenshots)
 }
 
@@ -1109,6 +1110,10 @@ mod tests {
             !expands(&more, &base),
             "less collection is not an expansion"
         );
+        let mut located = base.clone();
+        located.location.capture = true;
+        assert!(expands(&base, &located));
+        assert!(!expands(&located, &base));
         let mut faster = more.clone();
         faster.screenshots.interval_minutes = 10;
         assert!(expands(&more, &faster));
@@ -1176,7 +1181,8 @@ mod tests {
                 "Screenshots"
             ]
         );
-        assert_eq!(n.not_collected.len(), 2);
+        // Website domains, window titles, location.
+        assert_eq!(n.not_collected.len(), 3);
         assert!(n.warning.is_none());
         assert!(n
             .footer

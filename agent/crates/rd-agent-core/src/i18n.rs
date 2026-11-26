@@ -114,8 +114,10 @@ messages! {
     collect_shots_primary: "primary monitor" => "écran principal",
     collect_shots_all: "all monitors" => "tous les écrans",
     collect_shots_excluded: "except when excluded apps are in front, " => "sauf quand une application exclue est au premier plan, ",
+    collect_location_text: "Your location (city, from your IP address)" => "Votre emplacement (ville, d’après votre adresse IP)",
+    collect_location_detail: "Looked up when a session starts — never GPS" => "Déterminé au début d’une session — jamais par GPS",
     collect_off: "Off for you" => "Désactivé pour vous",
-    never_collected: "Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your location." => "Les touches sur lesquelles vous appuyez, le texte saisi, les mots de passe, le presse-papiers, la webcam, le micro, le contenu des messages, des courriels ou des documents, et votre position.",
+    never_collected: "Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your precise (GPS) location." => "Les touches sur lesquelles vous appuyez, le texte saisi, les mots de passe, le presse-papiers, la webcam, le micro, le contenu des messages, des courriels ou des documents, et votre position précise (GPS).",
 
     // Licence.
     license_inactive: "Tracking is unavailable: your organization's subscription is inactive" => "Le suivi n’est pas disponible : l’abonnement de votre organisation est inactif",

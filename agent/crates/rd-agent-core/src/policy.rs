@@ -182,6 +182,14 @@ impl ScreenshotSettings {
     }
 }
 
+/// `location.*` settings (the server looks up the city from the IP; carried for display).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct LocationSettings {
+    /// `location.capture` (default `false`).
+    pub capture: bool,
+}
+
 /// `viewers.*` settings (enforced server-side; carried for display).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -389,6 +397,8 @@ pub struct PolicySettings {
     pub apps: AppsSettings,
     /// `screenshots.*`
     pub screenshots: ScreenshotSettings,
+    /// `location.*`
+    pub location: LocationSettings,
     /// `viewers.*`
     pub viewers: ViewerSettings,
     /// `work_hours` (`null` = no limit).

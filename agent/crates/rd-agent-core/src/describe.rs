@@ -111,6 +111,12 @@ pub fn describe_collection_in(p: &PolicySettings, lang: Lang) -> Vec<CollectionI
             m.collect_shots_text,
             screenshot_detail,
         ),
+        item(
+            "location.capture",
+            p.location.capture,
+            m.collect_location_text,
+            off_or(m, p.location.capture, m.collect_location_detail),
+        ),
     ]
 }
 
@@ -152,7 +158,8 @@ mod tests {
                 "apps.capture_app_name",
                 "apps.capture_domains",
                 "apps.capture_window_titles",
-                "screenshots.enabled"
+                "screenshots.enabled",
+                "location.capture"
             ]
         );
         assert_eq!(items[0].text, "When your session starts, pauses and stops");
