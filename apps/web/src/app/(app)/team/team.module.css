@@ -10,16 +10,17 @@
 .act {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--space-3);
 }
 .actNum {
   font-family: var(--font-mono);
-  width: var(--space-10);
+  font-variant-numeric: tabular-nums;
+  min-width: var(--space-10);
+  text-align: right;
 }
 .actTrack {
-  flex: 1;
-  max-width: 90px;
-  min-width: var(--space-10);
+  width: 64px;
   height: 6px;
   background: var(--data-track);
 }
@@ -68,8 +69,28 @@ a.attItem:hover {
 }
 .thActivity {
   display: inline-flex;
+  justify-content: flex-end;
   align-items: center;
   gap: var(--space-2);
+}
+
+/* Attendance values: zero is quiet, anything else uses the warn ink. */
+.warn {
+  color: var(--warn-text);
+  font-weight: var(--weight-semibold);
+}
+.zero {
+  color: var(--text-3);
+}
+
+/* Narrow screens scroll the table inside its panel; the name stays in view. */
+.membersTable th:first-child,
+.membersTable td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  padding-right: var(--space-3);
 }
 
 /* Long column labels (French) wrap instead of pushing the table past its card; names stay on one line. */

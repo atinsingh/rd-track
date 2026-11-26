@@ -157,7 +157,7 @@ function MembersTable({
   if (rows.length === 0) return <Empty title={t('mgr.team.noMembers')} />;
   return (
     <TableBox label={t('mgr.team.membersLabel')}>
-      <table className={`${tableClass} ${s.membersTable}`} style={{ minWidth: 800 }}>
+      <table className={`${tableClass} ${s.membersTable}`} style={{ minWidth: 1200 }}>
         <caption className="visually-hidden">{t('mgr.team.membersCaption')}</caption>
         <thead>
           <tr>
@@ -178,13 +178,22 @@ function MembersTable({
                 <th scope="col" className={numClass}>
                   {t('mgr.col.idle')}
                 </th>
-                <th scope="col">
+                <th scope="col" className={numClass}>
                   <span className={s.thActivity}>
                     {t('mgr.col.activity')} <ActivityInfo />
                   </span>
                 </th>
               </>
             ) : null}
+            <th scope="col" className={numClass} title={t('mgr.col.quitsHint')}>
+              {t('mgr.col.quits')}
+            </th>
+            <th scope="col" className={numClass} title={t('mgr.col.awayHint')}>
+              {t('mgr.col.away')}
+            </th>
+            <th scope="col" className={numClass} title={t('mgr.col.underHint')}>
+              {t('mgr.col.under')}
+            </th>
             <th scope="col" className={numClass}>
               {t('session.manual')}
             </th>
@@ -226,20 +235,25 @@ function MembersTable({
                 <>
                   <td className={numClass}>{m.activity_percent === null ? '—' : formatDuration(m.active_seconds)}</td>
                   <td className={numClass}>{m.activity_percent === null ? '—' : formatDuration(m.idle_seconds)}</td>
-                  <td>
+                  <td className={numClass}>
                     {m.activity_percent === null ? (
-                      <span className="mono muted">—</span>
+                      <span className="muted">—</span>
                     ) : (
                       <span className={s.act}>
-                        <span className={s.actNum}>{formatPercent(m.activity_percent)}</span>
                         <span className={s.actTrack} aria-hidden="true">
                           <span className={s.actFill} style={{ width: `${m.activity_percent}%` }} />
                         </span>
+                        <span className={s.actNum}>{formatPercent(m.activity_percent)}</span>
                       </span>
                     )}
                   </td>
                 </>
               ) : null}
+              <td className={`${numClass} ${m.quits_during_hours > 0 ? s.warn : s.zero}`}>{m.quits_during_hours}</td>
+              <td className={`${numClass} ${m.quit_away_seconds > 0 ? s.warn : s.zero}`}>{formatDuration(m.quit_away_seconds)}</td>
+              <td className={`${numClass} ${m.days_under_target > 0 ? s.warn : s.zero}`}>
+                {t('mgr.col.underDays', { n: m.days_under_target, m: m.work_days })}
+              </td>
               <td className={numClass}>{durationOrDash(m.manual_seconds)}</td>
               <td className={numClass}>{formatDuration(m.tracked_seconds + m.manual_seconds)}</td>
               {multiDay ? <td className={numClass}>{m.days_active}</td> : null}
