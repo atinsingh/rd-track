@@ -47,6 +47,15 @@ describe('resolvePolicy', () => {
     expect(collectionExpansions(sharp, blurred)).toEqual([]);
   });
 
+  it('keeps location off by default, lets any scope turn it off, and counts turning it on as collecting more', () => {
+    expect(resolvePolicy([org({})]).settings.location.capture).toBe(false);
+    const on = resolvePolicy([org({ location: { capture: true } })]).settings;
+    expect(on.location.capture).toBe(true);
+    expect(resolvePolicy([org({ location: { capture: true } }), team('t1', { location: { capture: false } })]).settings.location.capture).toBe(false);
+    expect(collectionExpansions(DEFAULT_POLICY, on)).toEqual([{ field: 'location.capture', from: false, to: true }]);
+    expect(collectionExpansions(on, DEFAULT_POLICY)).toEqual([]);
+  });
+
   it('lets one project turn screenshots on without enabling them org-wide', () => {
     const { settings, sources } = resolvePolicy([org({}), project({ screenshots: { enabled: true } })]);
     expect(settings.screenshots.enabled).toBe(true);

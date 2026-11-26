@@ -91,6 +91,7 @@ describe('translations', () => {
         screenshots: { ...DEFAULT_POLICY.screenshots, enabled: true, primary_monitor_only: false, excluded_apps: ['com.apple.mail'] },
       },
       { ...DEFAULT_POLICY, screenshots: { ...DEFAULT_POLICY.screenshots, enabled: true, primary_monitor_only: true, excluded_apps: [] } },
+      { ...DEFAULT_POLICY, location: { capture: true } },
     ];
     for (const p of variants) expect(describeCollectionLocalized(p)).toEqual(describeCollection(p));
     setLocale('fr-CA');

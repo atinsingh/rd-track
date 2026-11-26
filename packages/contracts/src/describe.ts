@@ -53,12 +53,18 @@ export function describeCollection(p: PolicySettings): CollectionItem[] {
           }, ${p.screenshots.blur ? 'blurred so no text can be read, ' : ''}reduced to ${p.screenshots.max_width_px} px wide, kept ${p.screenshots.excluded_apps.length ? 'except when excluded apps are in front, ' : ''}${p.retention.screenshot_days} days`
         : 'Off for you',
     },
+    {
+      key: 'location.capture',
+      collected: p.location.capture,
+      text: 'Your location (city, from your IP address)',
+      detail: p.location.capture ? 'Looked up when a session starts — never GPS' : 'Off for you',
+    },
   ];
   return items;
 }
 
 export const NEVER_COLLECTED =
-  'Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your location.';
+  'Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your precise (GPS) location.';
 
 export function formatDuration(seconds: number): string {
   const s = Math.max(0, Math.round(seconds));

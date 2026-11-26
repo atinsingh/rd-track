@@ -84,6 +84,12 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
     help: 'Blurred on the computer before upload, so no text can be read; any scope can require it',
     kind: 'bool',
   },
+  'location.capture': {
+    group: 'Location',
+    label: 'Work location',
+    help: 'City and country looked up on the server from the IP address a session starts from; never GPS. Employees are told; any scope can turn it off',
+    kind: 'bool',
+  },
   'viewers.manager_can_view_activity': {
     group: 'Who can see it',
     label: 'Managers can view computer activity',
@@ -213,6 +219,7 @@ const META: Record<string, Omit<FieldMeta, 'key'>> = {
 const GROUP_ID: Record<string, string> = {
   Screenshots: 'screenshots',
   'Who can see it': 'viewers',
+  Location: 'location',
   Applications: 'apps',
   Sessions: 'sessions',
   Retention: 'retention',

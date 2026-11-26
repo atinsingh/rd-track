@@ -46,6 +46,12 @@ export function describeCollectionLocalized(p: PolicySettings): CollectionItem[]
           })
         : off,
     },
+    {
+      key: 'location.capture',
+      collected: p.location.capture,
+      text: t('collect.location.text'),
+      detail: p.location.capture ? t('collect.location.detail') : off,
+    },
   ];
 }
 

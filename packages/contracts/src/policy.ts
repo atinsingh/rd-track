@@ -54,6 +54,10 @@ export const policySettingsSchema = z.strictObject({
     /** Blurred on the computer before upload, so no text can be read (SCR-12). */
     blur: z.boolean(),
   }),
+  /** City, region and country looked up on the server from the public IP a session starts from. No GPS. */
+  location: z.strictObject({
+    capture: z.boolean(),
+  }),
   viewers: z.strictObject({
     manager_can_view_activity: z.boolean(),
     manager_can_view_apps: z.boolean(),
@@ -79,6 +83,7 @@ export const partialPolicySettingsSchema = z.strictObject({
   pause: policySettingsSchema.shape.pause.partial().optional(),
   apps: policySettingsSchema.shape.apps.partial().optional(),
   screenshots: policySettingsSchema.shape.screenshots.partial().optional(),
+  location: policySettingsSchema.shape.location.partial().optional(),
   viewers: policySettingsSchema.shape.viewers.partial().optional(),
   work_hours: workHoursSchema.optional(),
   retention: policySettingsSchema.shape.retention.partial().optional(),
@@ -100,6 +105,7 @@ export const DEFAULT_POLICY: PolicySettings = {
     employee_deletion: 'self_service',
     blur: false,
   },
+  location: { capture: false },
   viewers: {
     manager_can_view_activity: true,
     manager_can_view_apps: true,
@@ -139,6 +145,7 @@ export const POLICY_FIELD_RULES: readonly FieldRule[] = [
   { path: ['screenshots', 'employee_deletion'], strategy: 'specific', prefer: ['self_service', 'review'] },
   // Blurring is the more private choice: any scope asking for it wins.
   { path: ['screenshots', 'blur'], strategy: 'any_true' },
+  { path: ['location', 'capture'], strategy: 'restrictive_bool' },
   { path: ['viewers', 'manager_can_view_activity'], strategy: 'restrictive_bool' },
   { path: ['viewers', 'manager_can_view_apps'], strategy: 'restrictive_bool' },
   { path: ['viewers', 'manager_can_view_screenshots'], strategy: 'restrictive_bool' },
@@ -303,6 +310,7 @@ export function collectionExpansions(prev: PolicySettings, next: PolicySettings)
   turnedOn('apps.capture_domains', prev.apps.capture_domains, next.apps.capture_domains);
   turnedOn('apps.capture_window_titles', prev.apps.capture_window_titles, next.apps.capture_window_titles);
   turnedOn('screenshots.enabled', prev.screenshots.enabled, next.screenshots.enabled);
+  turnedOn('location.capture', prev.location.capture, next.location.capture);
   turnedOn(
     'viewers.manager_can_view_activity',
     prev.viewers.manager_can_view_activity,
