@@ -602,6 +602,16 @@ the usual flow. Revoking a key stops new requests; computers already connected s
   `{"timezone": "Europe/Riga", "days": [1,2,3,4,5], "start": "09:00", "end": "18:00"}` —
   IANA zone, ISO weekdays (or `"mon"`…), local `HH:MM`, `end ≤ start` = overnight, empty
   `days` = every day. An unparseable window rejects the whole document (last good kept).
+  Inside the base policy's window, with no session open, the agent starts one by itself
+  (no project; skipped when `session.require_project`); after an employee's Stop it waits
+  for the next window. When the window ends the session is stopped
+  (`session.stopped.v1 {reason: policy}`), so nothing stays open or paused overnight.
+* `pause.max_minutes` (1–240, default 15): an employee's pause resumes by itself after
+  that long (`session.paused.v1` / `session.resumed.v1` carry the real times; wall clock,
+  persisted across restarts).
+* Time with RoundDigital Track itself in front (`digital.round.track`,
+  `rd-agent-desktop.exe`) counts nowhere: no app usage, no activity seconds, no tray
+  time, no screenshot.
 * Screenshots are uploaded as `image/jpeg` (quality 70); `complete.sha256` is lowercase
   hex of the uploaded bytes; `width`/`height` are after downscaling.
 * Heartbeat `credential_status: "revoked"` is treated like `401 device_revoked`.
