@@ -92,9 +92,16 @@ describe('resolvePolicy', () => {
       team('a', { pause: { max_minutes: 20 } }),
       team('b', { pause: { max_minutes: 10 } }),
     ]);
-    // two teams at the same level: the shorter pause wins
-    expect(settings.pause.max_minutes).toBe(10);
+    // two teams at the same level: the longer (more private) pause wins
+    expect(settings.pause.max_minutes).toBe(20);
     expect(() => resolvePolicy([org({ pause: { max_minutes: 0 } })])).toThrow();
+  });
+
+  it('treats a shorter pause cap as a collection expansion', () => {
+    const base = resolvePolicy([]).settings;
+    const shorter = { ...base, pause: { max_minutes: 5 } };
+    expect(collectionExpansions(base, shorter)).toEqual([{ field: 'pause.max_minutes', from: 15, to: 5 }]);
+    expect(collectionExpansions(shorter, base)).toEqual([]);
   });
 
   it('applies the plan as an always-restrictive scope', () => {

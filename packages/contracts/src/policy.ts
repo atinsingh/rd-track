@@ -147,7 +147,8 @@ export const POLICY_FIELD_RULES: readonly FieldRule[] = [
   { path: ['apps', 'capture_window_titles'], strategy: 'restrictive_bool' },
   { path: ['idle', 'threshold_seconds'], strategy: 'specific', tie: 'max' },
   { path: ['idle', 'prompt_on_return'], strategy: 'specific' },
-  { path: ['pause', 'max_minutes'], strategy: 'specific', tie: 'min' },
+  // Longer pause is the more private choice: it wins ties, like idle.threshold_seconds.
+  { path: ['pause', 'max_minutes'], strategy: 'specific', tie: 'max' },
   { path: ['session', 'allow_overlapping_sessions'], strategy: 'restrictive_bool' },
   { path: ['session', 'require_project'], strategy: 'any_true' },
   { path: ['work_hours'], strategy: 'specific' },
@@ -334,6 +335,8 @@ export function collectionExpansions(prev: PolicySettings, next: PolicySettings)
     add('retention.activity_days', prev.retention.activity_days, next.retention.activity_days);
   if (next.retention.app_usage_days > prev.retention.app_usage_days)
     add('retention.app_usage_days', prev.retention.app_usage_days, next.retention.app_usage_days);
+  if (next.pause.max_minutes < prev.pause.max_minutes)
+    add('pause.max_minutes', prev.pause.max_minutes, next.pause.max_minutes);
   if (prev.work_hours !== null && next.work_hours === null) add('work_hours', prev.work_hours, null);
   return out;
 }
