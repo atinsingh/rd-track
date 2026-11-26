@@ -16,14 +16,13 @@ terraform {
   # State contains the database passwords — keep the bucket private, versioned and
   # encrypted, and limit who can read it. Uncomment, fill, then `terraform init`.
   #
-  # backend "s3" {
-  #   bucket       = "rd-track-tfstate-<account-id>"
-  #   key          = "staging/terraform.tfstate"
-  #   region       = "ca-central-1"
-  #   encrypt      = true
-  #   use_lockfile = true   # S3-native locking (Terraform >= 1.10); otherwise use dynamodb_table
-  #   # dynamodb_table = "rd-track-tfstate-lock"
-  # }
+  backend "s3" {
+    bucket       = "rd-track-tfstate-438086566999"
+    key          = "staging/terraform.tfstate"
+    region       = "ca-central-1"
+    encrypt      = true
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
