@@ -158,6 +158,54 @@ export type MemberLiveRow = MemberReportRow & { status: LiveStatus; screenshot_c
 
 // The agent heartbeats every minute and sends each minute's bucket within seconds.
 const OFFLINE_AFTER_MS = 3 * 60_000;
+
+// ponytail: one org-wide daily target; make it a policy field when teams need different hours.
+const TARGET_SECONDS_PER_DAY = 8 * 3600;
+const WEEKDAYS = [1, 2, 3, 4, 5];
+
+/** Office quits and the daily-hours target for one person, in their office time zone. */
+async function attendanceFor(deps: Deps, q: Queryable, orgId: string, userId: string, r: Range, tz: string) {
+  const wh = (await resolveFor(deps, q, orgId, userId)).settings.work_hours;
+  const zone = wh?.timezone ?? tz;
+  const now = deps.now().toISOString();
+  const quits = await one<{ n: number; away: number }>(
+    q,
+    `SELECT count(*)::int AS n,
+            coalesce(sum(greatest(0, EXTRACT(EPOCH FROM (least(coalesce(nx.started_at, $5::timestamptz), c.cap) - s.ended_at)))), 0)::int AS away
+     FROM work_sessions s
+     LEFT JOIN LATERAL (SELECT n.started_at FROM work_sessions n WHERE n.user_id = s.user_id AND n.started_at >= s.ended_at
+                        ORDER BY n.started_at LIMIT 1) nx ON true
+     CROSS JOIN LATERAL (SELECT (((s.ended_at AT TIME ZONE $6)::date + $7::time) AT TIME ZONE $6) AS cap) c
+     WHERE s.organization_id = $1 AND s.user_id = $2 AND s.stop_reason = 'quit_during_hours'
+       AND s.ended_at >= $3 AND s.ended_at < $4`,
+    [orgId, userId, r.from, r.to, now, zone, wh?.end ?? '24:00'],
+  );
+  // Completed office days only: today still has hours to go.
+  const target = await one<{ work_days: number; under: number }>(
+    q,
+    `WITH days AS (
+       SELECT g::date AS d FROM generate_series(($3::timestamptz AT TIME ZONE $5)::date,
+         least((($4::timestamptz - interval '1 second') AT TIME ZONE $5)::date, ($6::timestamptz AT TIME ZONE $5)::date - 1),
+         interval '1 day') g
+       WHERE extract(isodow FROM g)::int = ANY($7::int[])),
+     t AS (
+       SELECT (bucket_start AT TIME ZONE $5)::date AS d, active_seconds + idle_seconds AS s FROM activity_buckets
+       WHERE organization_id = $1 AND user_id = $2 AND bucket_start >= $3 AND bucket_start < $4
+       UNION ALL
+       SELECT (started_at AT TIME ZONE $5)::date, EXTRACT(EPOCH FROM (ended_at - started_at))::int FROM work_sessions
+       WHERE organization_id = $1 AND user_id = $2 AND source = 'manual' AND started_at >= $3 AND started_at < $4),
+     per AS (SELECT days.d, coalesce(sum(t.s), 0) AS s FROM days LEFT JOIN t ON t.d = days.d GROUP BY days.d)
+     SELECT count(*)::int AS work_days, count(*) FILTER (WHERE s < $8)::int AS under FROM per`,
+    [orgId, userId, r.from, r.to, zone, now, wh?.days ?? WEEKDAYS, TARGET_SECONDS_PER_DAY],
+  );
+  return {
+    quits_during_hours: quits?.n ?? 0,
+    quit_away_seconds: quits?.away ?? 0,
+    work_days: target?.work_days ?? 0,
+    days_under_target: target?.under ?? 0,
+    target_seconds_per_day: TARGET_SECONDS_PER_DAY,
+  };
+}
 // ponytail: the default idle threshold (300 s), not each person's policy value; resolve it per person if policies diverge.
 const IDLE_AFTER_MS = 5 * 60_000;
 
@@ -319,6 +367,7 @@ export async function teamReport(
       days_active: a?.days ?? 0,
       permission_missing_minutes: a?.missing ?? 0,
       notes,
+      ...(await attendanceFor(deps, q, orgId, m.user_id, r, tz)),
       status: liveStatus(open.find((o) => o.user_id === m.user_id), vis.activity, now),
       screenshot_count: vis.screenshots ? shotCount : null,
     });

@@ -286,6 +286,15 @@ export interface MemberReportRow {
   permission_missing_minutes: number;
   /** The same notes in English, for API and CSV readers. */
   notes: string[];
+  /** Times the person quit RD Track inside office hours. */
+  quits_during_hours: number;
+  /** Time from each such quit until tracking came back, capped at that day's office end. */
+  quit_away_seconds: number;
+  /** Office days in the range so far (today included). */
+  work_days: number;
+  /** Office days with less than `target_seconds_per_day` tracked, absent days included. */
+  days_under_target: number;
+  target_seconds_per_day: number;
 }
 export interface DailyProjectRow {
   date: string;

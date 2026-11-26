@@ -27,7 +27,7 @@ export const sessionPausedPayload = z.strictObject({
   reason: z.enum(['user', 'idle_auto', 'work_hours']),
 });
 export const sessionResumedPayload = z.strictObject({});
-export const SESSION_STOP_REASONS = ['user', 'logout', 'shutdown', 'revoked', 'policy', 'overlap'] as const;
+export const SESSION_STOP_REASONS = ['user', 'logout', 'shutdown', 'revoked', 'policy', 'overlap', 'project_switch', 'quit_during_hours'] as const;
 export const sessionStoppedPayload = z.strictObject({
   reason: z.enum(SESSION_STOP_REASONS),
 });

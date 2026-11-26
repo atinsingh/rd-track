@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { timestamp, uuid } from './events';
+import { SESSION_STOP_REASONS, timestamp, uuid } from './events';
 import type { LicenseState } from './plans';
 import type { PolicySettings } from './policy';
 import type { AppLocale } from './locale';
@@ -82,7 +82,7 @@ export const sessionCreateRequest = z.strictObject({
   client_started_at: timestamp.optional(),
 });
 export const sessionStopRequest = z.strictObject({
-  reason: z.enum(['user', 'logout', 'shutdown', 'revoked', 'policy', 'overlap']).default('user'),
+  reason: z.enum(SESSION_STOP_REASONS).default('user'),
 });
 
 // ───────────── Stage 4 F4 / F3: limit warnings and reminders ─────────────
