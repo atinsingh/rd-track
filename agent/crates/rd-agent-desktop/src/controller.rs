@@ -991,8 +991,12 @@ struct Observer {
 
 impl RuntimeObserver for Observer {
     fn status(&mut self, status: &LiveStatus) {
+        let new_capture_problem;
         {
             let mut i = lock(&self.ctl.inner);
+            new_capture_problem = status.screenshot_problem.is_some()
+                && i.live.as_ref().and_then(|l| l.screenshot_problem.as_ref())
+                    != status.screenshot_problem.as_ref();
             if status.session.is_some() {
                 if let Some(ack) = &i.acknowledged {
                     if view::expands(ack, &status.settings) && !i.collection_changed {
@@ -1022,6 +1026,11 @@ impl RuntimeObserver for Observer {
             }
         }
         self.ctl.emit(&self.app);
+        // A screenshot just failed (or failed differently): bring the banner into view
+        // without taking focus, as for limit warnings.
+        if new_capture_problem {
+            crate::tray::show_for_prompt(&self.app);
+        }
     }
 
     fn notice(&mut self, notice: &Notice) {

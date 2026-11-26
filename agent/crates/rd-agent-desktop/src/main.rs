@@ -327,20 +327,16 @@ fn set_open_at_login(app: AppHandle, ctl: Ctl<'_>, enabled: bool) -> Result<bool
     launcher.is_enabled().map_err(|e| e.to_string())
 }
 
-/// Turns "Open at login" on unless the person turned it off. Skipped for development
-/// builds and for a translocated copy, whose path is temporary (the login item would
-/// point at nothing after the next launch).
+/// Turns "Open at login" on unless the person turned it off, on every launch so the
+/// login item follows the app if it was moved. Skipped for development builds and for a
+/// translocated copy, whose path is temporary (the login item would point at nothing
+/// after the next launch).
 fn ensure_open_at_login(app: &AppHandle, ctl: &Controller) {
     if cfg!(debug_assertions) || ctl.translocated() || ctl.open_at_login_off_marker().exists() {
         return;
     }
-    let launcher = app.autolaunch();
-    if launcher.is_enabled().unwrap_or(false) {
-        return;
-    }
-    match launcher.enable() {
-        Ok(()) => log::info!("open at login turned on"),
-        Err(e) => log::info!("could not turn on open at login: {e}"),
+    if let Err(e) = app.autolaunch().enable() {
+        log::info!("could not turn on open at login: {e}");
     }
 }
 

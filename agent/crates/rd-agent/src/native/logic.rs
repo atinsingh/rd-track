@@ -109,39 +109,39 @@ impl CounterHealth {
     }
 }
 
-/// Seconds in a row that the idle timer may report input while working counters see
-/// none, before the timer is no longer trusted.
+/// Seconds without a single counter increment after which the idle timer can no
+/// longer claim more recent input than that.
 pub const STUCK_TIMER_SECONDS: u32 = 60;
 
 /// Guards against an idle timer that keeps reporting input nobody made (macOS
 /// `HIDIdleTime` reset by background or synthetic events, e.g. remote-control or
-/// "keep awake" tools, or a chattering device). While the event counters are known to
-/// work, [`STUCK_TIMER_SECONDS`] of "input just happened" with no counter increment
-/// means the timer is not about the person: it is then left out of the sample (the
-/// activity aggregator counts inactivity itself) until a counter increments again.
+/// "keep awake" tools, or a chattering device), every second or every few seconds.
+/// While the event counters are known to work, once they have stayed flat for
+/// [`STUCK_TIMER_SECONDS`] the reported idle time is at least that long, so such events
+/// cannot keep the person "active". A counter increment ends it at once.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IdleTimerGuard {
-    flat_input_seconds: u32,
+    flat_seconds: u32,
 }
 
 impl IdleTimerGuard {
-    /// The idle time to report for one sample: `since` (seconds since the last input
-    /// event), or `None` while the timer is judged stuck.
+    /// The idle time to report for one (one-second) sample, given the timer's `since`
+    /// (seconds since the last input event of any kind).
     pub fn filter(
         &mut self,
         since: Option<f64>,
         counters_verified: bool,
         total_counts: u64,
     ) -> Option<f64> {
-        let input_seen = since.is_some_and(|s| s < 1.0);
-        if total_counts > 0 || !input_seen || !counters_verified {
-            self.flat_input_seconds = 0;
+        if total_counts > 0 || !counters_verified {
+            self.flat_seconds = 0;
             return since;
         }
-        self.flat_input_seconds = self.flat_input_seconds.saturating_add(1);
-        (self.flat_input_seconds < STUCK_TIMER_SECONDS)
-            .then_some(since)
-            .flatten()
+        self.flat_seconds = self.flat_seconds.saturating_add(1);
+        if self.flat_seconds < STUCK_TIMER_SECONDS {
+            return since;
+        }
+        since.map(|s| s.max(f64::from(self.flat_seconds)))
     }
 }
 
@@ -269,26 +269,28 @@ mod tests {
     }
 
     #[test]
-    fn idle_timer_reporting_input_nobody_made_is_dropped() {
+    fn idle_timer_cannot_claim_input_the_counters_never_saw() {
         let mut g = IdleTimerGuard::default();
         // Counters not proven yet: the timer is all there is.
         for _ in 0..1000 {
             assert_eq!(g.filter(Some(0.2), false, 0), Some(0.2));
         }
-        // Working counters, flat, while the timer says "input just now".
-        for _ in 0..STUCK_TIMER_SECONDS - 1 {
-            assert_eq!(g.filter(Some(0.2), true, 0), Some(0.2));
+        // Working counters, flat, while the timer is reset every second or every few.
+        for i in 1..STUCK_TIMER_SECONDS {
+            let since = f64::from(i % 3);
+            assert_eq!(g.filter(Some(since), true, 0), Some(since));
         }
-        assert_eq!(g.filter(Some(0.2), true, 0), None, "stuck");
-        assert_eq!(g.filter(Some(0.1), true, 0), None, "stays dropped");
+        assert_eq!(g.filter(Some(0.2), true, 0), Some(60.0), "stuck timer");
+        assert_eq!(g.filter(Some(2.0), true, 0), Some(61.0));
+        // A timer showing longer idleness is kept as it is.
+        assert_eq!(g.filter(Some(500.0), true, 0), Some(500.0));
         // Real input again.
         assert_eq!(g.filter(Some(0.1), true, 4), Some(0.1));
         assert_eq!(g.filter(Some(0.3), true, 0), Some(0.3));
-        // A timer that shows real idleness is always kept.
+        // No timer at all stays none.
         let mut g = IdleTimerGuard::default();
-        for i in 0..1000 {
-            let since = 2.0 + f64::from(i);
-            assert_eq!(g.filter(Some(since), true, 0), Some(since));
+        for _ in 0..100 {
+            assert_eq!(g.filter(None, true, 0), None);
         }
     }
 
