@@ -17,7 +17,14 @@ import { changeSessionState, getSessionForDevice, normalizeTime, startSession } 
  * idempotently, apply lifecycle events inline, validate the rest against their
  * session, enqueue one processing job — then acknowledge.
  */
-export async function ingestBatch(deps: Deps, device: DeviceActor, batch: EventBatch, requestId?: string): Promise<EventBatchResponse> {
+export async function ingestBatch(
+  deps: Deps,
+  device: DeviceActor,
+  batch: EventBatch,
+  requestId?: string,
+  /** Client IP of this request (`req.ip`), for work location. */
+  ip?: string,
+): Promise<EventBatchResponse> {
   const receivedAt = deps.now();
   const offsetMs = receivedAt.getTime() - new Date(batch.sent_at).getTime();
 
@@ -65,7 +72,7 @@ export async function ingestBatch(deps: Deps, device: DeviceActor, batch: EventB
         results.set(index, { event_id: e.event_id, status: 'duplicate' });
         continue;
       }
-      const verdict = await applyOrValidate(deps, tx, device, e, receivedAt, offsetMs);
+      const verdict = await applyOrValidate(deps, tx, device, e, receivedAt, offsetMs, ip);
       if (verdict.ok) {
         results.set(index, { event_id: e.event_id, status: 'accepted' });
         if (verdict.deferred) pending.push(e.event_id);
@@ -105,6 +112,9 @@ export async function ingestBatch(deps: Deps, device: DeviceActor, batch: EventB
   });
 }
 
+/** A start this recent is taken to come from the network the batch arrived on. */
+const LIVE_START_MS = 10 * 60_000;
+
 type Verdict = { ok: true; deferred: boolean } | { ok: false; reason: string };
 
 async function applyOrValidate(
@@ -114,6 +124,7 @@ async function applyOrValidate(
   e: EventEnvelope,
   receivedAt: Date,
   offsetMs: number,
+  ip?: string,
 ): Promise<Verdict> {
   const at = normalizeTime(e.occurred_at, receivedAt, offsetMs);
   if (isLifecycleEvent(e)) {
@@ -127,6 +138,8 @@ async function applyOrValidate(
           at,
           clientAt: e.occurred_at,
           policyRevision: e.policy_version,
+          // A start replayed from the offline queue was not made from today's network: no IP.
+          ip: receivedAt.getTime() - at.getTime() <= LIVE_START_MS ? ip : undefined,
         });
         break;
       case 'session.paused.v1':

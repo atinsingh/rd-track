@@ -120,7 +120,7 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post('/v1/ingestion/event-batches', { config: { auth: 'device' }, bodyLimit: MAX_BATCH_BYTES }, async (req) => {
     const batch = parse(eventBatchSchema, req.body);
-    return ingestBatch(deps, deviceOf(req), batch, req.id);
+    return ingestBatch(deps, deviceOf(req), batch, req.id, req.ip);
   });
 
   // REST equivalents of the lifecycle events, for online clients.
@@ -139,6 +139,7 @@ export async function agentRoutes(app: FastifyInstance, deps: Deps) {
         at: deps.now(),
         clientAt: body.client_started_at,
         policyRevision: rev.rows[0]!.policy_revision,
+        ip: req.ip,
       });
       if (!r.ok) throw errors.conflict(r.reason, `Session could not be started: ${r.reason}`);
       return getSessionForDevice(tx, device, body.session_id);

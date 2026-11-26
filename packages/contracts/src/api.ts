@@ -93,6 +93,19 @@ export interface SessionDTO {
   paused_seconds: number;
   /** Idle time the person removed or moved on return (Stage 4 F1). `keep` is not listed. */
   idle_adjustments: IdleAdjustmentDTO[];
+  /** Public IP the session started from and the city looked up from it (policy `location.capture`); null when not captured. */
+  ip: string | null;
+  city: string | null;
+  region: string | null;
+  country_code: string | null;
+  /** City or country differs from the person's usual location (most common over the last 30 days). */
+  location_changed: boolean;
+}
+
+/** A city from an IP lookup. */
+export interface WorkLocation {
+  city: string | null;
+  country_code: string;
 }
 
 export interface IdleAdjustmentDTO {
@@ -295,6 +308,12 @@ export interface MemberReportRow {
   /** Office days with less than `target_seconds_per_day` tracked, absent days included. */
   days_under_target: number;
   target_seconds_per_day: number;
+  /** Latest work location in the range (from the session's IP), if captured. */
+  location: WorkLocation | null;
+  /** Most common location over the 30 days before the range ends. */
+  usual_location: WorkLocation | null;
+  /** Sessions in the range whose city or country differs from `usual_location`. */
+  location_changes: number;
 }
 export interface DailyProjectRow {
   date: string;

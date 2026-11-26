@@ -24,6 +24,8 @@ export interface Config {
    * Unset: the download page says installers aren't published yet.
    */
   agentDownloads: { baseUrl: string | null; version: string | null };
+  /** DB-IP "IP to City Lite" .mmdb for work location (`location.capture`). Unset or missing: IPs are stored without a city. */
+  geoipDbPath: string | null;
   /** Store listings of the Track browser extension (website domains, Pro), where published. */
   browserExtensions: { chrome: string | null; edge: string | null; firefox: string | null };
   billing: {
@@ -85,6 +87,7 @@ export function loadConfig(overrides: Partial<Config> = {}): Config {
     cookieSecure: env === 'production',
     authRateLimitPerMinute: Number(process.env.AUTH_RATE_LIMIT_PER_MINUTE ?? 10),
     webUrl: (process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000').replace(/\/$/, ''),
+    geoipDbPath: process.env.GEOIP_DB_PATH || null,
     agentDownloads: {
       baseUrl: process.env.AGENT_DOWNLOAD_BASE_URL?.replace(/\/$/, '') || null,
       version: process.env.AGENT_VERSION || null,

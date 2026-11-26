@@ -8,6 +8,7 @@ import {
   type ProjectReport,
   type SessionDTO,
   type TeamReport,
+  type WorkLocation,
 } from '@rd/contracts';
 import type { Deps } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
@@ -48,10 +49,11 @@ async function pauseIntervals(q: Queryable, sessionIds: string[], r: Range, now:
 }
 
 export async function sessionsFor(deps: Deps, q: Queryable, orgId: string, userId: string, r: Range): Promise<SessionDTO[]> {
-  const rows = await many<Omit<SessionDTO, 'paused_seconds'>>(
+  const rows = await many<Omit<SessionDTO, 'paused_seconds' | 'location_changed'>>(
     q,
     `SELECT s.id, s.user_id, s.device_id, s.project_id, p.name AS project_name, s.task_id, t.name AS task_name,
             s.state, s.source, s.corrected, s.started_at, s.ended_at,
+            host(s.ip) AS ip, s.city, s.region, s.country_code,
             COALESCE(b.active, 0)::int AS active_seconds, COALESCE(b.idle, 0)::int AS idle_seconds,
             CASE WHEN s.source = 'manual'
                  THEN EXTRACT(EPOCH FROM (s.ended_at - s.started_at))::int
@@ -68,8 +70,10 @@ export async function sessionsFor(deps: Deps, q: Queryable, orgId: string, userI
   );
   const pauses = await pauseIntervals(q, rows.map((s) => s.id), { from: '1970-01-01T00:00:00Z', to: '9999-01-01T00:00:00Z' }, deps.now());
   const idle = await idleAdjustmentsFor(q, rows.map((s) => s.id));
+  const usual = (await usualLocations(q, orgId, [userId], r.to)).get(userId);
   return rows.map((s) => ({
     ...s,
+    location_changed: locationChanged(s, usual),
     idle_adjustments: idle.get(s.id) ?? [],
     paused_seconds: Math.round(
       pauses.filter((p) => p.session_id === s.id).reduce((n, p) => n + (new Date(p.to).getTime() - new Date(p.from).getTime()), 0) / 1000,
@@ -331,6 +335,15 @@ export async function teamReport(
      WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND project_id IS NOT NULL AND started_at > $3::timestamptz - interval '90 days'`,
     [orgId, ids, deps.now().toISOString()],
   );
+  const usual = await usualLocations(q, orgId, ids, r.to);
+  const located = await many<{ user_id: string; city: string | null; country_code: string }>(
+    q,
+    `SELECT user_id, city, country_code FROM work_sessions
+     WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND country_code IS NOT NULL
+       AND started_at >= $3 AND started_at < $4 AND ($5::uuid IS NULL OR project_id = $5)
+     ORDER BY started_at DESC`,
+    [orgId, ids, r.from, r.to, projectId],
+  );
   const now = deps.now().getTime();
   const shareCache = new Map<string, boolean>();
   const sharesScreenshots = async (userId: string, project: string): Promise<boolean> => {
@@ -384,6 +397,7 @@ export async function teamReport(
       ...(await attendanceFor(deps, q, orgId, m.user_id, r, tz)),
       status: liveStatus(open.find((o) => o.user_id === m.user_id), vis.activity, now),
       screenshot_count: vis.screenshots ? shotCount : null,
+      ...locationSummary(located.filter((s) => s.user_id === m.user_id), usual.get(m.user_id) ?? null),
     });
   }
 
@@ -398,6 +412,39 @@ export async function teamReport(
     members: rows,
     daily,
     visibility: { activity: anyActivity, apps: anyApps, screenshots: anyScreens },
+  };
+}
+
+/**
+ * Each person's usual work location: the (country, city) their sessions most often started from
+ * in the 30 days before `until` (ties: the most recent). Sessions without a location don't count.
+ */
+async function usualLocations(q: Queryable, orgId: string, userIds: string[], until: string): Promise<Map<string, WorkLocation>> {
+  const rows = await many<{ user_id: string } & WorkLocation>(
+    q,
+    `SELECT DISTINCT ON (user_id) user_id, city, country_code FROM work_sessions
+     WHERE organization_id = $1 AND user_id = ANY($2::uuid[]) AND country_code IS NOT NULL
+       AND started_at >= $3::timestamptz - interval '30 days' AND started_at < $3::timestamptz
+     GROUP BY user_id, city, country_code
+     ORDER BY user_id, count(*) DESC, max(started_at) DESC`,
+    [orgId, userIds, until],
+  );
+  return new Map(rows.map((r) => [r.user_id, { city: r.city, country_code: r.country_code }]));
+}
+
+/** A known location that differs in country, or in city when the city is known. No usual location: no change. */
+function locationChanged(s: { city: string | null; country_code: string | null }, usual: WorkLocation | null | undefined): boolean {
+  if (!usual || !s.country_code) return false;
+  return s.country_code !== usual.country_code || (s.city !== null && s.city !== usual.city);
+}
+
+/** `located` is newest first. */
+function locationSummary(located: { city: string | null; country_code: string }[], usual: WorkLocation | null) {
+  const latest = located[0];
+  return {
+    location: latest ? { city: latest.city, country_code: latest.country_code } : null,
+    usual_location: usual,
+    location_changes: located.filter((s) => locationChanged(s, usual)).length,
   };
 }
 

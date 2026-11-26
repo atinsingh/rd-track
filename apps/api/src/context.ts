@@ -2,6 +2,7 @@ import type { OrgRole } from '@rd/contracts';
 import type { Config } from './config';
 import type { Pool } from './db/pool';
 import type { EmailSender } from './email/sender';
+import type { GeoLocation } from './lib/geoip';
 import type { ObjectStore } from './storage/object-store';
 
 /** Everything a module needs; built once in `app.ts` / `worker.ts`. */
@@ -15,6 +16,8 @@ export interface Deps {
   fetch?: typeof fetch;
   /** DNS TXT lookups for SSO domain verification; tests substitute a fake. */
   resolveTxt?: (name: string) => Promise<string[][]>;
+  /** City lookup for a public IP (work location); tests substitute a fake. */
+  geoip?: (ip: string) => Promise<GeoLocation | null>;
 }
 
 export interface UserActor {

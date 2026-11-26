@@ -329,6 +329,26 @@ for s in api worker; do aws ecs update-service --cluster $C --service $s --force
 aws ecs wait services-stable --cluster $C --services api worker
 ```
 
+### 2.1 Work-location database (GeoIP)
+
+Policy `location.capture` stores the public IP a session starts from plus the city,
+region and country, looked up **offline** from DB-IP's "IP to City Lite" file (CC BY 4.0,
+no licence key). No employee IP is sent to a third party.
+
+* The API image downloads it at build time (`ARG GEOIP_MONTH` in `apps/api/Dockerfile`)
+  and sets `GEOIP_DB_PATH`. DB-IP publishes a new file each month: bump `GEOIP_MONTH`
+  (format `YYYY-MM`) every month or two. An old file still works, only less precisely.
+* Local or non-Docker runs: fetch it yourself and point the env var at it.
+
+  ```bash
+  curl -fL https://download.db-ip.com/free/dbip-city-lite-$(date +%Y-%m).mmdb.gz | gunzip > dbip-city-lite.mmdb
+  export GEOIP_DB_PATH=$PWD/dbip-city-lite.mmdb
+  ```
+* No file or an unreadable one: the API logs one warning and stores the IP without a city.
+  Session start never fails because of it. Private and loopback IPs never get a city.
+* Attribution: CC BY 4.0 requires crediting "IP Geolocation by DB-IP" (https://db-ip.com)
+  where the data is shown.
+
 ## 3. Rollback
 
 * **Automatic:** a deployment whose tasks don't become healthy is rolled back by the

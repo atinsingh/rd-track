@@ -21,6 +21,14 @@ COPY --from=build /out /app
 # would otherwise give the parent directory 0644 and make the file unreachable.
 RUN mkdir -p /usr/local/share/rds
 ADD --chmod=0644 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /usr/local/share/rds/rds-global-bundle.pem
+# Work location (policy `location.capture`): DB-IP "IP to City Lite" (CC BY 4.0, no key), read
+# offline so no employee IP leaves the server. Monthly file; bump GEOIP_MONTH to refresh (see
+# docs/runbooks/deploy.md). Missing or unreadable: IPs are stored without a city.
+ARG GEOIP_MONTH=2026-11
+RUN mkdir -p /usr/local/share/geoip
+ADD --chmod=0644 https://download.db-ip.com/free/dbip-city-lite-${GEOIP_MONTH}.mmdb.gz /usr/local/share/geoip/dbip-city-lite.mmdb.gz
+RUN gunzip /usr/local/share/geoip/dbip-city-lite.mmdb.gz
+ENV GEOIP_DB_PATH=/usr/local/share/geoip/dbip-city-lite.mmdb
 USER node
 EXPOSE 4000
 # Same image runs the API (default), the worker (`node dist/worker.js`)

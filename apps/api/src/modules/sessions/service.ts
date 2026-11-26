@@ -3,6 +3,7 @@ import { one, type Queryable } from '../../db/pool';
 import { projectBudgetReached } from '../money/budgets';
 import { resolveFor } from '../policy/service';
 import { emitEvent } from '../webhooks/service';
+import { lookupLocation, normalizeIp } from '../../lib/geoip';
 
 /**
  * Work-session lifecycle (system design §6.2, TIME-01..07). Used by both the
@@ -60,7 +61,7 @@ export async function startSession(
   deps: Deps,
   q: Queryable,
   device: DeviceActor,
-  input: { sessionId: string; projectId?: string | null; taskId?: string | null; at: Date; clientAt?: string; policyRevision: number },
+  input: { sessionId: string; projectId?: string | null; taskId?: string | null; at: Date; clientAt?: string; policyRevision: number; ip?: string },
 ): Promise<LifecycleResult> {
   const existing = await one<SessionRow>(q, 'SELECT * FROM work_sessions WHERE id = $1', [input.sessionId]);
   if (existing) {
@@ -115,11 +116,15 @@ export async function startSession(
     }
   }
 
+  // Work location: only the server-seen IP (`req.ip`, real client behind TRUST_PROXY_HOPS), never a client-supplied one.
+  const ip = settings.location.capture ? normalizeIp(input.ip) : null;
+  const geo = ip ? await lookupLocation(deps, ip) : null;
   const row = await one<SessionRow>(
     q,
     `INSERT INTO work_sessions
-       (id, organization_id, user_id, device_id, project_id, task_id, state, source, started_at, client_started_at, policy_revision)
-     VALUES ($1, $2, $3, $4, $5, $6, 'active', 'agent', $7, $8, $9) RETURNING *`,
+       (id, organization_id, user_id, device_id, project_id, task_id, state, source, started_at, client_started_at, policy_revision,
+        ip, city, region, country_code)
+     VALUES ($1, $2, $3, $4, $5, $6, 'active', 'agent', $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
     [
       input.sessionId,
       device.organizationId,
@@ -130,6 +135,10 @@ export async function startSession(
       input.at.toISOString(),
       input.clientAt ?? null,
       input.policyRevision,
+      ip,
+      geo?.city ?? null,
+      geo?.region ?? null,
+      geo?.country_code ?? null,
     ],
   );
   await transition(q, row!, 'active', input.at, 'start');
