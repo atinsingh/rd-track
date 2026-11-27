@@ -1,4 +1,6 @@
 import type {
+  AdminConsentResponse,
+  PersonConsentResponse,
   AppLocale,
   AccountSecurity,
   InviteInfo,
@@ -606,6 +608,13 @@ export const rd = {
     testWebhook: (id: string) => ok(post(`/v1/admin/webhooks/${enc(id)}/test`)),
     webhookDeliveries: (id: string, signal?: AbortSignal) =>
       list<WebhookDeliveryDTO>(`/v1/admin/webhooks/${enc(id)}/deliveries`, { signal }),
+  },
+  /** The monitoring agreement: people's answers (append-only) and the admin's text. */
+  consent: {
+    mine: (signal?: AbortSignal) => get<PersonConsentResponse>('/v1/me/consent', { signal }),
+    person: (userId: string, signal?: AbortSignal) => get<PersonConsentResponse>(`/v1/users/${enc(userId)}/consent`, { signal }),
+    agreement: (signal?: AbortSignal) => get<AdminConsentResponse>('/v1/admin/consent', { signal }),
+    setText: (customText: string | null) => put<AdminConsentResponse>('/v1/admin/consent', { custom_text: customText }),
   },
   policies: {
     list: (signal?: AbortSignal) => get<PolicyListResponse>('/v1/policies', { signal }),

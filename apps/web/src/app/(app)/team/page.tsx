@@ -2,10 +2,11 @@
 
 import Link from 'next/link';
 import { useId, useState } from 'react';
-import { UTILIZATION_BAND_PERCENT, type CorrectionDTO, type MemberReportRow, type TeamOvertimeReport, type TeamReport } from '@rd/contracts';
+import { UTILIZATION_BAND_PERCENT, type CorrectionDTO, type MemberReportRow, type TeamOvertimeReport, type TeamReport, type ConsentStatus } from '@rd/contracts';
 import type { Range } from '@/lib/api';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { expectedStyles } from '@/components/insights/Expected';
+import { ConsentBadge } from '@/components/consent/Consent';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
 import { Stats } from '@/components/Stats';
 import { StatusBadge, memberTimesheetHref } from '@/components/timesheet/TimesheetView';
@@ -27,7 +28,7 @@ import s from './team.module.css';
 
 type LiveStatus = 'tracking' | 'paused' | 'idle' | 'offline';
 /** What the report adds to each row beyond the shared contract: right-now status and the period's screenshot count. */
-type MemberRow = MemberReportRow & { status?: LiveStatus; screenshot_count?: number | null };
+type MemberRow = MemberReportRow & { status?: LiveStatus; screenshot_count?: number | null; consent?: ConsentStatus };
 const STATUSES: LiveStatus[] = ['tracking', 'paused', 'idle', 'offline'];
 const STATUS_LABEL: Record<LiveStatus, MessageKey> = {
   tracking: 'mgr.status.tracking',
@@ -231,7 +232,8 @@ function MembersTable({
                   {m.display_name}
                 </Link>
               </td>
-              <td>{m.status ? <StatusLabel status={m.status} /> : '—'}</td>
+              {/* Without an accepted monitoring agreement the app tracks nothing: say so, so an admin can follow up. */}
+              <td>{m.consent && m.consent !== 'accepted' ? <ConsentBadge status={m.consent} /> : m.status ? <StatusLabel status={m.status} /> : '—'}</td>
               <td className={numClass}>{formatDuration(m.tracked_seconds)}</td>
               {showActivity ? (
                 <>

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useMemo, useState, type ReactNode } from 'react';
 import type { ExpansionConflict, PolicyListResponse, PolicyScopeDetail, ScopeType } from '@rd/contracts';
+import { AgreementEditor } from '@/components/consent/Consent';
 import { Button } from '@/components/ui/Button';
 import { ActionError, ErrorState, Loading } from '@/components/ui/DataState';
 import { InlineSelect, Segmented, TextArea, inputClass } from '@/components/ui/Field';
@@ -542,6 +543,8 @@ export default function PoliciesPage() {
     name: orgScope?.scope_name ?? me.organization.name,
   };
   const detail = useApi(enabled ? `policy|${scope.type}|${scope.id}` : null, (signal) => rd.policies.detail(scope.type, scope.id, signal));
+  // Keyed on the org revision: publishing a policy that collects more starts a new agreement version.
+  const agreement = useApi(enabled ? `admin:consent|${list.data?.org_revision ?? ''}` : null, (signal) => rd.consent.agreement(signal));
 
   if (!enabled) return <NoAccess what={t('adm.pol.noAccess')} />;
 
@@ -615,6 +618,7 @@ export default function PoliciesPage() {
           )}
         </div>
       )}
+      <AgreementEditor res={agreement} tz={timezone} />
     </>
   );
 }

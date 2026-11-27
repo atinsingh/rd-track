@@ -8,6 +8,7 @@ import {
   type MyPolicyResponse,
   type NotificationDTO,
 } from '@rd/contracts';
+import { ConsentRecords } from '@/components/consent/Consent';
 import { DataExports } from '@/components/DataExports';
 import { Button } from '@/components/ui/Button';
 import { ActionError, Empty, ErrorState, Loading, Resource } from '@/components/ui/DataState';
@@ -147,6 +148,7 @@ export default function PrivacyPage() {
   const notes = useApi('me:notifications', (signal) => rd.my.notifications(signal));
   const myExports = useApi('me:data-exports', (signal) => rd.my.dataExports(signal));
   const erasure = useApi('me:erasure-request', (signal) => rd.my.erasureRequest(signal));
+  const consent = useApi('me:consent', (signal) => rd.consent.mine(signal));
 
   const markRead = async (id: string) => {
     notes.mutate((prev) => prev && { ...prev, items: prev.items.map((n) => (n.id === id ? { ...n, read_at: new Date().toISOString() } : n)) });
@@ -240,6 +242,8 @@ export default function PrivacyPage() {
           </div>
         </div>
       )}
+
+      <ConsentRecords res={consent} tz={tz} title={t('consent.myRecords')} />
 
       <div className="row" id="your-data">
         <Card title={t('privacy.download')} subtitle={t('privacy.downloadSubtitle')} className="grow">
