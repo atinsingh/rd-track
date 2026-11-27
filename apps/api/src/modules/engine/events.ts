@@ -290,16 +290,17 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       });
       return;
     }
-    case 'consent.declined': {
+    case 'consent.declined':
+    case 'consent.pending': {
       // Their team managers and every admin: tracking stays off until they agree.
       const to = new Set([...(await reviewersOf(q, e.organizationId, e.subjectUserId!)), ...(await orgAdmins(q, e.organizationId))]);
       to.delete(e.subjectUserId!);
       await send([...to], {
-        kind: 'consent_declined',
+        kind: e.type === 'consent.declined' ? 'consent_declined' : 'consent_pending',
         // Privacy is mandatory (in-app and email): nobody can opt out of hearing that monitoring was refused.
         category: 'privacy',
-        title: (l) => l.t('ev.consentDeclined.title', { name: str(d.user_name) }),
-        body: (l) => l.t('ev.consentDeclined.body', { name: str(d.user_name) }),
+        title: (l) => l.t(e.type === 'consent.declined' ? 'ev.consentDeclined.title' : 'ev.consentPending.title', { name: str(d.user_name) }),
+        body: (l) => l.t(e.type === 'consent.declined' ? 'ev.consentDeclined.body' : 'ev.consentPending.body', { name: str(d.user_name) }),
         link: `/team/${e.subjectUserId}`,
       });
       return;

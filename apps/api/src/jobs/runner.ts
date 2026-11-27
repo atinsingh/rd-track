@@ -4,6 +4,7 @@ import { withTx } from '../db/pool';
 import { SYSTEM_SCOPE, withScope } from '../db/tenant-scope';
 import { certificateEmail } from '../email/templates';
 import { runBillingLifecycle, snapshotSeats } from '../modules/billing/service';
+import { runConsentReminders } from '../modules/consent/service';
 import { publish } from '../modules/engine/events';
 import { sendNotificationEmail } from '../modules/engine/notify';
 import { runDeviceHealth, runTimesheetRules } from '../modules/engine/work';
@@ -95,6 +96,7 @@ async function runJob(deps: Deps, job: Job): Promise<void> {
     case 'rules.run':
       await runTimesheetRules(deps);
       await runDeviceHealth(deps);
+      await runConsentReminders(deps);
       await remindExpiringTokens(deps);
       return;
     default:

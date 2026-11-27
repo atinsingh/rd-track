@@ -6,7 +6,8 @@ import {
   renderAgreement,
   resolvePolicy,
   type AdminConsentResponse,
-  type AppLanguage,
+  consentCovers,
+  type PolicySettings,
   type ConsentDecisionRequest,
   type ConsentRecordDTO,
   type ConsentStatus,
@@ -15,7 +16,7 @@ import {
   type PersonConsentResponse,
 } from '@rd/contracts';
 import type { Deps, DeviceActor, UserActor } from '../../context';
-import { many, one, type Queryable } from '../../db/pool';
+import { many, one, withTx, type Queryable } from '../../db/pool';
 import { localesOf } from '../../i18n';
 import { AppError, errors } from '../../lib/errors';
 import { ADMIN_ROLES } from '../../http';
@@ -23,10 +24,11 @@ import { audit } from '../audit/service';
 import { publish } from '../engine/events';
 import { currentPlan } from '../billing/service';
 import { loadScopes, planScope, resolveFor } from '../policy/service';
+import { addDays, dateInTz, isoWeekday, isValidTimeZone, zonedTimeToMs } from '../scheduling/tz';
 
 /**
- * Monitoring agreement (packages/contracts/src/consent.ts). One version per organization;
- * a person's status is their newest answer to the current version, from any of their computers.
+ * Monitoring agreement (packages/contracts/src/consent.ts). Versions label the organization's
+ * text; a computer may track while one of its acceptances covers what it collects now.
  */
 
 const sha256 = (text: string) => createHash('sha256').update(text, 'utf8').digest('hex');
@@ -72,9 +74,7 @@ async function agreementText(
   const settings = [(await resolveFor(deps, q, orgId, userId, { deviceId })).settings];
   for (const p of projects) settings.push((await resolveFor(deps, q, orgId, userId, { projectId: p.id, deviceId })).settings);
   const locale = (await localesOf(q, [userId])).get(userId) ?? 'en-US';
-  const render = (language: AppLanguage) => renderAgreement({ organizationName: org!.name, settings, language, customText: custom });
-  // An acceptance of the same agreement in another language still counts: changing language is not collecting more.
-  return { text: render(languageOf(locale)), sameIn: (['en', 'fr'] as const).map((l) => sha256(render(l))) };
+  return { text: renderAgreement({ organizationName: org!.name, settings, language: languageOf(locale), customText: custom }), settings };
 }
 
 interface Answer {
@@ -84,17 +84,24 @@ interface Answer {
 }
 
 /**
- * A person's answer to `version` on a computer whose text hashes to one of `hashes`. Only an
- * acceptance of that exact text counts: joining a team or project that collects more, a
- * device policy or a plan change all change the text and need a new acceptance. A decline
- * (from any of their computers) stands until they accept or someone asks again.
+ * A person's answer on one computer, given what it collects now (`settings`). An acceptance
+ * from that computer counts while what it was told covers everything collected now
+ * (consentCovers): only collecting more (a team or project that collects more, a device
+ * policy, a plan, longer office hours…) asks again. A decline (from any of their computers)
+ * stands until they accept or someone asks again. `deviceId` null: any computer's answer.
  */
-async function answerFor(q: Queryable, orgId: string, userId: string, version: number, hashes: readonly string[]): Promise<Answer> {
-  const rows = await many<{ seq: string; decision: 'accepted' | 'declined'; text_sha256: string; decided_at: string }>(
+async function answerFor(
+  q: Queryable,
+  orgId: string,
+  userId: string,
+  deviceId: string | null,
+  settings: readonly PolicySettings[],
+): Promise<Answer> {
+  const rows = await many<{ seq: string; device_id: string; decision: 'accepted' | 'declined'; collected: PolicySettings[] | null; decided_at: string }>(
     q,
-    `SELECT seq, decision, text_sha256, decided_at FROM consent_records
-     WHERE organization_id = $1 AND user_id = $2 AND version = $3 ORDER BY seq DESC LIMIT 100`,
-    [orgId, userId, version],
+    `SELECT seq, device_id, decision, collected, decided_at FROM consent_records
+     WHERE organization_id = $1 AND user_id = $2 ORDER BY seq DESC LIMIT 100`,
+    [orgId, userId],
   );
   const asked = await one<{ at: string }>(
     q,
@@ -104,7 +111,9 @@ async function answerFor(q: Queryable, orgId: string, userId: string, version: n
   const asked_again_at = asked?.at ?? null;
   const decline = rows.find((r) => r.decision === 'declined');
   const after = (r: { seq: string }) => !decline || BigInt(r.seq) > BigInt(decline.seq);
-  const ok = rows.find((r) => r.decision === 'accepted' && hashes.includes(r.text_sha256) && after(r));
+  const ok = rows.find(
+    (r) => r.decision === 'accepted' && after(r) && (deviceId === null || r.device_id === deviceId) && r.collected && consentCovers(r.collected, settings),
+  );
   if (ok) return { status: 'accepted', decided_at: ok.decided_at, asked_again_at };
   // Still declined unless they accepted somewhere since, or were asked again (an ask in the same millisecond counts as after).
   const reopened = rows.some((r) => r.decision === 'accepted' && after(r)) || (asked_again_at && Date.parse(asked_again_at) >= Date.parse(decline!.decided_at));
@@ -114,8 +123,8 @@ async function answerFor(q: Queryable, orgId: string, userId: string, version: n
 
 async function answerNow(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string, deviceId: string | null) {
   const { version, custom_text } = await current(q, orgId);
-  const { text, sameIn } = await agreementText(deps, q, orgId, userId, deviceId, custom_text);
-  return { version, text, text_sha256: sha256(text), ...(await answerFor(q, orgId, userId, version, sameIn)) };
+  const { text, settings } = await agreementText(deps, q, orgId, userId, deviceId, custom_text);
+  return { version, text, text_sha256: sha256(text), settings, ...(await answerFor(q, orgId, userId, deviceId, settings)) };
 }
 
 const RANK: Record<ConsentStatus, number> = { accepted: 0, pending: 1, declined: 2 };
@@ -179,7 +188,7 @@ export async function recordDecision(
   const orgId = device.organizationId;
   // Serialized with version bumps (publishPolicy, setAgreementText) so an answer can't land on a version that just ended.
   await q.query('SELECT 1 FROM organizations WHERE id = $1 FOR SHARE', [orgId]);
-  const shown = await deviceConsent(deps, q, device);
+  const shown = await answerNow(deps, q, orgId, device.userId, device.deviceId);
   if (input.version !== shown.version || input.text_sha256 !== shown.text_sha256) {
     throw errors.conflict(CONSENT_OUTDATED, 'The agreement changed since it was shown; show the current one', {
       version: shown.version,
@@ -187,9 +196,9 @@ export async function recordDecision(
   }
   const at = deps.now().toISOString();
   await q.query(
-    `INSERT INTO consent_records (organization_id, user_id, device_id, version, decision, text_sha256, text, ip, decided_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [orgId, device.userId, device.deviceId, shown.version, input.decision, shown.text_sha256, shown.text, ip, at],
+    `INSERT INTO consent_records (organization_id, user_id, device_id, version, decision, text_sha256, text, ip, decided_at, collected)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [orgId, device.userId, device.deviceId, shown.version, input.decision, shown.text_sha256, shown.text, ip, at, JSON.stringify(shown.settings)],
   );
   if (input.decision === 'declined') {
     await stopOpenSessions(q, orgId, [device.userId], at);
@@ -212,7 +221,7 @@ export async function recordDecision(
     requestId,
     metadata: { version: shown.version, text_sha256: shown.text_sha256 },
   });
-  return { ...shown, status: input.decision, decided_at: at };
+  return { version: shown.version, text: shown.text, text_sha256: shown.text_sha256, status: input.decision, decided_at: at };
 }
 
 /** Open sessions end now: nothing more is tracked until the person answers (again). */
@@ -234,8 +243,9 @@ async function stopOpenSessions(q: Queryable, orgId: string, userIds: readonly s
 }
 
 /**
- * A new agreement version everyone must accept. Called with the organization row locked
- * (publishPolicy locks it). An expansion keeps the admin's own text, if any.
+ * A new agreement version (a policy that collects more, or the admin's text). Called with the
+ * organization row locked (publishPolicy locks it). An expansion keeps the admin's own text,
+ * if any. Who must answer again follows from coverage (answerFor), not from the version.
  * Open sessions are left to the app: it stops at its next refused call, and its queued
  * stop (and the minutes before it, collected under the policy the person had accepted)
  * arrive once they answer; a decline ends them here (recordDecision).
@@ -350,4 +360,63 @@ export async function setAgreementText(
     metadata: { version, custom: customText !== null, text_sha256: customText === null ? null : sha256(customText) },
   });
   return adminConsent(deps, q, actor);
+}
+
+// ───────────── reminders for people who never answer ─────────────
+
+/**
+ * When someone who hasn't answered is reported: the end of the first full office day after
+ * `since` in their office hours' zone and days (default Mon–Fri in their own time zone).
+ */
+export function pendingDueAt(sinceMs: number, days: readonly number[], tz: string): number {
+  let d = dateInTz(sinceMs, tz);
+  do {
+    d = addDays(d, 1);
+  } while (!days.includes(isoWeekday(d)));
+  return zonedTimeToMs(addDays(d, 1), '00:00', tz);
+}
+
+/**
+ * Hourly (rules.run): a person with a computer who still hasn't answered one working day after
+ * the agreement became required for them (their first computer, or the newest version) is
+ * reported to their managers and the admins, once per person per version.
+ * ponytail: the clock starts at the version or the first computer; a team move that asks again
+ * without a new version is reported on the next run if that start is older.
+ */
+export async function runConsentReminders(deps: Pick<Deps, 'now' | 'pool'>): Promise<number> {
+  const now = deps.now().getTime();
+  const people = await many<{ id: string; organization_id: string; display_name: string; timezone: string | null; since: string; version: number }>(
+    deps.pool,
+    `SELECT u.id, u.organization_id, u.display_name, u.timezone, v.version,
+            greatest(min(d.enrolled_at), coalesce(v.created_at, '-infinity'::timestamptz)) AS since
+     FROM users u
+     JOIN devices d ON d.user_id = u.id AND d.credential_status = 'active'
+     LEFT JOIN LATERAL (
+       SELECT coalesce(max(version), 1) AS version, max(created_at) AS created_at FROM consent_agreements a WHERE a.organization_id = u.organization_id
+     ) v ON true
+     WHERE u.status = 'active' AND u.tracking_enabled
+       AND NOT EXISTS (SELECT 1 FROM domain_events e WHERE e.organization_id = u.organization_id
+                       AND e.dedupe_key = 'consent_pending:' || u.id || ':' || v.version)
+     GROUP BY u.id, v.version, v.created_at
+     HAVING greatest(min(d.enrolled_at), coalesce(v.created_at, '-infinity'::timestamptz)) < $1`,
+    [new Date(now - 24 * 3600_000).toISOString()],
+  );
+  let n = 0;
+  for (const p of people) {
+    const hours = (await resolveFor(deps, deps.pool, p.organization_id, p.id)).settings.work_hours;
+    const tz = hours?.timezone ?? (p.timezone && isValidTimeZone(p.timezone) ? p.timezone : 'UTC');
+    if (now < pendingDueAt(Date.parse(p.since), hours?.days ?? [1, 2, 3, 4, 5], tz)) continue;
+    const ok = await withTx(deps.pool, async (q) => {
+      if ((await personAnswer(deps, q, p.organization_id, p.id)).status !== 'pending') return null;
+      return publish(q, {
+        organizationId: p.organization_id,
+        type: 'consent.pending',
+        subjectUserId: p.id,
+        data: { user_name: p.display_name, version: p.version },
+        dedupeKey: `consent_pending:${p.id}:${p.version}`,
+      });
+    });
+    if (ok) n++;
+  }
+  return n;
 }

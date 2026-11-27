@@ -42,6 +42,8 @@ export const en = {
   'ev.escalated.more': '{names} and {n} more',
   'ev.consentDeclined.title': '{name} declined the monitoring agreement',
   'ev.consentDeclined.body': 'Track records nothing on {name}’s computers until they agree. You can ask them again from their page. What happens if they keep declining is for your organization (HR) to decide; Track takes no other action.',
+  'ev.consentPending.title': '{name} hasn’t answered the monitoring agreement',
+  'ev.consentPending.body': 'Track records nothing on {name}’s computers until they agree; it was shown in the desktop app over a working day ago. You can ask them again from their page. What happens if they don’t agree is for your organization (HR) to decide; Track takes no other action.',
   'ev.deviceStale.title': '{device} hasn’t synced for a few working days',
   'ev.deviceStale.body': 'Last seen {date}. If you\'ve been working on it, open Track so your time arrives. If you no longer use it, ask your org admin to remove it.',
   'ev.expenseClaimed.title': '{name} claimed an expense of {amount}',

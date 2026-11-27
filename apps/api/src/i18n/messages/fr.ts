@@ -42,6 +42,8 @@ export const fr: Record<ServerMessageKey, string> = {
   'ev.escalated.more': '{names} et {n} autres',
   'ev.consentDeclined.title': '{name} a refusé l’entente de suivi',
   'ev.consentDeclined.body': 'Track n’enregistre rien sur les ordinateurs de {name} tant que cette personne n’a pas accepté. Vous pouvez le lui redemander depuis sa page. La suite en cas de refus maintenu relève de votre organisation (RH) ; Track ne fait rien d’autre.',
+  'ev.consentPending.title': '{name} n’a pas répondu à l’entente de suivi',
+  'ev.consentPending.body': 'Track n’enregistre rien sur les ordinateurs de {name} tant que cette personne n’a pas accepté ; l’entente lui est présentée dans l’application de bureau depuis plus d’un jour ouvrable. Vous pouvez le lui redemander depuis sa page. La suite en l’absence d’accord relève de votre organisation (RH) ; Track ne fait rien d’autre.',
   'ev.deviceStale.title': '{device} ne s’est pas synchronisé depuis quelques jours ouvrables',
   'ev.deviceStale.body': 'Vu pour la dernière fois le {date}. Si vous y avez travaillé, ouvrez Track pour que votre temps soit transmis. Si vous ne l’utilisez plus, demandez à votre administrateur de le retirer.',
   'ev.expenseClaimed.title': '{name} a soumis une dépense de {amount}',

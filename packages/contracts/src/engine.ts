@@ -36,6 +36,7 @@ export const DOMAIN_EVENT_TYPES = [
   'expense.decided',
   // Monitoring agreement
   'consent.declined',
+  'consent.pending',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 

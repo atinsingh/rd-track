@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { withScope } from '../src/db/tenant-scope';
+import { SYSTEM_SCOPE, withScope } from '../src/db/tenant-scope';
+import { pendingDueAt, runConsentReminders } from '../src/modules/consent/service';
 import { answerConsent, bucket, deviceReq, enrollDevice, event, makeOrg, sendBatch, testEnv, type TestEnv } from './helpers';
 
 /** The monitoring agreement: asked before tracking, enforced by the server, versioned, kept as proof. */
@@ -119,9 +120,9 @@ describe('monitoring consent', () => {
       settings: { apps: { capture_app_name: false } }, change_note: 'less',
     });
     expect(narrower.status).toBe(200);
-    // Same version, but the text this computer shows changed, so the acceptance is for other text:
-    // any change to what a person is shown (even collecting less) asks them again.
-    expect(await shown(d)).toMatchObject({ version: 1, status: 'pending' });
+    // Collecting less is covered by what they accepted: no new answer, tracking goes on.
+    expect(await shown(d)).toMatchObject({ version: 1, status: 'accepted' });
+    expect((await sendBatch(env, d, [bucket(d, sid, env.clock.iso())])).body.results[0].status).toBe('accepted');
 
     const wider = await org.admin.put(`/v1/policies/organization/${org.id}`, {
       settings: {
@@ -165,10 +166,11 @@ describe('monitoring consent', () => {
     expect(put.body).toMatchObject({ version: 2, custom_text: 'Our own agreement.' });
     expect(put.body.history[0]).toMatchObject({ version: 2, reason: 'text_edited' });
     const custom = await shown(d);
-    expect(custom).toMatchObject({ version: 2, status: 'pending' });
+    // New wording, same collection: what they accepted still covers it, so they aren't asked again.
+    expect(custom).toMatchObject({ version: 2, status: 'accepted' });
     // The admin's text, followed by what is collected about this person.
     expect(custom.text).toMatch(/^Our own agreement\.\n\nWhat is collected\n/);
-    expect((await start(d)).body.error.code).toBe('consent_required');
+    expect((await start(d)).status).toBe(201);
 
     // Another organization is untouched and can't see or answer this one.
     expect(await shown(od)).toMatchObject({ version: 1, status: 'accepted' });
@@ -191,7 +193,7 @@ describe('monitoring consent', () => {
     expect(pub.status).toBe(200);
     expect((await start(d)).status).toBe(201);
 
-    // Joining it widens what is collected about them: the accepted text no longer matches.
+    // Joining it widens what is collected about them beyond what they accepted.
     await org.admin.post(`/v1/admin/teams/${team.body.id}/members`, { user_id: org.users.emp!.id, role: 'member' });
     const now = await shown(d);
     expect(now).toMatchObject({ version: 1, status: 'pending' });
@@ -204,6 +206,11 @@ describe('monitoring consent', () => {
       expect(r.body.error.code).toBe('consent_required');
     }
     await answerConsent(env, d, 'accepted');
+    expect((await start(d)).status).toBe(201);
+
+    // Leaving it collects less: no new answer.
+    await org.admin.req('DELETE', `/v1/admin/teams/${team.body.id}/members/${org.users.emp!.id}`);
+    expect((await shown(d)).status).toBe('accepted');
     expect((await start(d)).status).toBe(201);
   });
 
@@ -262,7 +269,7 @@ describe('monitoring consent', () => {
     expect((await deviceReq(env, d, 'POST', '/v1/screenshots/upload-intents', { session_id: sid, content_type: 'image/webp' })).status).not.toBe(403);
   });
 
-  it('binds an acceptance to the computer it was given on when a device policy differs', async () => {
+  it('asks again only on the computer whose device policy collects more', async () => {
     const org = await makeOrg(env, 'cons11');
     const laptop = await enrollDevice(env, org, 'emp');
     const desktop = await enrollDevice(env, org, 'emp');
@@ -273,9 +280,9 @@ describe('monitoring consent', () => {
     expect((await shown(laptop)).text).not.toContain('Screenshots, about one every');
     expect((await shown(desktop)).text).toContain('Screenshots, about one every');
 
-    await answerConsent(env, laptop, 'accepted');
+    // The laptop collects what it did: its acceptance stands. It doesn't cover the desktop's screenshots.
+    expect((await shown(laptop)).status).toBe('accepted');
     expect((await start(laptop)).status).toBe(201);
-    // The laptop's acceptance doesn't cover the desktop's screenshots.
     expect((await start(desktop)).body.error.code).toBe('consent_required');
     const before = await org.admin.get(`/v1/users/${org.users.emp!.id}/consent`);
     expect(before.body.status).toBe('pending');
@@ -284,5 +291,50 @@ describe('monitoring consent', () => {
     expect((await shown(laptop)).status).toBe('accepted');
     expect((await shown(desktop)).status).toBe('accepted');
     expect((await org.admin.get(`/v1/users/${org.users.emp!.id}/consent`)).body.status).toBe('accepted');
+  });
+
+  it('reports the end of the first full office day after the agreement was shown', () => {
+    // Monday morning → end of Tuesday; Friday → end of Monday (the weekend doesn't count).
+    expect(new Date(pendingDueAt(Date.parse('2026-11-02T15:00:00Z'), [1, 2, 3, 4, 5], 'America/Toronto')).toISOString()).toBe('2026-11-04T05:00:00.000Z');
+    expect(new Date(pendingDueAt(Date.parse('2026-11-06T15:00:00Z'), [1, 2, 3, 4, 5], 'UTC')).toISOString()).toBe('2026-11-10T00:00:00.000Z');
+    expect(new Date(pendingDueAt(Date.parse('2026-11-06T15:00:00Z'), [6], 'UTC')).toISOString()).toBe('2026-11-08T00:00:00.000Z');
+  });
+
+  it('tells managers and admins once per version about someone who never answers', async () => {
+    const at = (iso: string) => (env.clock.t = Date.parse(iso));
+    at('2026-11-02T10:00:00Z'); // a Monday
+    const org = await makeOrg(env, 'cons12');
+    const d = await enrollDevice(env, org, 'emp', { consent: false });
+    await enrollDevice(env, org, 'emp2'); // answered: never reported
+    await env.deps.pool.query(`UPDATE devices SET enrolled_at = '2026-11-02T10:00:00Z' WHERE organization_id = $1`, [org.id]);
+    const run = () => withScope(SYSTEM_SCOPE, () => runConsentReminders(env.deps));
+    const pending = async () =>
+      (
+        await env.deps.pool.query(
+          `SELECT n.user_id, j.id IS NOT NULL AS mailed FROM notifications n
+           LEFT JOIN jobs j ON j.kind = 'notification.email' AND j.payload->>'notification_id' = n.id::text
+           WHERE n.organization_id = $1 AND n.kind = 'consent_pending' ORDER BY n.user_id`,
+          [org.id],
+        )
+      ).rows;
+
+    at('2026-11-03T20:00:00Z'); // still within their first working day after it was shown
+    await run();
+    expect(await pending()).toEqual([]);
+
+    at('2026-11-04T12:00:00Z');
+    await run();
+    await run();
+    const told = await pending();
+    expect(told.map((r) => r.user_id).sort()).toEqual([org.users.manager!.id, org.adminId].sort());
+    expect(told.every((r) => r.mailed)).toBe(true);
+    const title = await env.deps.pool.query(`SELECT title FROM notifications WHERE organization_id = $1 AND kind = 'consent_pending' LIMIT 1`, [org.id]);
+    expect(title.rows[0].title).toMatch(/hasn’t answered the monitoring agreement$/);
+
+    // Once they answer, nothing more is sent.
+    await answerConsent(env, d, 'accepted');
+    at('2026-11-09T12:00:00Z');
+    await run();
+    expect(await pending()).toHaveLength(2);
   });
 });

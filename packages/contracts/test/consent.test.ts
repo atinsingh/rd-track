@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_POLICY, renderAgreement, type PolicySettings } from '../src';
+import { DEFAULT_POLICY, consentCovers, renderAgreement, type PolicySettings } from '../src';
 
 const policy = (patch: (p: PolicySettings) => void): PolicySettings => {
   const p = JSON.parse(JSON.stringify(DEFAULT_POLICY)) as PolicySettings;
@@ -73,5 +73,48 @@ describe('renderAgreement', () => {
     const text = renderAgreement({ organizationName: 'Acme', settings: [DEFAULT_POLICY], language: 'fr' });
     expect(text).toContain('Entente de suivi');
     expect(text).toContain('Jamais recueilli');
+  });
+});
+
+describe('consentCovers', () => {
+  const hours = { timezone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' };
+  const shots = policy((s) => {
+    s.screenshots.enabled = true;
+  });
+
+  it('covers collecting less, or the same split differently', () => {
+    expect(consentCovers([shots], [DEFAULT_POLICY])).toBe(true);
+    expect(consentCovers([DEFAULT_POLICY, shots], [shots])).toBe(true);
+    expect(consentCovers([shots], [])).toBe(true);
+  });
+
+  it('asks again for anything collected beyond what was accepted, text or not', () => {
+    expect(consentCovers([DEFAULT_POLICY], [DEFAULT_POLICY, shots])).toBe(false);
+    expect(consentCovers([DEFAULT_POLICY], [policy((s) => (s.pause.max_minutes = DEFAULT_POLICY.pause.max_minutes - 5))])).toBe(false);
+    expect(consentCovers([DEFAULT_POLICY], [policy((s) => (s.retention.activity_days += 30))])).toBe(false);
+    const wider = policy((s) => {
+      s.screenshots.enabled = true;
+      s.screenshots.max_width_px = shots.screenshots.max_width_px * 2;
+      s.screenshots.excluded_apps = [];
+    });
+    const withExcluded = policy((s) => {
+      s.screenshots.enabled = true;
+      s.screenshots.excluded_apps = ['1Password'];
+    });
+    expect(consentCovers([shots], [wider])).toBe(false);
+    expect(consentCovers([withExcluded], [shots])).toBe(false);
+  });
+
+  it('asks again when office hours grow, and when location starts because office hours appear', () => {
+    const office = policy((s) => (s.work_hours = hours));
+    expect(consentCovers([office], [policy((s) => (s.work_hours = { ...hours, end: '16:00' }))])).toBe(true);
+    expect(consentCovers([office], [policy((s) => (s.work_hours = { ...hours, end: '18:00' }))])).toBe(false);
+    expect(consentCovers([office], [policy((s) => (s.work_hours = { ...hours, days: [1, 2, 3, 4, 5, 6] }))])).toBe(false);
+    const locNoHours = policy((s) => (s.location.capture = true));
+    const locHours = policy((s) => {
+      s.location.capture = true;
+      s.work_hours = hours;
+    });
+    expect(consentCovers([locNoHours], [locHours])).toBe(false);
   });
 });

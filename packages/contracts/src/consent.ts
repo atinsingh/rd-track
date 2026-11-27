@@ -1,13 +1,14 @@
 import { z } from 'zod';
 import type { AppLanguage } from './locale';
-import type { PolicySettings } from './policy';
+import { collectionExpansions, type PolicySettings, type WorkHours } from './policy';
 
 /**
  * Monitoring agreement (EULA) the desktop app shows before it tracks anything.
  *
- * The organization's agreement has a version. It goes up when a published policy collects
- * more (`collectionExpansions`) and when an admin edits or resets the text; each person must
- * accept the current version before their computers may track (`403 consent_required`).
+ * Each acceptance stores what that computer was told is collected (the policies the text was
+ * generated from). Tracking needs an acceptance that covers everything collected now
+ * (`consentCovers`), else `403 consent_required`: only collecting more asks again. The
+ * version labels the text (a policy that collects more, an admin's edit) and its history.
  * The text is generated from the effective policy unless an admin wrote their own.
  */
 
@@ -175,7 +176,7 @@ const AGREEMENT_TEXT = {
     answer: (org: string) =>
       `Choose "I agree" to allow this monitoring on this computer. If you choose "Decline", the app will not track anything and ${org} will see that you declined; ` +
       `what happens next is up to ${org} (for example HR), and the app takes no other action. ` +
-      'You will be asked again if what is collected changes. Your answers are on your Privacy page.',
+      'You will be asked again if more is collected. Your answers are on your Privacy page.',
   },
   fr: {
     title: (org: string) => `Entente de suivi du temps de travail — ${org}`,
@@ -212,6 +213,36 @@ const AGREEMENT_TEXT = {
     answer: (org: string) =>
       `Choisissez « J’accepte » pour autoriser ce suivi sur cet ordinateur. Si vous choisissez « Refuser », l’application ne suivra rien et ${org} verra que vous avez refusé ; ` +
       `la suite relève de ${org} (par exemple les RH), et l’application ne fait rien d’autre. ` +
-      'On vous le redemandera si ce qui est recueilli change. Vos réponses se trouvent sur votre page Confidentialité.',
+      'On vous le redemandera si davantage est recueilli. Vos réponses se trouvent sur votre page Confidentialité.',
   },
 } as const;
+
+/** Office hours `next` that stay within `prev`: same zone, no new days, no earlier start or later end. */
+function hoursWithin(prev: WorkHours, next: WorkHours): boolean {
+  if (prev.timezone !== next.timezone || !next.days.every((d) => prev.days.includes(d))) return false;
+  if (prev.start === next.start && prev.end === next.end) return true;
+  // HH:MM compares as text; overnight hours (end before start) must match exactly.
+  return prev.start <= prev.end && next.start <= next.end && next.start >= prev.start && next.end <= prev.end;
+}
+
+/**
+ * What `next` collects beyond `prev`, for consent: everything a published policy counts as an
+ * expansion, plus office hours that grow (location and auto-start follow them) and location
+ * starting because office hours appeared.
+ */
+export function consentExpansions(prev: PolicySettings, next: PolicySettings): string[] {
+  const out = collectionExpansions(prev, next).map((c) => c.field);
+  if (prev.work_hours && next.work_hours && !hoursWithin(prev.work_hours, next.work_hours)) out.push('work_hours');
+  const located = (s: PolicySettings) => s.location.capture && s.work_hours !== null;
+  if (!located(prev) && located(next) && !out.includes('location.capture')) out.push('location.capture');
+  return out;
+}
+
+/**
+ * Whether an acceptance given for `accepted` (the policies behind the text shown then) covers
+ * what is collected now: each current policy within one that was accepted. Collecting less,
+ * leaving a team or project, or wording changes never ask again.
+ */
+export function consentCovers(accepted: readonly PolicySettings[], now: readonly PolicySettings[]): boolean {
+  return now.every((n) => accepted.some((a) => consentExpansions(a, n).length === 0));
+}
