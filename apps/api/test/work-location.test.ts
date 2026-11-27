@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runRetention } from '../src/modules/retention/service';
 import { withinWorkHours } from '../src/modules/sessions/service';
-import { enrollDevice, event, login, makeOrg, testEnv, type Device, type Org, type TestEnv } from './helpers';
+import { answerConsent, enrollDevice, event, login, makeOrg, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** Work location (policy `location.capture`): the server-seen IP of a session start and its city. */
 
@@ -57,6 +57,8 @@ describe('work location', () => {
       confirm_expansion: true,
     });
     expect(pub.status, JSON.stringify(pub.body)).toBe(200);
+    // Turning location on collects more, so the person accepts the new agreement first.
+    await answerConsent(env, dev, 'accepted');
     const from = env.clock.iso();
     await session(dev, '203.0.113.10');
     await session(dev, '203.0.113.10');
@@ -95,6 +97,8 @@ describe('work location', () => {
       confirm_expansion: true,
     });
     expect(pub.status, JSON.stringify(pub.body)).toBe(200);
+    // Turning location on collects more, so the person accepts the new agreement first.
+    await answerConsent(env, dev, 'accepted');
     const sid = await session(dev, '203.0.113.10');
     // Read the row itself: session lists only show office-hours time to viewers.
     const { rows } = await env.deps.pool.query('SELECT ip, city, country_code FROM work_sessions WHERE id = $1', [sid]);
