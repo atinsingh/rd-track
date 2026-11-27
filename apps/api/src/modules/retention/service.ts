@@ -8,10 +8,12 @@ import { deleteScreenshot } from '../screenshots/service';
  * AUD-03: scheduled deletion — screenshots first, then activity/app metadata under
  * each employee's resolved retention, then operational data. Legal holds win.
  */
+const LOCATION_DAYS = 30;
+
 export async function runRetention(deps: Deps): Promise<Record<string, number>> {
   const { pool } = deps;
   const now = deps.now();
-  const counts = { screenshots: 0, abandoned_uploads: 0, activity_buckets: 0, app_usage: 0, data_gaps: 0, ingest_events: 0, exports: 0 };
+  const counts = { screenshots: 0, abandoned_uploads: 0, activity_buckets: 0, app_usage: 0, data_gaps: 0, session_locations: 0, ingest_events: 0, exports: 0 };
 
   // 1. Expired screenshots without a legal hold.
   for (;;) {
@@ -52,6 +54,16 @@ export async function runRetention(deps: Deps): Promise<Record<string, number>> 
     counts.app_usage +=
       (await pool.query(`DELETE FROM app_usage WHERE user_id = $1 AND started_at < $2 AND ${notHeld('started_at')}`, [u.id, appCutoff])).rowCount ?? 0;
   }
+
+  // Work location (IP and city) is kept 30 days at most, the same window the usual city is counted over.
+  counts.session_locations =
+    (await pool.query(
+      `UPDATE work_sessions s SET ip = NULL, city = NULL, region = NULL, country_code = NULL
+       WHERE (s.ip IS NOT NULL OR s.city IS NOT NULL) AND s.started_at < $1
+         AND NOT EXISTS (SELECT 1 FROM legal_holds h WHERE h.user_id = s.user_id AND h.released_at IS NULL
+                         AND s.started_at BETWEEN h.from_at AND h.to_at)`,
+      [new Date(now.getTime() - LOCATION_DAYS * 86_400_000).toISOString()],
+    )).rowCount ?? 0;
 
   // 3. Raw envelopes are operational, not records.
   counts.ingest_events =

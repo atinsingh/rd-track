@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { runRetention } from '../src/modules/retention/service';
 import { withinWorkHours } from '../src/modules/sessions/service';
 import { enrollDevice, event, login, makeOrg, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
@@ -107,5 +108,17 @@ describe('work location', () => {
     expect(withinWorkHours(wh, new Date('2026-10-26T21:00:00Z'))).toBe(false); // Mon 17:00, end excluded
     expect(withinWorkHours(wh, new Date('2026-10-31T14:00:00Z'))).toBe(false); // Saturday
     expect(withinWorkHours(null, new Date('2026-10-26T13:30:00Z'))).toBe(false);
+  });
+
+  it('clears IP and city from sessions older than 30 days', async () => {
+    const { rows: before } = await env.deps.pool.query(`SELECT count(*)::int AS n FROM work_sessions WHERE user_id = $1 AND ip IS NOT NULL`, [org.users.emp!.id]);
+    expect(before[0].n).toBeGreaterThan(0);
+    env.clock.advance(31 * 86_400_000);
+    await runRetention(env.deps);
+    const { rows } = await env.deps.pool.query(
+      `SELECT count(*)::int AS n FROM work_sessions WHERE user_id = $1 AND (ip IS NOT NULL OR city IS NOT NULL OR country_code IS NOT NULL)`,
+      [org.users.emp!.id],
+    );
+    expect(rows[0].n).toBe(0);
   });
 });
