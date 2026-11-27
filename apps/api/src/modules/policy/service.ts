@@ -24,6 +24,7 @@ import { signEd25519 } from '../../lib/crypto';
 import { errors } from '../../lib/errors';
 import { audit } from '../audit/service';
 import { currentPlan, currentSubscription } from '../billing/service';
+import { bumpAgreement } from '../consent/service';
 import { notify } from '../engine/notify';
 
 interface ScopeRow {
@@ -306,6 +307,8 @@ export async function publishPolicy(
     [policy!.id, orgId, version, rev!.policy_revision, settings, input.change_note, expandedFor.length > 0, actor.userId],
   );
   await q.query('UPDATE policies SET current_version = $2 WHERE id = $1', [policy!.id, version]);
+  // Collecting more needs everyone's agreement again before their computers track (consent/service.ts).
+  const agreementVersion = expandedFor.length > 0 ? await bumpAgreement(deps, q, orgId, 'policy_expansion', actor.userId) : null;
 
   await notify(q, orgId, expandedFor, {
     kind: 'policy_expansion',
@@ -327,6 +330,7 @@ export async function publishPolicy(
       expands_collection: expandedFor.length > 0,
       notified_users: expandedFor.length,
       changed_fields: [...changes.keys()],
+      agreement_version: agreementVersion,
     },
   });
   return scopeDetail(deps, q, orgId, scopeType, scopeId);

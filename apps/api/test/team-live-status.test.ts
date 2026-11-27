@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { SYSTEM_SCOPE, withScope } from '../src/db/tenant-scope';
-import { bucket, deviceReq, enrollDevice, event, makeOrg, minutes, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
+import { answerConsent, bucket, deviceReq, enrollDevice, event, makeOrg, minutes, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** The team overview says what each person is doing right now, and how many screenshots the range holds. */
 
@@ -67,6 +67,7 @@ describe('team live status', () => {
       confirm_expansion: true,
     });
     expect(res.status, JSON.stringify(res.body)).toBe(200);
+    await answerConsent(env, dev, 'accepted');
     expect((await rowFor('emp')).screenshot_count).toBe(0);
 
     await send([event(dev, sid, 'session.resumed.v1', {}, env.clock.iso())]);

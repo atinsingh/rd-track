@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { bucket, deviceReq, enrollDevice, event, makeOrg, minutes, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
+import { answerConsent, bucket, deviceReq, enrollDevice, event, makeOrg, minutes, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** Website domains (Pro): the browser extension tells the app, the app tells the server. */
 
@@ -53,6 +53,7 @@ describe('website domains', () => {
 
     const on = await org.admin.put(`/v1/policies/organization/${org.id}`, { settings: { apps: { capture_domains: true } }, change_note: 'Record website domains', confirm_expansion: true });
     expect(on.status).toBe(200);
+    await answerConsent(env, dev, 'accepted');
     expect(await browse(org, dev, 'org.mozilla.firefox', 3)).toEqual({ 'com.google.Chrome': null, 'org.mozilla.firefox': 'github.com' });
     // Only a hostname is ever accepted.
     const sid = randomUUID();

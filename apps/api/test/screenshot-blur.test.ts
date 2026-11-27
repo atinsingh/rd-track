@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deviceReq, enrollDevice, event, makeOrg, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
+import { answerConsent, deviceReq, enrollDevice, event, makeOrg, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** SCR-12: screenshots blurred on the computer, before upload, when the policy says so. */
 
@@ -27,6 +27,8 @@ async function policy(screenshots: object) {
     confirm_expansion: true,
   });
   expect(r.status, JSON.stringify(r.body)).toBe(200);
+  // Collecting more asks the person again before their computer may capture.
+  if ((await deviceReq(env, dev, 'GET', '/v1/device/consent')).body.status !== 'accepted') await answerConsent(env, dev, 'accepted');
   return r;
 }
 

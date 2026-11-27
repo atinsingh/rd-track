@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { deviceReq, enrollDevice, event, makeOrg, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
+import { answerConsent, deviceReq, enrollDevice, event, makeOrg, sendBatch, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 let env: TestEnv;
 let org: Org;
@@ -17,6 +17,8 @@ async function enableScreenshots(o: Org) {
     confirm_expansion: true,
   });
   expect(res.status).toBe(200);
+  // Collecting more asks the person again before their computer may capture.
+  await answerConsent(env, dev, 'accepted');
 }
 
 async function capture(d: Device, sid: string): Promise<{ id: string; status: number; body: any }> {

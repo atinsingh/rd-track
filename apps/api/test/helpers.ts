@@ -183,7 +183,11 @@ export interface Device {
   publicKeyB64: string;
 }
 
-export async function enrollDevice(env: TestEnv, org: Org, userKey: string): Promise<Device> {
+/**
+ * Enrolls a computer for `userKey`. By default the person then accepts the monitoring agreement,
+ * as the app asks before tracking; `{ consent: false }` leaves it unanswered.
+ */
+export async function enrollDevice(env: TestEnv, org: Org, userKey: string, opts: { consent?: boolean } = {}): Promise<Device> {
   const code = await org.admin.post('/v1/admin/enrollment-codes', { user_id: org.users[userKey]!.id });
   if (code.status !== 201) throw new Error(`enrollment code: ${code.status} ${JSON.stringify(code.body)}`);
   const res = await env.app.inject({
@@ -193,7 +197,18 @@ export async function enrollDevice(env: TestEnv, org: Org, userKey: string): Pro
   });
   if (res.statusCode !== 201) throw new Error(`enroll: ${res.statusCode} ${res.body}`);
   const b = JSON.parse(res.body);
-  return { id: b.device_id, credential: b.device_credential, userId: b.user_id, orgId: b.organization_id, seq: 0, publicKeyB64: b.policy_signing_key.public_key_b64 };
+  const d: Device = { id: b.device_id, credential: b.device_credential, userId: b.user_id, orgId: b.organization_id, seq: 0, publicKeyB64: b.policy_signing_key.public_key_b64 };
+  if (opts.consent !== false) await answerConsent(env, d, 'accepted');
+  return d;
+}
+
+/** The person answers the agreement currently shown on `d`. */
+export async function answerConsent(env: TestEnv, d: Device, decision: 'accepted' | 'declined') {
+  const shown = await deviceReq(env, d, 'GET', '/v1/device/consent');
+  if (shown.status !== 200) throw new Error(`consent: ${shown.status} ${JSON.stringify(shown.body)}`);
+  const r = await deviceReq(env, d, 'POST', '/v1/device/consent', { version: shown.body.version, text_sha256: shown.body.text_sha256, decision });
+  if (r.status !== 200) throw new Error(`consent answer: ${r.status} ${JSON.stringify(r.body)}`);
+  return r.body;
 }
 
 export async function deviceReq(env: TestEnv, d: Device, method: 'GET' | 'POST', url: string, body?: unknown) {

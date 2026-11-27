@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { dailyInsights, focusBlocks, summarize, typicalDay, type InsightBucket } from '../src/modules/insights/compute';
 import { assertPublicHttps } from '../src/modules/webhooks/service';
 import {
+  answerConsent,
   bucket,
   deviceReq,
   enrollDevice,
@@ -12,6 +13,7 @@ import {
   PASSWORD,
   sendBatch,
   testEnv,
+  type Device,
   type Org,
   type TestEnv,
 } from './helpers';
@@ -289,6 +291,8 @@ describe('tray app support', () => {
     });
     const enrolled = JSON.parse(res.body);
     expect(enrolled.dashboard_url).toBe(`${env.deps.config.webUrl}/me`);
+    // The app asks for the monitoring agreement before its first heartbeat counts.
+    await answerConsent(env, { credential: enrolled.device_credential } as Device, 'accepted');
     const hb = await env.app.inject({
       method: 'POST',
       url: '/v1/device/heartbeat',

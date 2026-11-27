@@ -18,6 +18,8 @@ import { authenticateToken } from './modules/api-tokens/service';
 import { apiEndpoint } from './modules/api-tokens/surface';
 import { developerRoutes } from './modules/developer-routes';
 import { brandingRoutes } from './modules/branding-routes';
+import { CONSENT_GATED_ROUTES, consentRoutes } from './modules/consent-routes';
+import { assertConsented } from './modules/consent/service';
 import { authenticateClient } from './modules/client-portal/service';
 import { clientPortalRoutes } from './modules/client-portal-routes';
 import { expensesRoutes } from './modules/expenses-routes';
@@ -93,6 +95,8 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       if (!d) throw new AppError(401, 'unauthenticated', 'Unknown device credential');
       req.device = d;
       narrowScope(d.organizationId);
+      // Nothing is tracked without the person's acceptance of the current agreement (403 consent_required).
+      if (CONSENT_GATED_ROUTES.has(`${req.method} ${req.routeOptions.url}`)) await assertConsented(deps.pool, d);
       return;
     }
 
@@ -224,6 +228,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
   await app.register(async (s) => platformRoutes(s, deps));
   await app.register(async (s) => clientPortalRoutes(s, deps));
   await app.register(async (s) => brandingRoutes(s, deps));
+  await app.register(async (s) => consentRoutes(s, deps));
   await app.register(async (s) => localStorageRoutes(s, deps));
   return app;
 }

@@ -20,6 +20,7 @@ import { errors } from '../lib/errors';
 import { parse, parseRange } from '../lib/validate';
 import { activityFor, appsFor, projectReport, sessionsFor, teamReport } from './activity/queries';
 import { accessLogFor, audit } from './audit/service';
+import { consentStatuses } from './consent/service';
 import { assertCanView, managedProjectIds, managedTeamIds, visibilityFor, type ViewPurpose } from './authz';
 import { myCorrections, pendingForReviewer, proposeCorrection, reviewCorrection } from './corrections/service';
 import { createExport, getExport, listExports } from './exports/service';
@@ -176,7 +177,7 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
       const projectId = req.query.project_id ? parse(z.uuid(), req.query.project_id) : null;
       const report = await teamReport(deps, pool, a.organizationId, teamId, parseRange(req.query), tz(req.query.tz), projectId);
       await auditTeamView(a, report.members.map((m) => m.user_id), teamId, req.id);
-      return report;
+      return withConsent(a.organizationId, report);
     },
   );
   // Everyone active in the organization, for org admins: the team report over all members.
@@ -185,7 +186,7 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
     const projectId = req.query.project_id ? parse(z.uuid(), req.query.project_id) : null;
     const report = await teamReport(deps, pool, a.organizationId, null, parseRange(req.query), tz(req.query.tz), projectId);
     await auditTeamView(a, report.members.map((m) => m.user_id), a.organizationId, req.id, 'org_report');
-    return report;
+    return withConsent(a.organizationId, report);
   });
   // Names for jumping to a person or project (⌘K). Not a data view, so not audited as one.
   app.get('/v1/me/directory', user, async (req): Promise<DirectoryResponse> => {
@@ -237,6 +238,12 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
   });
   app.get('/v1/exports', user, async (req) => ({ items: await listExports(deps, pool, userOf(req)) }));
   app.get<{ Params: { id: string } }>('/v1/exports/:id', user, async (req) => getExport(deps, pool, userOf(req), req.params.id, req.id));
+
+  /** Each member's answer to the monitoring agreement, so admins can follow up on "Consent pending" and "Declined". */
+  async function withConsent<R extends { members: { user_id: string }[] }>(orgId: string, report: R) {
+    const s = await consentStatuses(pool, orgId, report.members.map((m) => m.user_id));
+    return { ...report, members: report.members.map((m) => ({ ...m, consent: s.get(m.user_id) ?? 'pending' })) };
+  }
 
   async function auditTeamView(actor: UserActor, members: string[], teamId: string, requestId: string, via = 'team_report') {
     // One entry per member so each employee sees it under "Who viewed my data".
