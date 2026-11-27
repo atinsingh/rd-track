@@ -21,13 +21,81 @@ export function ConsentBadge({ status }: { status: ConsentStatus }) {
   return <Badge tone={status === 'accepted' ? 'outline' : 'warn'}>{t(STATUS_KEY[status])}</Badge>;
 }
 
-/** Every accept and decline, newest first, with what was shown and where it came from. */
-export function ConsentRecords({ res, tz, title }: { res: ApiResource<PersonConsentResponse>; tz: string; title: string }) {
+/** Manager or admin: ask someone to answer again. Recorded and audited; the app shows the agreement on its next check. */
+export function AskAgain({ userId, onAsked }: { userId: string; onAsked?: (c: PersonConsentResponse) => void }) {
+  const action = useAction();
+  const [asked, setAsked] = useState(false);
+  if (asked) return <span className="small secondary">{t('consent.askedNow')}</span>;
   return (
-    <Card title={title} actions={res.data ? <ConsentBadge status={res.data.status} /> : null}>
+    <>
+      <Button
+        size="sm"
+        variant="quiet"
+        disabled={action.busy}
+        onClick={async () => {
+          const r = await action.run(() => rd.consent.askAgain(userId));
+          if (r) {
+            setAsked(true);
+            onAsked?.(r);
+          }
+        }}
+      >
+        {t('consent.askAgain')}
+      </Button>
+      <ActionError error={action.error} />
+    </>
+  );
+}
+
+/** Team page: who can't be tracked yet, so someone follows up. HR decides on a continued refusal. */
+export function ConsentNotice({ members }: { members: { consent?: ConsentStatus }[] }) {
+  const declined = members.filter((m) => m.consent === 'declined').length;
+  const pending = members.filter((m) => m.consent === 'pending').length;
+  if (!declined && !pending) return null;
+  return (
+    <Banner tone="warn" role="status" title={t('consent.notice.title', { declined, pending })}>
+      {t('consent.notice.body')}
+    </Banner>
+  );
+}
+
+/** Every accept and decline, newest first, with what was shown and where it came from. */
+export function ConsentRecords({
+  res,
+  tz,
+  title,
+  userId,
+  records = true,
+}: {
+  res: ApiResource<PersonConsentResponse>;
+  tz: string;
+  title: string;
+  /** Shows "Ask again" (managers and admins) when they declined or haven't answered. */
+  userId?: string;
+  /** false: status only (managers don't see the stored answers). */
+  records?: boolean;
+}) {
+  const c = res.data;
+  return (
+    <Card
+      title={title}
+      actions={
+        c ? (
+          <span className="row">
+            <ConsentBadge status={c.status} />
+            {userId && c.status !== 'accepted' ? <AskAgain userId={userId} onAsked={(next) => res.mutate(() => next)} /> : null}
+          </span>
+        ) : null
+      }
+    >
       <Resource {...res} label={t('common.loading')}>
         {(c) =>
-          c.records.length === 0 ? (
+          !records ? (
+            <p className="small secondary">
+              {t(c.status === 'accepted' ? 'consent.followAccepted' : 'consent.follow')}
+              {c.asked_again_at ? ` ${t('consent.askedAt', { when: formatDateTime(c.asked_again_at, tz) })}` : ''}
+            </p>
+          ) : c.records.length === 0 ? (
             <Empty title={t('consent.none')}>{t('consent.noneBody', { n: c.required_version })}</Empty>
           ) : (
             <TableBox label={title}>

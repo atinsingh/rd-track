@@ -36,8 +36,8 @@ export default function MemberDayPage() {
   const name = member?.display_name ?? search.get('name') ?? t('mgr.member.fallback');
   // What policy shares with this manager about this one person (not the team as a whole).
   const vis = useApi(allowed && userId ? `visibility|${userId}` : null, (signal) => rd.person.visibility(userId, signal));
-  // Admins follow up on the monitoring agreement: every answer this person gave.
-  const consent = useApi(access.isAdmin && userId ? `consent|${userId}` : null, (signal) => rd.consent.person(userId, signal));
+  // Managers and admins follow up on the monitoring agreement; only admins see the stored answers.
+  const consent = useApi(allowed && userId ? `consent|${userId}` : null, (signal) => rd.consent.person(userId, signal));
   const visibility: Visibility | undefined = vis.data
     ? { activity: vis.data.activity, apps: vis.data.apps, screenshots: vis.data.screenshots }
     : undefined;
@@ -76,7 +76,7 @@ export default function MemberDayPage() {
           visibility={visibility ?? { activity: false, apps: false, screenshots: false }}
         />
       )}
-      {access.isAdmin ? <ConsentRecords res={consent} tz={tz} title={t('consent.records')} /> : null}
+      <ConsentRecords res={consent} tz={tz} title={t('consent.records')} userId={userId} records={access.isAdmin} />
     </>
   );
 }

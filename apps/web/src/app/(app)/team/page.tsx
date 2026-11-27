@@ -6,7 +6,7 @@ import { UTILIZATION_BAND_PERCENT, type CorrectionDTO, type MemberReportRow, typ
 import type { Range } from '@/lib/api';
 import { DateSwitcher } from '@/components/day/DateSwitcher';
 import { expectedStyles } from '@/components/insights/Expected';
-import { ConsentBadge } from '@/components/consent/Consent';
+import { AskAgain, ConsentBadge, ConsentNotice } from '@/components/consent/Consent';
 import { StackedDailyChart } from '@/components/StackedDailyChart';
 import { Stats } from '@/components/Stats';
 import { StatusBadge, memberTimesheetHref } from '@/components/timesheet/TimesheetView';
@@ -233,7 +233,18 @@ function MembersTable({
                 </Link>
               </td>
               {/* Without an accepted monitoring agreement the app tracks nothing: say so, so an admin can follow up. */}
-              <td>{m.consent && m.consent !== 'accepted' ? <ConsentBadge status={m.consent} /> : m.status ? <StatusLabel status={m.status} /> : '—'}</td>
+              <td>
+                {m.consent && m.consent !== 'accepted' ? (
+                  <span className="row">
+                    <ConsentBadge status={m.consent} />
+                    <AskAgain userId={m.user_id} />
+                  </span>
+                ) : m.status ? (
+                  <StatusLabel status={m.status} />
+                ) : (
+                  '—'
+                )}
+              </td>
               <td className={numClass}>{formatDuration(m.tracked_seconds)}</td>
               {showActivity ? (
                 <>
@@ -588,6 +599,7 @@ export default function TeamPage() {
             </Card>
             <Attention report={report.data} pending={pending.data ?? []} />
           </div>
+          <ConsentNotice members={report.data.members as MemberRow[]} />
           <Banner tag="NOTE">{t('mgr.team.note')}</Banner>
           {span.days > 1 ? <StackedDailyChart title={t('mgr.team.chartTitle')} daily={report.data.daily} tz={tz} /> : null}
           {current && manages ? (

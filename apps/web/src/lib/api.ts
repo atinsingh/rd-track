@@ -613,6 +613,8 @@ export const rd = {
   consent: {
     mine: (signal?: AbortSignal) => get<PersonConsentResponse>('/v1/me/consent', { signal }),
     person: (userId: string, signal?: AbortSignal) => get<PersonConsentResponse>(`/v1/users/${enc(userId)}/consent`, { signal }),
+    /** Manager or admin: record a re-request; the app shows the agreement again. */
+    askAgain: (userId: string) => post<PersonConsentResponse>(`/v1/users/${enc(userId)}/consent/ask-again`, {}),
     agreement: (signal?: AbortSignal) => get<AdminConsentResponse>('/v1/admin/consent', { signal }),
     setText: (customText: string | null) => put<AdminConsentResponse>('/v1/admin/consent', { custom_text: customText }),
   },
