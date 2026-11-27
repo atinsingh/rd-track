@@ -3,6 +3,7 @@ import { one, type Queryable } from '../../db/pool';
 import { projectBudgetReached } from '../money/budgets';
 import { resolveFor } from '../policy/service';
 import { emitEvent } from '../webhooks/service';
+import type { WorkHours } from '@rd/contracts';
 import { lookupLocation, normalizeIp } from '../../lib/geoip';
 
 /**
@@ -116,8 +117,9 @@ export async function startSession(
     }
   }
 
-  // Work location: only the server-seen IP (`req.ip`, real client behind TRUST_PROXY_HOPS), never a client-supplied one.
-  const ip = settings.location.capture ? normalizeIp(input.ip) : null;
+  // Work location: only the server-seen IP (`req.ip`, real client behind TRUST_PROXY_HOPS), never a client-supplied one,
+  // and only for a session that starts inside office hours. No office hours set means no location at all.
+  const ip = settings.location.capture && withinWorkHours(settings.work_hours, input.at) ? normalizeIp(input.ip) : null;
   const geo = ip ? await lookupLocation(deps, ip) : null;
   const row = await one<SessionRow>(
     q,
@@ -184,4 +186,17 @@ export async function changeSessionState(
     });
   }
   return { ok: true };
+}
+
+/** Whether `at` falls inside the office hours (ISO weekday and HH:MM in their time zone). */
+export function withinWorkHours(wh: WorkHours | null, at: Date): boolean {
+  if (!wh) return false;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: wh.timezone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(at);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  const day = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].indexOf(get('weekday')) + 1;
+  const hm = `${get('hour')}:${get('minute')}`;
+  // ponytail: day shifts only (start < end); an overnight window never matches, add when night shifts exist.
+  return wh.days.includes(day) && hm >= wh.start && hm < wh.end;
 }

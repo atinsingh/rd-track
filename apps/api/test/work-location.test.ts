@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { withinWorkHours } from '../src/modules/sessions/service';
 import { enrollDevice, event, login, makeOrg, testEnv, type Device, type Org, type TestEnv } from './helpers';
 
 /** Work location (policy `location.capture`): the server-seen IP of a session start and its city. */
@@ -50,7 +51,7 @@ describe('work location', () => {
 
   it('stores the IP and city when capture is on, and the team report counts a change from the usual city', async () => {
     const pub = await org.admin.put(`/v1/policies/organization/${org.id}`, {
-      settings: { location: { capture: true } },
+      settings: { location: { capture: true }, work_hours: { timezone: 'UTC', days: [1, 2, 3, 4, 5, 6, 7], start: '00:00', end: '23:59' } },
       change_note: 'Work location',
       confirm_expansion: true,
     });
@@ -84,5 +85,27 @@ describe('work location', () => {
       location_changes: 1,
     });
     expect(row).not.toHaveProperty('ip');
+  });
+
+  it('stores nothing for a session that starts outside office hours', async () => {
+    const pub = await org.admin.put(`/v1/policies/organization/${org.id}`, {
+      settings: { location: { capture: true }, work_hours: { timezone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '10:00' } },
+      change_note: 'Office hours 9-10',
+      confirm_expansion: true,
+    });
+    expect(pub.status, JSON.stringify(pub.body)).toBe(200);
+    const sid = await session(dev, '203.0.113.10');
+    // Read the row itself: session lists only show office-hours time to viewers.
+    const { rows } = await env.deps.pool.query('SELECT ip, city, country_code FROM work_sessions WHERE id = $1', [sid]);
+    expect(rows).toEqual([{ ip: null, city: null, country_code: null }]);
+  });
+
+  it('matches office hours in their own time zone', () => {
+    const wh = { timezone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' };
+    expect(withinWorkHours(wh, new Date('2026-10-26T13:30:00Z'))).toBe(true); // Mon 09:30 Toronto
+    expect(withinWorkHours(wh, new Date('2026-10-26T12:30:00Z'))).toBe(false); // Mon 08:30
+    expect(withinWorkHours(wh, new Date('2026-10-26T21:00:00Z'))).toBe(false); // Mon 17:00, end excluded
+    expect(withinWorkHours(wh, new Date('2026-10-31T14:00:00Z'))).toBe(false); // Saturday
+    expect(withinWorkHours(null, new Date('2026-10-26T13:30:00Z'))).toBe(false);
   });
 });
