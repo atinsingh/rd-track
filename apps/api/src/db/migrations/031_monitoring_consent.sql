@@ -8,6 +8,9 @@
 -- consent_records: every accept and decline, append-only, with the version, a hash of the
 -- exact text shown (and the text itself), the IP the server saw, the user and the device.
 -- Like audit_logs, rows are only removed when the whole organization is deleted.
+--
+-- consent_requests: a manager or admin asking someone who declined to answer again
+-- ("Ask again"); the app then shows the agreement again. Append-only as well.
 
 SELECT set_config('rd.org_id', '*', true);
 
@@ -50,7 +53,22 @@ BEGIN
   IF TG_OP = 'DELETE' AND current_setting('rd.allow_audit_purge', true) = 'on' THEN
     RETURN OLD;
   END IF;
-  RAISE EXCEPTION 'consent_records is append-only';
+  RAISE EXCEPTION '% is append-only', TG_TABLE_NAME;
 END $$ LANGUAGE plpgsql;
 CREATE TRIGGER consent_records_no_update BEFORE UPDATE OR DELETE ON consent_records
+  FOR EACH ROW EXECUTE FUNCTION consent_records_append_only();
+
+CREATE TABLE consent_requests (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id  uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id          uuid NOT NULL REFERENCES users(id),
+  requested_by     uuid NOT NULL REFERENCES users(id),
+  version          integer NOT NULL CHECK (version >= 1),
+  requested_at     timestamptz NOT NULL
+);
+CREATE INDEX consent_requests_user ON consent_requests (organization_id, user_id, requested_at DESC);
+ALTER TABLE consent_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE consent_requests FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON consent_requests USING (rd_org_visible(organization_id)) WITH CHECK (rd_org_visible(organization_id));
+CREATE TRIGGER consent_requests_no_update BEFORE UPDATE OR DELETE ON consent_requests
   FOR EACH ROW EXECUTE FUNCTION consent_records_append_only();

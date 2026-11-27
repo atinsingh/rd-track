@@ -290,6 +290,19 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       });
       return;
     }
+    case 'consent.declined': {
+      // Their team managers and every admin: tracking stays off until they agree.
+      const to = new Set([...(await reviewersOf(q, e.organizationId, e.subjectUserId!)), ...(await orgAdmins(q, e.organizationId))]);
+      to.delete(e.subjectUserId!);
+      await send([...to], {
+        kind: 'consent_declined',
+        category: 'devices',
+        title: (l) => l.t('ev.consentDeclined.title', { name: str(d.user_name) }),
+        body: (l) => l.t('ev.consentDeclined.body', { name: str(d.user_name) }),
+        link: `/team/${e.subjectUserId}`,
+      });
+      return;
+    }
     case 'device.stale':
       await send(subject, {
         kind: 'device_stale',

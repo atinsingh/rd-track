@@ -40,6 +40,8 @@ export const en = {
   'ev.escalated.title.other': '{n} timesheets are overdue for the week of {week}',
   'ev.escalated.body': '{names} haven\'t submitted yet.',
   'ev.escalated.more': '{names} and {n} more',
+  'ev.consentDeclined.title': '{name} declined the monitoring agreement',
+  'ev.consentDeclined.body': 'Track records nothing on {name}’s computers until they agree. You can ask them again from their page. What happens if they keep declining is for your organization (HR) to decide; Track takes no other action.',
   'ev.deviceStale.title': '{device} hasn’t synced for a few working days',
   'ev.deviceStale.body': 'Last seen {date}. If you\'ve been working on it, open Track so your time arrives. If you no longer use it, ask your org admin to remove it.',
   'ev.expenseClaimed.title': '{name} claimed an expense of {amount}',

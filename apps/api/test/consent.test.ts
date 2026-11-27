@@ -122,7 +122,13 @@ describe('monitoring consent', () => {
     expect((await shown(d)).version).toBe(1);
 
     const wider = await org.admin.put(`/v1/policies/organization/${org.id}`, {
-      settings: { apps: { capture_app_name: true }, location: { capture: true } }, change_note: 'more', confirm_expansion: true,
+      settings: {
+        apps: { capture_app_name: true },
+        location: { capture: true },
+        work_hours: { timezone: 'America/Toronto', days: [1, 2, 3, 4, 5], start: '09:00', end: '17:00' },
+      },
+      change_note: 'more',
+      confirm_expansion: true,
     });
     expect(wider.status).toBe(200);
     const v2 = await shown(d);
@@ -156,7 +162,10 @@ describe('monitoring consent', () => {
     expect(put.status).toBe(200);
     expect(put.body).toMatchObject({ version: 2, custom_text: 'Our own agreement.' });
     expect(put.body.history[0]).toMatchObject({ version: 2, reason: 'text_edited' });
-    expect(await shown(d)).toMatchObject({ version: 2, text: 'Our own agreement.', status: 'pending' });
+    const custom = await shown(d);
+    expect(custom).toMatchObject({ version: 2, status: 'pending' });
+    // The admin's text, followed by what is collected about this person.
+    expect(custom.text).toMatch(/^Our own agreement\.\n\nWhat is collected\n/);
     expect((await start(d)).body.error.code).toBe('consent_required');
 
     // Another organization is untouched and can't see or answer this one.
@@ -167,5 +176,61 @@ describe('monitoring consent', () => {
     const reset = await org.admin.put('/v1/admin/consent', { custom_text: null });
     expect(reset.body).toMatchObject({ version: 3, custom_text: null });
     expect((await shown(d)).text).toContain('cons5 Inc');
+  });
+
+  it('needs a new acceptance when joining a team that collects more, without a new version', async () => {
+    const org = await makeOrg(env, 'cons8');
+    const d = await enrollDevice(env, org, 'emp');
+    // An empty team turns on screenshots: nobody's collection grows, so no new version.
+    const team = await org.admin.post('/v1/admin/teams', { name: 'Screens' });
+    const pub = await org.admin.put(`/v1/policies/team/${team.body.id}`, {
+      settings: { screenshots: { enabled: true } }, change_note: 'screens', confirm_expansion: true,
+    });
+    expect(pub.status).toBe(200);
+    expect((await start(d)).status).toBe(201);
+
+    // Joining it widens what is collected about them: the accepted text no longer matches.
+    await org.admin.post(`/v1/admin/teams/${team.body.id}/members`, { user_id: org.users.emp!.id, role: 'member' });
+    const now = await shown(d);
+    expect(now).toMatchObject({ version: 1, status: 'pending' });
+    expect(now.text).toContain('Screenshots, about one every');
+    for (const r of [
+      await start(d),
+      await deviceReq(env, d, 'POST', '/v1/screenshots/upload-intents', { session_id: randomUUID(), content_type: 'image/webp' }),
+    ]) {
+      expect(r.status).toBe(403);
+      expect(r.body.error.code).toBe('consent_required');
+    }
+    await answerConsent(env, d, 'accepted');
+    expect((await start(d)).status).toBe(201);
+  });
+
+  it('tells managers and admins about a decline, and lets them ask again', async () => {
+    const org = await makeOrg(env, 'cons9');
+    const d = await enrollDevice(env, org, 'emp');
+    await answerConsent(env, d, 'declined');
+    for (const c of [org.users.manager!.client, org.admin]) {
+      const n = await c.get('/v1/me/notifications');
+      expect(n.body.items.map((i: { kind: string }) => i.kind)).toContain('consent_declined');
+    }
+    const emp = org.users.emp!;
+    expect((await emp.client.get('/v1/me/notifications')).body.items.map((i: { kind: string }) => i.kind)).not.toContain('consent_declined');
+
+    // The manager sees the status (not the stored answers); someone outside their teams can't ask.
+    const seen = await org.users.manager!.client.get(`/v1/users/${emp.id}/consent`);
+    expect(seen.body).toMatchObject({ status: 'declined', records: [] });
+    expect((await org.users.emp2!.client.post(`/v1/users/${emp.id}/consent/ask-again`, {})).status).toBe(403);
+
+    const asked = await org.users.manager!.client.post(`/v1/users/${emp.id}/consent/ask-again`, {});
+    expect(asked.status).toBe(200);
+    expect(asked.body.status).toBe('pending');
+    expect(asked.body.asked_again_at).not.toBeNull();
+    // The app shows the agreement again; tracking still waits for an acceptance.
+    expect((await shown(d)).status).toBe('pending');
+    expect((await start(d)).body.error.code).toBe('consent_required');
+    const log = await env.deps.pool.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'consent.asked_again' AND target_user_id = $1`, [emp.id]);
+    expect(log.rows[0].n).toBe(1);
+    await answerConsent(env, d, 'accepted');
+    expect((await start(d)).status).toBe(201);
   });
 });

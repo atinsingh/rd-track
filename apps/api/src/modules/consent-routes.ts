@@ -1,12 +1,13 @@
 import { adminConsentUpdate, consentDecisionRequest } from '@rd/contracts';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Deps } from '../context';
-import { one, withTx } from '../db/pool';
+import { withTx } from '../db/pool';
 import { ADMIN_ROLES, deviceOf, requireRole, userOf } from '../http';
 import { errors } from '../lib/errors';
 import { parse } from '../lib/validate';
-import { adminConsent, deviceConsent, personConsent, recordDecision, setAgreementText } from './consent/service';
+import { assertSameOrgUser, isTeamManagerOf } from './authz';
+import { adminConsent, askAgain, deviceConsent, personConsent, recordDecision, setAgreementText } from './consent/service';
 
 /**
  * Device routes that track (or would apply a newer policy) and so need an accepted
@@ -38,15 +39,25 @@ export async function consentRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/v1/me/consent', user, async (req) => {
     const a = userOf(req);
-    return personConsent(pool, a.organizationId, a.userId);
+    return personConsent(deps, pool, a.organizationId, a.userId);
   });
-  app.get<{ Params: { id: string } }>('/v1/users/:id/consent', user, async (req) => {
-    const a = requireRole(req, ADMIN_ROLES);
+  /** Admins and the managers of the person's teams, who follow up on a decline. */
+  async function follower(req: FastifyRequest<{ Params: { id: string } }>) {
+    const a = userOf(req);
     const id = parse(z.uuid(), req.params.id);
-    if (!(await one(pool, 'SELECT 1 FROM users WHERE id = $1 AND organization_id = $2', [id, a.organizationId]))) {
-      throw errors.notFound('User');
-    }
-    return personConsent(pool, a.organizationId, id);
+    await assertSameOrgUser(pool, a, id);
+    if (!ADMIN_ROLES.includes(a.orgRole) && !(await isTeamManagerOf(pool, a.userId, id))) throw errors.forbidden();
+    return { a, id };
+  }
+  app.get<{ Params: { id: string } }>('/v1/users/:id/consent', user, async (req) => {
+    const { a, id } = await follower(req);
+    const c = await personConsent(deps, pool, a.organizationId, id);
+    // The stored answers (text, IP, computer) are for admins; managers see the status to follow up.
+    return ADMIN_ROLES.includes(a.orgRole) ? c : { ...c, records: [] };
+  });
+  app.post<{ Params: { id: string } }>('/v1/users/:id/consent/ask-again', user, async (req) => {
+    const { a, id } = await follower(req);
+    return withTx(pool, (tx) => askAgain(deps, tx, a, id, req.id));
   });
 
   app.get('/v1/admin/consent', user, async (req) => adminConsent(deps, pool, requireRole(req, ADMIN_ROLES)));

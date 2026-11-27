@@ -34,6 +34,8 @@ export const DOMAIN_EVENT_TYPES = [
   // Stage 4 F7
   'expense.submitted',
   'expense.decided',
+  // Monitoring agreement
+  'consent.declined',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
 

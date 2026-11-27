@@ -96,7 +96,7 @@ export async function buildApp(deps: Deps, opts: { logger?: boolean } = {}): Pro
       req.device = d;
       narrowScope(d.organizationId);
       // Nothing is tracked without the person's acceptance of the current agreement (403 consent_required).
-      if (CONSENT_GATED_ROUTES.has(`${req.method} ${req.routeOptions.url}`)) await assertConsented(deps.pool, d);
+      if (CONSENT_GATED_ROUTES.has(`${req.method} ${req.routeOptions.url}`)) await assertConsented(deps, deps.pool, d);
       return;
     }
 

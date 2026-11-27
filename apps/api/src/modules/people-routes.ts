@@ -241,7 +241,7 @@ export async function peopleRoutes(app: FastifyInstance, deps: Deps) {
 
   /** Each member's answer to the monitoring agreement, so admins can follow up on "Consent pending" and "Declined". */
   async function withConsent<R extends { members: { user_id: string }[] }>(orgId: string, report: R) {
-    const s = await consentStatuses(pool, orgId, report.members.map((m) => m.user_id));
+    const s = await consentStatuses(deps, pool, orgId, report.members.map((m) => m.user_id));
     return { ...report, members: report.members.map((m) => ({ ...m, consent: s.get(m.user_id) ?? 'pending' })) };
   }
 
