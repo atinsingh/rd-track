@@ -129,6 +129,18 @@ export const en = {
     "revoked.title": "Tracking has stopped",
     "revoked.body": "Your organization removed this computer. Nothing is recorded and data that had not been sent was erased from this computer.",
     "revoked.again": "Enroll again",
+    "consent.eyebrow": "Before anything is tracked",
+    "consent.title": "Monitoring agreement",
+    "consent.lead": "Your organization asks you to read and answer this. Nothing is collected until you agree.",
+    "consent.changed": "What is collected changed, so your organization asks you again. Tracking stays off until you answer.",
+    "consent.declined": "You declined. Nothing is tracked on this computer, and your organization can see that you declined. You can change your answer here at any time.",
+    "consent.agree": "I agree",
+    "consent.decline": "Decline",
+    "consent.version": "Version {n}",
+    "consent.thanks": "Thank you. Getting tracking ready…",
+    "consent.loading": "Getting your organization’s monitoring agreement…",
+    "consent.outdated": "The agreement was just updated. Please read this version.",
+    "consent.failed": "Your answer was not sent. Check your connection and try again.",
 };
 export const fr = {
     "error.generic": "Une erreur est survenue",
@@ -257,6 +269,18 @@ export const fr = {
     "revoked.title": "Le suivi est arrêté",
     "revoked.body": "Votre organisation a retiré cet ordinateur. Rien n’est enregistré, et les données qui n’avaient pas été envoyées ont été effacées de cet ordinateur.",
     "revoked.again": "S’inscrire de nouveau",
+    "consent.eyebrow": "Avant tout suivi",
+    "consent.title": "Entente de suivi",
+    "consent.lead": "Votre organisation vous demande de lire ceci et d’y répondre. Rien n’est recueilli tant que vous n’avez pas accepté.",
+    "consent.changed": "Ce qui est recueilli a changé, votre organisation vous le redemande donc. Le suivi reste désactivé jusqu’à votre réponse.",
+    "consent.declined": "Vous avez refusé. Rien n’est suivi sur cet ordinateur, et votre organisation voit que vous avez refusé. Vous pouvez changer votre réponse ici à tout moment.",
+    "consent.agree": "J’accepte",
+    "consent.decline": "Refuser",
+    "consent.version": "Version {n}",
+    "consent.thanks": "Merci. Préparation du suivi…",
+    "consent.loading": "Récupération de l’entente de suivi de votre organisation…",
+    "consent.outdated": "L’entente vient d’être mise à jour. Veuillez lire cette version.",
+    "consent.failed": "Votre réponse n’a pas été envoyée. Vérifiez votre connexion et réessayez.",
 };
 const CATALOGUES = { en, fr };
 let current = "en";

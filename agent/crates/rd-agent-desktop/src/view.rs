@@ -2,7 +2,7 @@
 //! here from the runtime's [`LiveStatus`], so it is unit tested without a window.
 
 use chrono::{DateTime, Datelike, TimeZone, Utc};
-use rd_agent_core::api::{DeviceProject, LicenseStatus};
+use rd_agent_core::api::{DeviceProject, LicenseBlock, LicenseStatus};
 use rd_agent_core::describe::{describe_collection_in, format_duration, CollectionItem};
 use rd_agent_core::events::IdleDecision;
 use rd_agent_core::i18n::{fill, translate, Lang};
@@ -714,11 +714,12 @@ pub fn banners(live: Option<&LiveStatus>, ctx: &BannerContext<'_>) -> Vec<Banner
         out.push(Banner::new("translocated", "warn", m.translocated).sticky());
     }
     if let Some(l) = live {
-        let unavailable = l
-            .agent
-            .tracking_unavailable
-            .map(|b| b.message_in(ctx.lang).to_owned())
-            .or_else(|| l.agent.tracking_unavailable_message.clone());
+        // The agreement screen explains a consent block itself.
+        let unavailable = match l.agent.tracking_unavailable {
+            Some(LicenseBlock::ConsentRequired) => None,
+            Some(b) => Some(b.message_in(ctx.lang).to_owned()),
+            None => l.agent.tracking_unavailable_message.clone(),
+        };
         if let Some(msg) = unavailable {
             out.push(
                 Banner::new("license", "warn", fill(m.license_ask, &[("message", &msg)])).sticky(),
@@ -943,7 +944,7 @@ pub fn popover_origin(
 mod tests {
     use super::*;
     use chrono::TimeZone;
-    use rd_agent_core::api::{LicenseBlock, LicenseInfo};
+    use rd_agent_core::api::LicenseInfo;
     use rd_agent_core::i18n::Lang;
     use rd_agent_core::platform::Permissions;
     use rd_agent_core::runtime::{AgentStatus, LiveSession, SyncStatus, TodayTotals};
@@ -985,6 +986,8 @@ mod tests {
             reminders: ReminderStatus::default(),
             screenshot_problem: None,
             stop_locked: false,
+            consent: None,
+            consent_error: None,
         }
     }
 
@@ -1200,6 +1203,15 @@ mod tests {
         assert_eq!(n.title, "Start a session without a project?");
         assert!(n.warning.is_some());
         assert_eq!(n.footer.len(), 1);
+    }
+
+    #[test]
+    fn a_consent_block_has_no_licence_banner() {
+        let mut l = live();
+        l.agent.tracking_unavailable = Some(LicenseBlock::ConsentRequired);
+        l.agent.tracking_unavailable_message = Some(LicenseBlock::ConsentRequired.message().into());
+        let b = banners(Some(&l), &BannerContext::default());
+        assert!(b.iter().all(|b| b.id != "license"));
     }
 
     #[test]

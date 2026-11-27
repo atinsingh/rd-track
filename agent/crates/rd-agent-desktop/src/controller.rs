@@ -9,7 +9,7 @@ use rd_agent::config::{self, Paths};
 use rd_agent::native::logic::PromptLedger;
 use rd_agent::native::{self, NativePlatform, Permission};
 use rd_agent::{credentials, http, setup, simulated};
-use rd_agent_core::api::{ApiClient, ApiError, DeviceProject, Os};
+use rd_agent_core::api::{ApiClient, ApiError, ConsentAgreement, DeviceProject, LicenseBlock, Os};
 use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::describe::format_duration;
@@ -116,6 +116,18 @@ pub struct AppView {
     pub simulated: bool,
     /// App version.
     pub version: &'static str,
+    /// The monitoring agreement to answer before anything is tracked (only while the
+    /// server refuses tracking with `consent_required`).
+    pub consent: Option<ConsentView>,
+}
+
+/// The monitoring agreement screen.
+#[derive(Debug, Clone, Serialize)]
+pub struct ConsentView {
+    /// The agreement, once fetched (`None` while offline).
+    pub agreement: Option<ConsentAgreement>,
+    /// Error code of the last answer that did not go through.
+    pub error: Option<String>,
 }
 
 #[derive(Default)]
@@ -1027,6 +1039,12 @@ impl Controller {
             default_server_url: default_server_url(),
             simulated: self.simulated,
             version: env!("CARGO_PKG_VERSION"),
+            consent: live
+                .filter(|l| l.agent.tracking_unavailable == Some(LicenseBlock::ConsentRequired))
+                .map(|l| ConsentView {
+                    agreement: l.consent.clone(),
+                    error: l.consent_error.clone(),
+                }),
         }
     }
 

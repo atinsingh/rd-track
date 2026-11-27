@@ -19,6 +19,7 @@
     "allow-pause-session",
     "allow-resume-session",
     "allow-stop-session",
+    "allow-answer-consent",
     "allow-resolve-idle",
     "allow-resolve-reminder",
     "allow-set-reminder-settings",

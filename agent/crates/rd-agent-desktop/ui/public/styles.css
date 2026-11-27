@@ -348,6 +348,15 @@ button.with-icon { display: inline-flex; align-items: center; justify-content: c
 .notice .buttons.one { grid-template-columns: 1fr; }
 .notice .buttons button { padding: 0 var(--space-3); }
 
+/* ----- monitoring agreement: the text scrolls, the answer stays in reach ------------- */
+.consent { gap: var(--space-3); height: 100%; }
+.consent .agreement {
+  flex: 1 1 auto; min-height: 120px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere;
+  padding: var(--space-3) var(--space-4); border: 1px solid var(--rule); border-radius: var(--radius-panel);
+  background: var(--surface-sunken); color: var(--text); font-size: var(--text-sm); line-height: 1.5; user-select: text;
+}
+.consent .agreement:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
 /* ----- signing in -------------------------------------------------------------------- */
 .signin { gap: var(--space-3); }
 .signin h1.title { margin-top: var(--space-1); }

@@ -95,6 +95,12 @@ interface AppView {
   version: string;
   /** The person's language; every string above is already in it (G27). */
   lang: Lang;
+  /** The monitoring agreement to answer before anything is tracked. */
+  consent: ConsentView | null;
+}
+interface ConsentView {
+  agreement: { version: number; text: string; text_sha256: string; status: "pending" | "accepted" | "declined" } | null;
+  error: string | null;
 }
 interface Item { key: string; collected: boolean; text: string; detail: string }
 interface SessionNotice {
@@ -824,6 +830,35 @@ function noticeButtons(review: boolean): HTMLElement[] {
   ];
 }
 
+// The monitoring agreement: shown before anything is tracked, and again when the policy
+// collects more. Only the person answers; the server records exactly which text they saw.
+function consentView(c: ConsentView): HTMLElement {
+  const a = c.agreement;
+  if (!a) return simpleView(t("consent.loading"));
+  if (a.status === "accepted") return simpleView(t("consent.thanks"));
+  const answer = (accept: boolean): void => {
+    void run(() => invoke("answer_consent", { version: a.version, textSha256: a.text_sha256, accept }));
+  };
+  const problem = c.error === "consent_outdated" ? t("consent.outdated") : c.error ? t("consent.failed") : null;
+  return h(
+    "section",
+    { class: "notice consent", "aria-labelledby": "consent-h" },
+    h("span", { class: "eyebrow" }, t("consent.eyebrow")),
+    h("h2", { id: "consent-h" }, t("consent.title")),
+    h("p", { class: "lead" }, a.status === "declined" ? t("consent.declined") : a.version > 1 ? t("consent.changed") : t("consent.lead")),
+    h("div", { class: "agreement", tabindex: "0", role: "document", "aria-label": t("consent.title") }, a.text),
+    h("p", { class: "fine mono" }, t("consent.version", { n: String(a.version) })),
+    problem && alertLine(problem),
+    error && alertLine(error),
+    h(
+      "div",
+      { class: "buttons" },
+      h("button", { class: "btn-quiet", type: "button", disabled: busy || a.status === "declined", onclick: () => answer(false) }, t("consent.decline")),
+      h("button", { class: "btn-action", type: "button", disabled: busy, onclick: () => answer(true) }, t("consent.agree")),
+    ),
+  );
+}
+
 function managedEnrollView(v: AppView, server: string): HTMLElement {
   const field = (label: string, value: string, set: (s: string) => void, attrs: Record<string, unknown>): HTMLElement =>
     h(
@@ -1248,6 +1283,7 @@ function render(): void {
   else if (v.phase === "error") content = simpleView(t("error.couldNotStart"), true, v.error);
   else if (v.phase === "starting") content = simpleView(t("app.starting"));
   else if (v.phase === "stopping") content = simpleView(t("app.stopping"));
+  else if (v.consent) content = consentView(v.consent);
   else content = mainView(v);
   // Keep focus and the select values stable across re-renders.
   const active = document.activeElement as HTMLElement | null;

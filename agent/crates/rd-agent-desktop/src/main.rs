@@ -167,6 +167,22 @@ fn stop_session(ctl: Ctl<'_>) -> Result<(), String> {
     ctl.stop()
 }
 
+/// The person's answer to the monitoring agreement, naming the version and text they
+/// read. Only the popover calls this, on the person's click.
+#[tauri::command]
+fn answer_consent(
+    ctl: Ctl<'_>,
+    version: u32,
+    text_sha256: String,
+    accept: bool,
+) -> Result<(), String> {
+    ctl.send(Command::AnswerConsent {
+        version,
+        text_sha256,
+        accept,
+    })
+}
+
 /// The person's answer to the idle-return prompt. Only the popover calls this, on the
 /// person's click; nothing decides for them.
 #[tauri::command]
@@ -477,6 +493,7 @@ fn main() {
             pause_session,
             resume_session,
             stop_session,
+            answer_consent,
             resolve_idle,
             resolve_reminder,
             set_reminder_settings,

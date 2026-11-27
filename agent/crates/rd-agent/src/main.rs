@@ -20,6 +20,7 @@ use clap::{Parser, Subcommand};
 use rd_agent::config::{self, Paths};
 use rd_agent::setup::{credential_store, open_outbox};
 use rd_agent::{browser_host, http, native, setup, simulated};
+use rd_agent_core::api::LicenseBlock;
 use rd_agent_core::browser::BrowserAware;
 use rd_agent_core::clock::SystemClock;
 use rd_agent_core::events::StopReason;
@@ -339,6 +340,13 @@ fn run(paths: &Paths, args: RunArgs) -> Result<ExitCode, String> {
         setup::mark_revoked(paths, &identity)?;
         eprintln!("This device was revoked by your organization. Tracking has stopped and local data was erased.");
         return Ok(ExitCode::from(3));
+    }
+    if summary.license_block == Some(LicenseBlock::ConsentRequired) {
+        eprintln!(
+            "{}. Open the RoundDigital Track app on this computer to read and answer it; nothing is tracked until you agree.",
+            LicenseBlock::ConsentRequired.message()
+        );
+        return Ok(ExitCode::from(4));
     }
     if let Some(block) = summary.license_block {
         eprintln!(
