@@ -57,6 +57,8 @@ export interface ConsentRecordDTO {
 export interface PersonConsentResponse {
   required_version: number;
   status: ConsentStatus;
+  /** The last time a manager or admin asked them to answer again ("Ask again"). */
+  asked_again_at: string | null;
   records: ConsentRecordDTO[];
 }
 
@@ -87,13 +89,15 @@ interface AgreementInput {
   /** The person's effective policy, plus any per-project policy that differs (collection is the union). */
   settings: readonly PolicySettings[];
   language: AppLanguage;
+  /** The admin's own text: shown instead of the generated one, followed by what is collected about this person. */
+  customText?: string | null;
 }
 
 /**
  * Plain-language agreement listing exactly what the policies collect, who may see it and
  * how long it is kept. Deterministic: the same input always gives the same text (it is hashed).
  */
-export function renderAgreement({ organizationName: org, settings, language }: AgreementInput): string {
+export function renderAgreement({ organizationName: org, settings, language, customText }: AgreementInput): string {
   const any = (f: (s: PolicySettings) => boolean) => settings.some(f);
   const max = (f: (s: PolicySettings) => number) => Math.max(...settings.map(f));
   const shots = settings.filter((s) => s.screenshots.enabled);
@@ -107,7 +111,8 @@ export function renderAgreement({ organizationName: org, settings, language }: A
   if (any((s) => s.apps.capture_domains)) collected.push(m.domains);
   if (any((s) => s.apps.capture_window_titles)) collected.push(m.titles);
   if (shots.length) collected.push(m.screenshots(interval, allMonitors, allBlurred));
-  if (any((s) => s.location.capture)) collected.push(m.location);
+  // Location is looked up only for sessions that start inside office hours: none without them.
+  if (any((s) => s.location.capture && s.work_hours !== null)) collected.push(m.location);
 
   const managerSees: string[] = [m.seeTime];
   if (any((s) => s.viewers.manager_can_view_activity)) managerSees.push(m.seeActivity);
@@ -118,6 +123,9 @@ export function renderAgreement({ organizationName: org, settings, language }: A
   if (shots.length) kept.push(m.keepScreenshots(Math.max(...shots.map((s) => s.retention.screenshot_days))));
 
   const list = (items: string[]) => items.map((i) => `• ${i}`).join('\n');
+  // The person's own collection list always follows the admin's text, so what they accept
+  // (and its hash) changes whenever what is collected about them does.
+  if (customText != null) return [customText, `${m.collectedHeading}\n${list(collected)}`].join('\n\n');
   return [
     m.title(org),
     m.intro(org),
@@ -145,7 +153,9 @@ const AGREEMENT_TEXT = {
       `Screenshots, about one every ${n} minutes, of ${allMonitors ? 'all monitors' : 'the primary monitor'}${
         blurred ? ', blurred on this computer so no text can be read' : ''
       }.`,
-    location: 'Your approximate location: the city, region and country looked up from your IP address when a session starts. Never GPS.',
+    location:
+      'Your approximate location: the city, region and country looked up from your IP address, only for sessions that start during office hours. ' +
+      'The IP address and city are deleted after 30 days. Never GPS.',
     neverHeading: 'Never collected',
     never:
       'Which keys you press, typed text, passwords, clipboard, webcam, microphone, the content of messages, email or documents, and your precise (GPS) location.',
@@ -161,7 +171,8 @@ const AGREEMENT_TEXT = {
     keepApps: (d: number) => `App and website usage: ${d} days.`,
     keepScreenshots: (d: number) => `Screenshots: ${d} days.`,
     answer: (org: string) =>
-      `Choose "I agree" to allow this monitoring on this computer. If you choose "Decline", the app will not track anything and ${org} will see that you declined. ` +
+      `Choose "I agree" to allow this monitoring on this computer. If you choose "Decline", the app will not track anything and ${org} will see that you declined; ` +
+      `what happens next is up to ${org} (for example HR), and the app takes no other action. ` +
       'You will be asked again if what is collected changes. Your answers are on your Privacy page.',
   },
   fr: {
@@ -179,7 +190,9 @@ const AGREEMENT_TEXT = {
       `Des captures d’écran, environ une toutes les ${n} minutes, ${allMonitors ? 'de tous les écrans' : 'de l’écran principal'}${
         blurred ? ', floutées sur cet ordinateur pour qu’aucun texte ne soit lisible' : ''
       }.`,
-    location: 'Votre emplacement approximatif : la ville, la région et le pays déduits de votre adresse IP au début d’une session. Jamais de GPS.',
+    location:
+      'Votre emplacement approximatif : la ville, la région et le pays déduits de votre adresse IP, seulement pour les sessions qui commencent pendant les heures de bureau. ' +
+      'L’adresse IP et la ville sont effacées après 30 jours. Jamais de GPS.',
     neverHeading: 'Jamais recueilli',
     never:
       'Les touches que vous pressez, le texte saisi, les mots de passe, le presse-papiers, la webcam, le micro, le contenu des messages, courriels ou documents, et votre emplacement précis (GPS).',
@@ -195,7 +208,8 @@ const AGREEMENT_TEXT = {
     keepApps: (d: number) => `Utilisation des applications et des sites : ${d} jours.`,
     keepScreenshots: (d: number) => `Captures d’écran : ${d} jours.`,
     answer: (org: string) =>
-      `Choisissez « J’accepte » pour autoriser ce suivi sur cet ordinateur. Si vous choisissez « Refuser », l’application ne suivra rien et ${org} verra que vous avez refusé. ` +
+      `Choisissez « J’accepte » pour autoriser ce suivi sur cet ordinateur. Si vous choisissez « Refuser », l’application ne suivra rien et ${org} verra que vous avez refusé ; ` +
+      `la suite relève de ${org} (par exemple les RH), et l’application ne fait rien d’autre. ` +
       'On vous le redemandera si ce qui est recueilli change. Vos réponses se trouvent sur votre page Confidentialité.',
   },
 } as const;
