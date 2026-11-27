@@ -25,7 +25,8 @@ use uuid::Uuid;
 
 use crate::activity::{ActivityAggregator, IdleRun};
 use crate::api::{
-    ApiClient, ApiError, HeartbeatRequest, LicenseBlock, LicenseInfo, ScheduleToday, WorkLimits,
+    ApiClient, ApiError, ConsentAgreement, ConsentAnswer, HeartbeatRequest, LicenseBlock,
+    LicenseInfo, ScheduleToday, WorkLimits,
 };
 use crate::apps::{is_own_app, AppTracker};
 use crate::browser::BrowserFamily;
@@ -61,6 +62,10 @@ pub const META_AGENT_STATUS: &str = "agent_status";
 pub const META_SYNC_STATUS: &str = "sync_status";
 /// Outbox metadata key holding the active [`LicenseBlock`], if any (survives restarts).
 pub const META_LICENSE_BLOCK: &str = "license_block";
+/// Outbox metadata key set once the server has accepted this device's calls (so the
+/// person has accepted the monitoring agreement). Until then the agent starts blocked
+/// with [`LicenseBlock::ConsentRequired`] and collects nothing, even offline.
+pub const META_CONSENT_CONFIRMED: &str = "consent_confirmed";
 /// Outbox metadata key holding [`TodayTotals`] (tray "Today" line).
 pub const META_TODAY: &str = "today_totals";
 /// Outbox metadata key holding the work-limit [`LimitState`] (Stage 4 F4: last good
@@ -527,6 +532,12 @@ pub struct LiveStatus {
     pub screenshot_problem: Option<ScreenshotProblem>,
     /// Inside the policy's work hours: the employee can pause but not stop.
     pub stop_locked: bool,
+    /// The monitoring agreement to show while tracking is blocked with
+    /// [`LicenseBlock::ConsentRequired`] (`None` until fetched).
+    pub consent: Option<ConsentAgreement>,
+    /// Why the last answer to the agreement did not go through (`consent_outdated`,
+    /// `network`…); cleared by the next fetch.
+    pub consent_error: Option<String>,
 }
 
 /// Why a screenshot could not be taken, for the tray.
@@ -715,6 +726,15 @@ impl Agent {
         agent.license_block = lock(&agent.outbox)
             .get_meta(META_LICENSE_BLOCK)?
             .and_then(|s| serde_json::from_str(&s).ok());
+        // A new install (or one from before the agreement existed) tracks nothing until the
+        // server confirms the person accepted the monitoring agreement.
+        if agent.license_block.is_none()
+            && lock(&agent.outbox)
+                .get_meta(META_CONSENT_CONFIRMED)?
+                .is_none()
+        {
+            agent.license_block = Some(LicenseBlock::ConsentRequired);
+        }
         agent.today = lock(&agent.outbox)
             .get_meta(META_TODAY)?
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -1278,6 +1298,9 @@ impl Agent {
         }
         if let Err(e) = lock(&self.outbox).delete_meta(META_LICENSE_BLOCK) {
             log::warn!("could not clear licence state: {e}");
+        }
+        if let Err(e) = lock(&self.outbox).set_meta(META_CONSENT_CONFIRMED, "true") {
+            log::warn!("could not persist consent state: {e}");
         }
         log::info!("licence available again; tracking can resume");
         self.notices.push(Notice::LicenseRestored);
@@ -2053,6 +2076,17 @@ pub enum Command {
     },
     /// The employee changed their reminder settings.
     SetReminderSettings(ReminderSettings),
+    /// The person's answer to the monitoring agreement in [`LiveStatus::consent`], naming
+    /// the version and text hash they were shown. Accepting lifts the
+    /// [`LicenseBlock::ConsentRequired`] block once the server confirms it.
+    AnswerConsent {
+        /// [`ConsentAgreement::version`].
+        version: u32,
+        /// [`ConsentAgreement::text_sha256`].
+        text_sha256: String,
+        /// `true`: I agree; `false`: Decline.
+        accept: bool,
+    },
 }
 
 /// Messages from the network worker.
@@ -2090,6 +2124,10 @@ pub enum NetEvent {
     Schedule(Option<ScheduleToday>),
     /// A screenshot attempt ended: `None` on success, else why it failed.
     Screenshot(Option<ScreenshotProblem>),
+    /// The monitoring agreement (fetched, or as stored after an answer).
+    Consent(ConsentAgreement),
+    /// An answer to the agreement did not go through (error code or `network`).
+    ConsentFailed(String),
 }
 
 /// Everything the tick loop can receive.
@@ -2117,6 +2155,7 @@ enum NetJob {
     FetchPolicy(Option<String>),
     FetchWorkLimits(Option<Uuid>),
     FetchSchedule,
+    AnswerConsent(ConsentAnswer),
     Shutdown { deadline: Duration },
 }
 
@@ -2226,6 +2265,8 @@ pub struct Runtime {
     sync_status: Arc<Mutex<SyncStatus>>,
     depth: Option<(Duration, u64)>,
     screenshot_problem: Option<ScreenshotProblem>,
+    consent: Option<ConsentAgreement>,
+    consent_error: Option<String>,
 }
 
 impl Runtime {
@@ -2273,6 +2314,8 @@ impl Runtime {
                 sync_status: Arc::new(Mutex::new(SyncStatus::default())),
                 depth: None,
                 screenshot_problem: None,
+                consent: None,
+                consent_error: None,
             },
             handle,
         ))
@@ -2325,6 +2368,8 @@ impl Runtime {
             browser_extensions: self.agent.browser_extensions(),
             screenshot_problem: self.screenshot_problem.clone(),
             stop_locked: self.agent.stop_locked(),
+            consent: self.consent.clone(),
+            consent_error: self.consent_error.clone(),
         }
     }
 
@@ -2567,6 +2612,19 @@ impl Runtime {
                 self.agent.resolve_reminder(id, choice).map(|_| ())
             }
             Command::SetReminderSettings(s) => self.agent.set_reminder_settings(s),
+            Command::AnswerConsent {
+                version,
+                text_sha256,
+                accept,
+            } => {
+                self.consent_error = None;
+                let _ = self.jobs_tx.send(NetJob::AnswerConsent(ConsentAnswer {
+                    version,
+                    text_sha256,
+                    decision: if accept { "accepted" } else { "declined" }.into(),
+                }));
+                Ok(())
+            }
         };
         if let Err(e) = r {
             log::warn!("command refused: {e}");
@@ -2585,6 +2643,7 @@ impl Runtime {
             NetEvent::LicenseBlocked(b) => self.agent.on_license_blocked(b),
             NetEvent::LicenseRestored => {
                 self.agent.on_license_restored();
+                self.consent = None;
                 self.maybe_auto_start();
             }
             NetEvent::License(info) => self.agent.on_license_info(info),
@@ -2594,6 +2653,11 @@ impl Runtime {
             }
             NetEvent::Schedule(s) => self.agent.on_schedule(s),
             NetEvent::Screenshot(p) => self.screenshot_problem = p,
+            NetEvent::Consent(c) => {
+                self.consent = Some(c);
+                self.consent_error = None;
+            }
+            NetEvent::ConsentFailed(e) => self.consent_error = Some(e),
             NetEvent::Revoked => {}
         }
         self.update_health();
@@ -2684,6 +2748,55 @@ impl NetWorker {
         self.status.last_error = Some(b.code().to_owned());
         self.write_status();
         self.next_heartbeat = self.clock.monotonic() + self.opts.license_retry_interval;
+        if b == LicenseBlock::ConsentRequired {
+            self.fetch_consent();
+        }
+    }
+
+    /// Fetches the monitoring agreement for the tray. Never blocks or unblocks.
+    fn fetch_consent(&mut self) {
+        match self.api.consent() {
+            Ok(c) => {
+                self.set_online(true);
+                self.send(NetEvent::Consent(c));
+            }
+            Err(e) => {
+                log::debug!("agreement fetch failed: {e}");
+                if let ApiError::Transport(_) = e {
+                    self.set_online(false);
+                }
+            }
+        }
+    }
+
+    /// Sends the person's answer; an acceptance is followed by a heartbeat at once so
+    /// tracking is available without waiting for the retry interval. Returns `true` if
+    /// the device turned out to be revoked.
+    fn answer_consent(&mut self, a: &ConsentAnswer) -> bool {
+        match self.api.answer_consent(a) {
+            Ok(c) => {
+                self.set_online(true);
+                let accepted = c.status == "accepted";
+                self.send(NetEvent::Consent(c));
+                accepted && self.heartbeat()
+            }
+            Err(ApiError::DeviceRevoked) => {
+                self.send(NetEvent::Revoked);
+                true
+            }
+            Err(e) => {
+                log::warn!("agreement answer failed: {e}");
+                if let ApiError::Transport(_) = e {
+                    self.set_online(false);
+                }
+                self.send(NetEvent::ConsentFailed(
+                    e.code().unwrap_or("network").to_owned(),
+                ));
+                // The agreement may have changed (consent_outdated): show the current one.
+                self.fetch_consent();
+                false
+            }
+        }
     }
 
     fn unblock(&mut self) {
@@ -2703,6 +2816,12 @@ impl NetWorker {
                     log::info!("screenshot skipped: tracking unavailable")
                 }
                 Ok(NetJob::Screenshot(job)) => self.screenshot(&job),
+                // The agreement is answered while blocked: that is what lifts it.
+                Ok(NetJob::AnswerConsent(a)) => {
+                    if self.answer_consent(&a) {
+                        return;
+                    }
+                }
                 Ok(NetJob::FetchPolicy(_)) if self.blocked.is_some() => {}
                 Ok(NetJob::FetchPolicy(p)) => {
                     if self.fetch_policy(p) {

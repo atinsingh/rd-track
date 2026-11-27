@@ -234,6 +234,9 @@ pub enum LicenseBlock {
     SubscriptionInactive,
     /// `seat_unavailable`: this user has no licensed seat.
     SeatUnavailable,
+    /// `consent_required`: this person has not accepted the organization's current
+    /// monitoring agreement (or declined it). Nothing is collected until they accept.
+    ConsentRequired,
 }
 
 impl LicenseBlock {
@@ -242,6 +245,7 @@ impl LicenseBlock {
         match code {
             "subscription_inactive" => Some(Self::SubscriptionInactive),
             "seat_unavailable" => Some(Self::SeatUnavailable),
+            "consent_required" => Some(Self::ConsentRequired),
             _ => None,
         }
     }
@@ -251,6 +255,7 @@ impl LicenseBlock {
         match self {
             Self::SubscriptionInactive => "subscription_inactive",
             Self::SeatUnavailable => "seat_unavailable",
+            Self::ConsentRequired => "consent_required",
         }
     }
 
@@ -265,8 +270,37 @@ impl LicenseBlock {
         match self {
             Self::SubscriptionInactive => m.license_inactive,
             Self::SeatUnavailable => m.license_no_seat,
+            Self::ConsentRequired => m.consent_required,
         }
     }
+}
+
+/// `GET /v1/device/consent`: the monitoring agreement to show, and this person's answer
+/// to its current version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsentAgreement {
+    /// Agreement version (goes up when the policy collects more or the text changes).
+    pub version: u32,
+    /// The exact text to show.
+    pub text: String,
+    /// SHA-256 (hex) of `text`, sent back with the answer.
+    pub text_sha256: String,
+    /// `pending`, `accepted` or `declined`.
+    pub status: String,
+    /// When they answered this version.
+    #[serde(default)]
+    pub decided_at: Option<String>,
+}
+
+/// `POST /v1/device/consent`: the person's answer to exactly what was shown.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConsentAnswer {
+    /// [`ConsentAgreement::version`] shown.
+    pub version: u32,
+    /// [`ConsentAgreement::text_sha256`] shown.
+    pub text_sha256: String,
+    /// `accepted` or `declined`.
+    pub decision: String,
 }
 
 /// A task in a [`DeviceProject`].
@@ -767,6 +801,22 @@ impl ApiClient {
             url.push_str(&percent_encode(p));
         }
         self.call(Method::Get, url, None, true)
+    }
+
+    /// `GET /v1/device/consent`: the monitoring agreement for this device's user.
+    pub fn consent(&self) -> Result<ConsentAgreement, ApiError> {
+        self.call(Method::Get, self.url("/device/consent"), None, true)
+    }
+
+    /// `POST /v1/device/consent`. `409 consent_outdated`: the agreement changed since it
+    /// was fetched; fetch and show it again.
+    pub fn answer_consent(&self, req: &ConsentAnswer) -> Result<ConsentAgreement, ApiError> {
+        self.call(
+            Method::Post,
+            self.url("/device/consent"),
+            Some(Self::json(req)?),
+            true,
+        )
     }
 
     /// `GET /v1/device/projects` — the projects (and their open tasks) this device's

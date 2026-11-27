@@ -122,6 +122,7 @@ messages! {
     // Licence.
     license_inactive: "Tracking is unavailable: your organization's subscription is inactive" => "Le suivi n’est pas disponible : l’abonnement de votre organisation est inactif",
     license_no_seat: "Tracking is unavailable: no licence seat assigned" => "Le suivi n’est pas disponible : aucun poste de licence n’est attribué",
+    consent_required: "Tracking is off until you answer your organization's monitoring agreement" => "Le suivi est désactivé tant que vous n’avez pas répondu à l’entente de suivi de votre organisation",
     license_ask: "{message}. Ask your administrator." => "{message}. Adressez-vous à votre administrateur.",
     license_grace: "Your organization's subscription is in its grace period{until}. Tracking continues." => "L’abonnement de votre organisation est en période de grâce{until}. Le suivi continue.",
     license_grace_until: " until {date}" => " jusqu’au {date}",

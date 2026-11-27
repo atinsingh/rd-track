@@ -31,7 +31,17 @@ fn identity() -> DeviceIdentity {
     }
 }
 
+/// An outbox for a person who already accepted the monitoring agreement.
 fn shared_outbox() -> SharedOutbox {
+    let outbox = fresh_outbox();
+    lock(&outbox)
+        .set_meta(META_CONSENT_CONFIRMED, "true")
+        .unwrap();
+    outbox
+}
+
+/// A new install: nothing accepted yet.
+fn fresh_outbox() -> SharedOutbox {
     Arc::new(Mutex::new(
         Outbox::open_in_memory(&StaticKey([5; 32]), OutboxConfig::default()).unwrap(),
     ))
@@ -1426,6 +1436,219 @@ fn license_block_survives_restart_and_stops_recovered_session() {
             reason: StopReason::Policy
         })
     ));
+}
+
+// ----- monitoring agreement (consent_required) ----------------------------------------
+
+#[test]
+fn a_new_install_collects_nothing_before_the_agreement_is_accepted() {
+    let mut h = harness_at(t0(), fresh_outbox(), AgentConfig::new(identity()));
+    assert_eq!(h.agent.license_block(), Some(LicenseBlock::ConsentRequired));
+    assert!(matches!(
+        h.agent.start(None, None),
+        Err(AgentError::LicenseUnavailable(
+            LicenseBlock::ConsentRequired
+        ))
+    ));
+    // Office hours do not start a session either.
+    work_hours_policy(&mut h, json!({}));
+    h.step(600);
+    assert!(!h.agent.machine.is_open());
+    assert!(!h.input.capturing());
+    assert_eq!(h.input.samples_taken(), 0);
+    assert!(h.events().is_empty(), "{:?}", types(&h.events()));
+    assert!(h.jobs().is_empty());
+    assert_eq!(
+        h.agent.status().tracking_unavailable_message.as_deref(),
+        Some("Tracking is off until you answer your organization's monitoring agreement")
+    );
+
+    // The server confirmed an acceptance (heartbeat succeeded): tracking may start, and
+    // that survives a restart.
+    h.agent.on_license_restored();
+    h.agent.start(None, None).unwrap();
+    h.step(5);
+    assert!(!h.of_type("session.started.v1").is_empty());
+    let outbox = h.outbox.clone();
+    drop(h);
+    let h = harness_at(
+        t0() + TimeDelta::seconds(60),
+        outbox,
+        AgentConfig::new(identity()),
+    );
+    assert_eq!(h.agent.license_block(), None);
+}
+
+#[test]
+fn a_new_agreement_version_blocks_resume_until_accepted_again() {
+    let mut h = harness();
+    h.agent.start(None, None).unwrap();
+    h.step(30);
+    h.agent.pause().unwrap();
+    // The server answers 403 consent_required after a policy collects more.
+    h.agent.on_license_blocked(LicenseBlock::ConsentRequired);
+    assert_eq!(h.agent.state(), SessionState::Stopped(StopReason::Policy));
+    assert!(matches!(
+        h.agent.resume(),
+        Err(AgentError::LicenseUnavailable(
+            LicenseBlock::ConsentRequired
+        ))
+    ));
+    let n = h.events().len();
+    h.step(120);
+    assert_eq!(
+        h.events().len(),
+        n,
+        "nothing is collected while waiting for consent"
+    );
+    // Still blocked after a restart, though this computer accepted an earlier version.
+    let outbox = h.outbox.clone();
+    drop(h);
+    let h = harness_at(
+        t0() + TimeDelta::seconds(600),
+        outbox,
+        AgentConfig::new(identity()),
+    );
+    assert_eq!(h.agent.license_block(), Some(LicenseBlock::ConsentRequired));
+}
+
+/// A server where nothing tracks until the agreement is accepted, like the API's gate.
+fn consent_server(t: &FakeTransport, accepted: Arc<std::sync::atomic::AtomicBool>) {
+    use std::sync::atomic::Ordering;
+    t.set_handler(move |req| {
+        let ok = |v: Value| Some(Ok(HttpResponse { status: 200, body: serde_json::to_vec(&v).unwrap() }));
+        let agreement = |status: &str| json!({"version": 3, "text": "We record your work time.",
+            "text_sha256": "ab".repeat(32), "status": status, "decided_at": null});
+        if req.url.ends_with("/v1/device/consent") {
+            if let Some(body) = &req.body {
+                let v: Value = serde_json::from_slice(body).unwrap();
+                assert_eq!(v["version"], 3);
+                assert_eq!(v["text_sha256"], "ab".repeat(32));
+                let yes = v["decision"] == "accepted";
+                accepted.store(yes, Ordering::SeqCst);
+                return ok(agreement(if yes { "accepted" } else { "declined" }));
+            }
+            return ok(agreement(if accepted.load(Ordering::SeqCst) { "accepted" } else { "pending" }));
+        }
+        if !accepted.load(Ordering::SeqCst) {
+            return Some(Ok(HttpResponse {
+                status: 403,
+                body: br#"{"error":{"code":"consent_required","message":"agree first","request_id":"r"}}"#.to_vec(),
+            }));
+        }
+        if req.url.contains("/v1/ingestion/event-batches") {
+            let v: Value = serde_json::from_slice(req.body.as_ref().unwrap()).unwrap();
+            let results: Vec<Value> = v["events"].as_array().unwrap().iter()
+                .map(|e| json!({"event_id": e["event_id"], "status": "accepted"}))
+                .collect();
+            return ok(json!({"results": results}));
+        }
+        if req.url.contains("/v1/device/heartbeat") {
+            return ok(json!({"policy_revision": 0, "credential_status": "active"}));
+        }
+        if req.url.contains("/v1/device/policy") {
+            return ok(serde_json::to_value(doc(None, 1, json!({}))).unwrap());
+        }
+        None
+    });
+}
+
+#[test]
+fn runtime_shows_the_agreement_and_tracks_only_after_i_agree() {
+    use std::sync::atomic::Ordering;
+    let t = FakeTransport::new();
+    let accepted = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    consent_server(&t, accepted.clone());
+    let outbox = fresh_outbox();
+    let (rt, handle) = runtime(
+        t.clone(),
+        Arc::new(MemoryCredentials::default()),
+        outbox.clone(),
+    );
+    let rec = Recorder::default();
+    let rt = rt.with_observer(Box::new(rec.clone()));
+    let mut opts = fast_opts();
+    opts.max_duration = Some(Duration::from_millis(2500));
+    let answer = std::thread::spawn({
+        let rec = rec.clone();
+        move || {
+            // Wait until the tray has the agreement, then decline, then agree.
+            let shown = loop {
+                std::thread::sleep(Duration::from_millis(50));
+                if let Some(c) = rec
+                    .0
+                    .lock()
+                    .unwrap()
+                    .0
+                    .iter()
+                    .rev()
+                    .find_map(|s| s.consent.clone())
+                {
+                    break c;
+                }
+            };
+            assert_eq!(shown.status, "pending");
+            handle.send(Command::AnswerConsent {
+                version: shown.version,
+                text_sha256: shown.text_sha256.clone(),
+                accept: false,
+            });
+            std::thread::sleep(Duration::from_millis(500));
+            handle.send(Command::AnswerConsent {
+                version: shown.version,
+                text_sha256: shown.text_sha256,
+                accept: true,
+            });
+        }
+    });
+    let summary = rt.run(opts).unwrap();
+    answer.join().unwrap();
+    assert!(accepted.load(Ordering::SeqCst));
+    assert_eq!(summary.license_block, None);
+    let answers: Vec<String> = t
+        .requests_to("/v1/device/consent")
+        .iter()
+        .filter_map(|r| r.body.as_ref())
+        .map(|b| {
+            serde_json::from_slice::<Value>(b).unwrap()["decision"]
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(answers, ["declined", "accepted"]);
+    // Nothing was sent (or even queued) before the acceptance; the auto-started session after.
+    let first_answer = t
+        .requests()
+        .iter()
+        .position(|r| r.url.ends_with("/v1/device/consent") && r.body.is_some())
+        .unwrap();
+    assert!(t.requests()[..first_answer]
+        .iter()
+        .all(|r| !r.url.contains("/v1/ingestion/")));
+    let sent: Vec<String> = t
+        .requests_to("/v1/ingestion/event-batches")
+        .iter()
+        .flat_map(|r| {
+            serde_json::from_slice::<Value>(r.body.as_ref().unwrap()).unwrap()["events"]
+                .as_array()
+                .cloned()
+                .unwrap()
+        })
+        .map(|e| e["event_type"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        sent.iter().filter(|t| *t == "session.started.v1").count(),
+        1,
+        "{sent:?}"
+    );
+    assert!(rec
+        .0
+        .lock()
+        .unwrap()
+        .0
+        .iter()
+        .any(|s| s.consent.as_ref().is_some_and(|c| c.status == "declined")));
 }
 
 #[test]
