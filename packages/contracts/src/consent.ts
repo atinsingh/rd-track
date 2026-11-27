@@ -89,7 +89,7 @@ interface AgreementInput {
   /** The person's effective policy, plus any per-project policy that differs (collection is the union). */
   settings: readonly PolicySettings[];
   language: AppLanguage;
-  /** The admin's own text: shown instead of the generated one, followed by what is collected about this person. */
+  /** The admin's own text: shown instead of the generated one, followed by what is collected about this person, who sees it and for how long. */
   customText?: string | null;
 }
 
@@ -123,16 +123,18 @@ export function renderAgreement({ organizationName: org, settings, language, cus
   if (shots.length) kept.push(m.keepScreenshots(Math.max(...shots.map((s) => s.retention.screenshot_days))));
 
   const list = (items: string[]) => items.map((i) => `• ${i}`).join('\n');
-  // The person's own collection list always follows the admin's text, so what they accept
-  // (and its hash) changes whenever what is collected about them does.
-  if (customText != null) return [customText, `${m.collectedHeading}\n${list(collected)}`].join('\n\n');
+  // The person's own lists always follow the admin's text, so what they accept (and its
+  // hash) changes whenever what is collected about them, who sees it or how long it is kept does.
+  const who = `${m.whoHeading}\n${list([m.admins, m.managers(managerSees.join(', '))])}`;
+  const keptFor = `${m.keptHeading}\n${list(kept)}`;
+  if (customText != null) return [customText, `${m.collectedHeading}\n${list(collected)}`, who, keptFor].join('\n\n');
   return [
     m.title(org),
     m.intro(org),
     `${m.collectedHeading}\n${list(collected)}`,
     `${m.neverHeading}\n${m.never}`,
-    `${m.whoHeading}\n${list([m.admins, m.managers(managerSees.join(', '))])}`,
-    `${m.keptHeading}\n${list(kept)}`,
+    who,
+    keptFor,
     m.answer(org),
   ].join('\n\n');
 }

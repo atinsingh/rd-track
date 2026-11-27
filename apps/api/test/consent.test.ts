@@ -119,7 +119,9 @@ describe('monitoring consent', () => {
       settings: { apps: { capture_app_name: false } }, change_note: 'less',
     });
     expect(narrower.status).toBe(200);
-    expect((await shown(d)).version).toBe(1);
+    // Same version, but the text this computer shows changed, so the acceptance is for other text:
+    // any change to what a person is shown (even collecting less) asks them again.
+    expect(await shown(d)).toMatchObject({ version: 1, status: 'pending' });
 
     const wider = await org.admin.put(`/v1/policies/organization/${org.id}`, {
       settings: {
@@ -213,6 +215,13 @@ describe('monitoring consent', () => {
       const n = await c.get('/v1/me/notifications');
       expect(n.body.items.map((i: { kind: string }) => i.kind)).toContain('consent_declined');
     }
+    // Privacy notices are mandatory, so both are emailed too.
+    const mailed = await env.deps.pool.query(
+      `SELECT n.user_id FROM jobs j JOIN notifications n ON n.id::text = j.payload->>'notification_id'
+       WHERE j.kind = 'notification.email' AND n.kind = 'consent_declined' AND n.organization_id = $1`,
+      [org.id],
+    );
+    expect(mailed.rows.map((r) => r.user_id).sort()).toEqual([org.users.manager!.id, org.adminId].sort());
     const emp = org.users.emp!;
     expect((await emp.client.get('/v1/me/notifications')).body.items.map((i: { kind: string }) => i.kind)).not.toContain('consent_declined');
 
@@ -223,14 +232,57 @@ describe('monitoring consent', () => {
 
     const asked = await org.users.manager!.client.post(`/v1/users/${emp.id}/consent/ask-again`, {});
     expect(asked.status).toBe(200);
-    expect(asked.body.status).toBe('pending');
+    expect(asked.body).toMatchObject({ status: 'pending', records: [] });
+    expect((await org.admin.post(`/v1/users/${emp.id}/consent/ask-again`, {})).body.records).toHaveLength(2);
     expect(asked.body.asked_again_at).not.toBeNull();
     // The app shows the agreement again; tracking still waits for an acceptance.
     expect((await shown(d)).status).toBe('pending');
     expect((await start(d)).body.error.code).toBe('consent_required');
     const log = await env.deps.pool.query(`SELECT count(*)::int AS n FROM audit_logs WHERE action = 'consent.asked_again' AND target_user_id = $1`, [emp.id]);
-    expect(log.rows[0].n).toBe(1);
+    expect(log.rows[0].n).toBe(2); // the manager's ask and the admin's
     await answerConsent(env, d, 'accepted');
     expect((await start(d)).status).toBe(201);
+  });
+
+  it('covers a project they tracked on without being a member', async () => {
+    const org = await makeOrg(env, 'cons10');
+    const d = await enrollDevice(env, org, 'emp');
+    const side = await org.admin.post('/v1/admin/projects', { name: 'Side job' });
+    const pub = await org.admin.put(`/v1/policies/project/${side.body.id}`, {
+      settings: { screenshots: { enabled: true } }, change_note: 'screens', confirm_expansion: true,
+    });
+    expect(pub.status).toBe(200);
+    const sid = randomUUID();
+    expect((await deviceReq(env, d, 'POST', '/v1/sessions', { session_id: sid, project_id: side.body.id, client_started_at: env.clock.iso() })).status).toBe(201);
+    // Once they track there, its screenshots are part of their agreement: nothing is uploaded before they accept it.
+    const intent = await deviceReq(env, d, 'POST', '/v1/screenshots/upload-intents', { session_id: sid, content_type: 'image/webp' });
+    expect(intent.body.error.code).toBe('consent_required');
+    expect((await shown(d)).text).toContain('Screenshots, about one every');
+    await answerConsent(env, d, 'accepted');
+    expect((await deviceReq(env, d, 'POST', '/v1/screenshots/upload-intents', { session_id: sid, content_type: 'image/webp' })).status).not.toBe(403);
+  });
+
+  it('binds an acceptance to the computer it was given on when a device policy differs', async () => {
+    const org = await makeOrg(env, 'cons11');
+    const laptop = await enrollDevice(env, org, 'emp');
+    const desktop = await enrollDevice(env, org, 'emp');
+    const pub = await org.admin.put(`/v1/policies/device/${desktop.id}`, {
+      settings: { screenshots: { enabled: true } }, change_note: 'screens here', confirm_expansion: true,
+    });
+    expect(pub.status).toBe(200);
+    expect((await shown(laptop)).text).not.toContain('Screenshots, about one every');
+    expect((await shown(desktop)).text).toContain('Screenshots, about one every');
+
+    await answerConsent(env, laptop, 'accepted');
+    expect((await start(laptop)).status).toBe(201);
+    // The laptop's acceptance doesn't cover the desktop's screenshots.
+    expect((await start(desktop)).body.error.code).toBe('consent_required');
+    const before = await org.admin.get(`/v1/users/${org.users.emp!.id}/consent`);
+    expect(before.body.status).toBe('pending');
+    await answerConsent(env, desktop, 'accepted');
+    // Both stand: answering on one computer doesn't undo the other.
+    expect((await shown(laptop)).status).toBe('accepted');
+    expect((await shown(desktop)).status).toBe('accepted');
+    expect((await org.admin.get(`/v1/users/${org.users.emp!.id}/consent`)).body.status).toBe('accepted');
   });
 });

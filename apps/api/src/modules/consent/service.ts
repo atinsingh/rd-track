@@ -18,6 +18,7 @@ import type { Deps, DeviceActor, UserActor } from '../../context';
 import { many, one, type Queryable } from '../../db/pool';
 import { localesOf } from '../../i18n';
 import { AppError, errors } from '../../lib/errors';
+import { ADMIN_ROLES } from '../../http';
 import { audit } from '../audit/service';
 import { publish } from '../engine/events';
 import { currentPlan } from '../billing/service';
@@ -44,21 +45,32 @@ async function current(q: Queryable, orgId: string): Promise<{ version: number; 
 }
 
 /**
- * The exact text this person is shown: generated from everything their policies collect (the
- * base policy plus each project they belong to, as on their "What's collected" page), or the
- * admin's own text followed by that same list. Device scopes are left out: publishing one that
- * collects more starts a new version anyway (publishPolicy).
+ * The exact text shown on one computer: generated from everything collected there (the base
+ * policy and each project the person belongs to or tracked on in the last 30 days, each with
+ * that computer's own policy), or the admin's text followed by the same lists. `deviceId` null
+ * is the person without a computer in particular (nothing enrolled yet).
  */
-async function agreementText(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string, custom: string | null) {
+async function agreementText(
+  deps: Pick<Deps, 'now'>,
+  q: Queryable,
+  orgId: string,
+  userId: string,
+  deviceId: string | null,
+  custom: string | null,
+) {
   const org = await one<{ name: string }>(q, 'SELECT name FROM organizations WHERE id = $1', [orgId]);
+  // The same projects the person's "What's collected" page covers: whatever a session there collects is in the text.
   const projects = await many<{ id: string }>(
     q,
-    `SELECT DISTINCT p.id FROM projects p JOIN project_memberships m ON m.project_id = p.id AND m.user_id = $2 AND m.valid_to IS NULL
-     WHERE p.organization_id = $1 AND p.status = 'active' ORDER BY p.id`,
-    [orgId, userId],
+    `SELECT DISTINCT p.id FROM projects p
+     WHERE p.organization_id = $1 AND p.status = 'active' AND (
+       p.id IN (SELECT project_id FROM project_memberships WHERE user_id = $2 AND valid_to IS NULL)
+       OR p.id IN (SELECT project_id FROM work_sessions WHERE user_id = $2 AND started_at > $3::timestamptz))
+     ORDER BY p.id`,
+    [orgId, userId, new Date(deps.now().getTime() - 30 * 86_400_000).toISOString()],
   );
-  const settings = [(await resolveFor(deps, q, orgId, userId)).settings];
-  for (const p of projects) settings.push((await resolveFor(deps, q, orgId, userId, { projectId: p.id })).settings);
+  const settings = [(await resolveFor(deps, q, orgId, userId, { deviceId })).settings];
+  for (const p of projects) settings.push((await resolveFor(deps, q, orgId, userId, { projectId: p.id, deviceId })).settings);
   const locale = (await localesOf(q, [userId])).get(userId) ?? 'en-US';
   const render = (language: AppLanguage) => renderAgreement({ organizationName: org!.name, settings, language, customText: custom });
   // An acceptance of the same agreement in another language still counts: changing language is not collecting more.
@@ -72,16 +84,16 @@ interface Answer {
 }
 
 /**
- * A person's answer to `version` given the hashes of the text they would be shown now. Only an
- * acceptance of that exact text counts: joining a team or project that collects more, or a
- * plan change, changes the text and needs a new acceptance. A decline stands until someone
- * asks again (consent_requests) or the person accepts.
+ * A person's answer to `version` on a computer whose text hashes to one of `hashes`. Only an
+ * acceptance of that exact text counts: joining a team or project that collects more, a
+ * device policy or a plan change all change the text and need a new acceptance. A decline
+ * (from any of their computers) stands until they accept or someone asks again.
  */
 async function answerFor(q: Queryable, orgId: string, userId: string, version: number, hashes: readonly string[]): Promise<Answer> {
-  const rows = await many<{ decision: 'accepted' | 'declined'; text_sha256: string; decided_at: string }>(
+  const rows = await many<{ seq: string; decision: 'accepted' | 'declined'; text_sha256: string; decided_at: string }>(
     q,
-    `SELECT decision, text_sha256, decided_at FROM consent_records
-     WHERE organization_id = $1 AND user_id = $2 AND version = $3 ORDER BY seq DESC LIMIT 50`,
+    `SELECT seq, decision, text_sha256, decided_at FROM consent_records
+     WHERE organization_id = $1 AND user_id = $2 AND version = $3 ORDER BY seq DESC LIMIT 100`,
     [orgId, userId, version],
   );
   const asked = await one<{ at: string }>(
@@ -90,24 +102,45 @@ async function answerFor(q: Queryable, orgId: string, userId: string, version: n
     [orgId, userId],
   );
   const asked_again_at = asked?.at ?? null;
-  const latest = rows[0];
-  if (latest?.decision === 'accepted' && hashes.includes(latest.text_sha256)) return { status: 'accepted', decided_at: latest.decided_at, asked_again_at };
-  // An ask at the same instant as the decline counts as after it (one clock, millisecond precision).
-  if (latest?.decision === 'declined' && !(asked_again_at && Date.parse(asked_again_at) >= Date.parse(latest.decided_at))) {
-    return { status: 'declined', decided_at: latest.decided_at, asked_again_at };
-  }
+  const decline = rows.find((r) => r.decision === 'declined');
+  const after = (r: { seq: string }) => !decline || BigInt(r.seq) > BigInt(decline.seq);
+  const ok = rows.find((r) => r.decision === 'accepted' && hashes.includes(r.text_sha256) && after(r));
+  if (ok) return { status: 'accepted', decided_at: ok.decided_at, asked_again_at };
+  // Still declined unless they accepted somewhere since, or were asked again (an ask in the same millisecond counts as after).
+  const reopened = rows.some((r) => r.decision === 'accepted' && after(r)) || (asked_again_at && Date.parse(asked_again_at) >= Date.parse(decline!.decided_at));
+  if (decline && !reopened) return { status: 'declined', decided_at: decline.decided_at, asked_again_at };
   return { status: 'pending', decided_at: null, asked_again_at };
 }
 
-async function answerNow(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string) {
+async function answerNow(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string, deviceId: string | null) {
   const { version, custom_text } = await current(q, orgId);
-  const { text, sameIn } = await agreementText(deps, q, orgId, userId, custom_text);
+  const { text, sameIn } = await agreementText(deps, q, orgId, userId, deviceId, custom_text);
   return { version, text, text_sha256: sha256(text), ...(await answerFor(q, orgId, userId, version, sameIn)) };
 }
 
+const RANK: Record<ConsentStatus, number> = { accepted: 0, pending: 1, declined: 2 };
+
 /**
- * Each person's answer to the agreement they would be shown now.
- * ponytail: resolves each person's policies per call (a few queries each); cache per user if team reports get slow.
+ * A person's answer across their computers: declined if they declined, pending while any
+ * active computer still needs an acceptance of its text, else accepted.
+ */
+async function personAnswer(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string) {
+  const devices = await many<{ id: string }>(
+    q,
+    `SELECT id FROM devices WHERE organization_id = $1 AND user_id = $2 AND credential_status = 'active' ORDER BY id`,
+    [orgId, userId],
+  );
+  let worst = await answerNow(deps, q, orgId, userId, devices[0]?.id ?? null);
+  for (const d of devices.slice(1)) {
+    const a = await answerNow(deps, q, orgId, userId, d.id);
+    if (RANK[a.status] > RANK[worst.status]) worst = a;
+  }
+  return worst;
+}
+
+/**
+ * Each person's answer, for the team report.
+ * ponytail: resolves policies per person and computer on every call (a few queries each); cache if reports get slow.
  */
 export async function consentStatuses(
   deps: Pick<Deps, 'now'>,
@@ -116,17 +149,17 @@ export async function consentStatuses(
   userIds: readonly string[],
 ): Promise<Map<string, ConsentStatus>> {
   const out = new Map<string, ConsentStatus>();
-  for (const id of userIds) out.set(id, (await answerNow(deps, q, orgId, id)).status);
+  for (const id of userIds) out.set(id, (await personAnswer(deps, q, orgId, id)).status);
   return out;
 }
 
-/** Tracking endpoints call this: without an acceptance of the exact text they would be shown now, refused. */
+/** Tracking endpoints call this: without an acceptance of the exact text this computer would show now, refused. */
 export async function assertConsented(deps: Pick<Deps, 'now'>, q: Queryable, device: DeviceActor): Promise<void> {
-  if ((await answerNow(deps, q, device.organizationId, device.userId)).status !== 'accepted') throw consentRequired();
+  if ((await answerNow(deps, q, device.organizationId, device.userId, device.deviceId)).status !== 'accepted') throw consentRequired();
 }
 
 export async function deviceConsent(deps: Pick<Deps, 'now'>, q: Queryable, device: DeviceActor): Promise<DeviceConsentResponse> {
-  const a = await answerNow(deps, q, device.organizationId, device.userId);
+  const a = await answerNow(deps, q, device.organizationId, device.userId, device.deviceId);
   return { version: a.version, text: a.text, text_sha256: a.text_sha256, status: a.status, decided_at: a.decided_at };
 }
 
@@ -225,15 +258,27 @@ export async function bumpAgreement(
   return version;
 }
 
-export async function personConsent(deps: Pick<Deps, 'now'>, q: Queryable, orgId: string, userId: string): Promise<PersonConsentResponse> {
-  const now = await answerNow(deps, q, orgId, userId);
-  const records = await many<ConsentRecordDTO>(
-    q,
-    `SELECT r.id, r.version, r.decision, r.text_sha256, r.text, r.ip, r.device_id, d.name AS device_name, r.decided_at
-     FROM consent_records r JOIN devices d ON d.id = r.device_id
-     WHERE r.organization_id = $1 AND r.user_id = $2 ORDER BY r.seq DESC LIMIT 200`,
-    [orgId, userId],
-  );
+/**
+ * A person's consent. The stored answers (text, IP, computer) go only to the person
+ * themselves and to admins (`includeRecords`); managers get the status to follow up.
+ */
+export async function personConsent(
+  deps: Pick<Deps, 'now'>,
+  q: Queryable,
+  orgId: string,
+  userId: string,
+  includeRecords: boolean,
+): Promise<PersonConsentResponse> {
+  const now = await personAnswer(deps, q, orgId, userId);
+  const records = includeRecords
+    ? await many<ConsentRecordDTO>(
+        q,
+        `SELECT r.id, r.version, r.decision, r.text_sha256, r.text, r.ip, r.device_id, d.name AS device_name, r.decided_at
+         FROM consent_records r JOIN devices d ON d.id = r.device_id
+         WHERE r.organization_id = $1 AND r.user_id = $2 ORDER BY r.seq DESC LIMIT 200`,
+        [orgId, userId],
+      )
+    : [];
   return { required_version: now.version, status: now.status, asked_again_at: now.asked_again_at, records };
 }
 
@@ -259,7 +304,7 @@ export async function askAgain(deps: Pick<Deps, 'now'>, q: Queryable, actor: Use
     requestId,
     metadata: { version },
   });
-  return personConsent(deps, q, orgId, userId);
+  return personConsent(deps, q, orgId, userId, ADMIN_ROLES.includes(actor.orgRole));
 }
 
 export async function adminConsent(deps: Deps, q: Queryable, actor: UserActor): Promise<AdminConsentResponse> {

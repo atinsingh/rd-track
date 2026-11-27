@@ -296,7 +296,8 @@ async function notifyFor(q: Queryable, e: DomainEvent): Promise<void> {
       to.delete(e.subjectUserId!);
       await send([...to], {
         kind: 'consent_declined',
-        category: 'devices',
+        // Privacy is mandatory (in-app and email): nobody can opt out of hearing that monitoring was refused.
+        category: 'privacy',
         title: (l) => l.t('ev.consentDeclined.title', { name: str(d.user_name) }),
         body: (l) => l.t('ev.consentDeclined.body', { name: str(d.user_name) }),
         link: `/team/${e.subjectUserId}`,

@@ -63,6 +63,8 @@ describe('renderAgreement', () => {
     const more = renderAgreement({ organizationName: 'Acme', settings: [shots], language: 'en', customText: 'Our rules.' });
     expect(plain.startsWith('Our rules.\n\nWhat is collected')).toBe(true);
     expect(plain).not.toContain('Never collected');
+    expect(plain).toContain('Who can see it');
+    expect(plain).toContain('Activity: 90 days.');
     expect(more).toContain('Screenshots, about one every');
     expect(more).not.toBe(plain);
   });

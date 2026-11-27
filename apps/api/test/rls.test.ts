@@ -53,6 +53,15 @@ describe('row-level security', () => {
     expect(records.rows[0].n).toBe(0);
   });
 
+  it('"Ask again" requests are tenant-scoped and append-only', async () => {
+    const ask = `INSERT INTO consent_requests (organization_id, user_id, requested_by, version, requested_at) VALUES ($1, $2, $3, 1, now())`;
+    await withScope(a.id, () => pool().query(ask, [a.id, a.users.emp!.id, a.adminId]));
+    const seen = await withScope(b.id, () => pool().query(`SELECT count(*)::int AS n FROM consent_requests`));
+    expect(seen.rows[0].n).toBe(0);
+    await expect(withScope(a.id, () => pool().query(ask, [b.id, b.users.emp!.id, b.adminId]))).rejects.toThrow(/row-level security/);
+    await expect(withScope(a.id, () => pool().query(`DELETE FROM consent_requests`))).rejects.toThrow(/append-only/);
+  });
+
   it('an unset or malformed scope sees nothing', async () => {
     for (const scope of ['', 'not-a-uuid']) {
       const r = await withScope(scope, () => pool().query(`SELECT count(*)::int AS n FROM users`));

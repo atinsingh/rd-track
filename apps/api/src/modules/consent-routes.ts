@@ -39,7 +39,7 @@ export async function consentRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get('/v1/me/consent', user, async (req) => {
     const a = userOf(req);
-    return personConsent(deps, pool, a.organizationId, a.userId);
+    return personConsent(deps, pool, a.organizationId, a.userId, true);
   });
   /** Admins and the managers of the person's teams, who follow up on a decline. */
   async function follower(req: FastifyRequest<{ Params: { id: string } }>) {
@@ -51,9 +51,7 @@ export async function consentRoutes(app: FastifyInstance, deps: Deps) {
   }
   app.get<{ Params: { id: string } }>('/v1/users/:id/consent', user, async (req) => {
     const { a, id } = await follower(req);
-    const c = await personConsent(deps, pool, a.organizationId, id);
-    // The stored answers (text, IP, computer) are for admins; managers see the status to follow up.
-    return ADMIN_ROLES.includes(a.orgRole) ? c : { ...c, records: [] };
+    return personConsent(deps, pool, a.organizationId, id, ADMIN_ROLES.includes(a.orgRole));
   });
   app.post<{ Params: { id: string } }>('/v1/users/:id/consent/ask-again', user, async (req) => {
     const { a, id } = await follower(req);
