@@ -3124,7 +3124,7 @@ export const fr: Record<MessageKey, string> = {
   'consent.notice.title': 'Pas encore suivis : {declined} refus, {pending} sans réponse à l’entente de suivi',
   'consent.notice.body': 'Track n’enregistre rien pour ces personnes tant qu’elles n’ont pas accepté. Utilisez Redemander pour leur présenter l’entente dans l’application de bureau. La suite en cas de refus maintenu relève de votre organisation (RH) ; Track ne fait rien d’autre.',
   'consent.adm.title': 'Entente de suivi',
-  'consent.adm.subtitle': 'Les personnes la lisent et y répondent dans l’application de bureau avant tout suivi. Enregistrer crée une nouvelle version que chacun doit accepter de nouveau.',
+  'consent.adm.subtitle': 'Les personnes la lisent et y répondent dans l’application de bureau avant tout suivi. Enregistrer crée une nouvelle version. On ne redemande que si ce qui est recueilli à leur sujet augmente, pas pour une nouvelle formulation.',
   'consent.adm.lawyerTitle': 'Faites relire ce texte par un avocat',
   'consent.adm.lawyer': 'Le texte généré décrit ce que vos politiques recueillent. Ce n’est pas un avis juridique ; les règles sur la surveillance au travail varient selon le pays, la province et l’État.',
   'consent.adm.current': 'Version {n}',

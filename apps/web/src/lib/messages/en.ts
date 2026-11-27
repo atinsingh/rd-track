@@ -3122,7 +3122,7 @@ export const en = {
   'consent.notice.title': 'Not tracked yet: {declined} declined, {pending} haven’t answered the monitoring agreement',
   'consent.notice.body': 'Track records nothing for them until they agree. Use Ask again to show them the agreement in the desktop app. What happens on a continued refusal is for your organization (HR) to decide; Track takes no other action.',
   'consent.adm.title': 'Monitoring agreement',
-  'consent.adm.subtitle': 'People read and answer this in the desktop app before anything is tracked. Saving starts a new version that everyone must accept again.',
+  'consent.adm.subtitle': 'People read and answer this in the desktop app before anything is tracked. Saving starts a new version. People are asked again only when what is collected about them grows, not for new wording.',
   'consent.adm.lawyerTitle': 'Have a lawyer review this text',
   'consent.adm.lawyer': 'The generated text describes what your policies collect. It is not legal advice; rules on workplace monitoring differ by country, province and state.',
   'consent.adm.current': 'Version {n}',
